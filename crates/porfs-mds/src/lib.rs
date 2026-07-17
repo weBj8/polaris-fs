@@ -40,4 +40,4 @@ mod types;
 
 pub use error::{MdsError, Result};
 pub use mds::Mds;
-pub use types::{CheckReport, Ino, InodeAttr, MAX_NAME_LEN, NodeKind, ROOT_INO, SetAttr};
+pub use types::{CheckReport, Ino, InodeAttr, MAX_NAME_LEN, NodeKind, ROOT_INO, SetAttr, Statfs};

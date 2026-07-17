@@ -83,6 +83,22 @@ pub struct CheckReport {
     pub orphans_repaired: u64,
 }
 
+/// Storage and namespace totals reported by [`crate::Mds::statfs`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Statfs {
+    /// Total device bytes.
+    pub total_bytes: u64,
+    /// Bytes still appendable in the extent-log region (device size minus
+    /// the log tail; tombstoned space is not reclaimed until P27's GC).
+    pub free_bytes: u64,
+    /// Sum of payload bytes over live extents.
+    pub live_bytes: u64,
+    /// Number of inode rows.
+    pub inodes: u64,
+    /// Number of live extents in the store.
+    pub extents: u64,
+}
+
 /// Serialized form of an inode (bincode, stored in the `inodes` table).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct InodeRec {

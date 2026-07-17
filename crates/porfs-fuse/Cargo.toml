@@ -1,0 +1,13 @@
+[package]
+name = "porfs-fuse"
+description = "PolarisFS FUSE client v0: fuser::Filesystem implementation over porfs-mds"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+porfs-mds = { path = "../porfs-mds" }
+fuser = "0.17"
+
+[dev-dependencies]
+tempfile.workspace = true

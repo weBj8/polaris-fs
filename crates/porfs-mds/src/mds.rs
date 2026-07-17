@@ -14,7 +14,7 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use redb::{Database, ReadableDatabase, ReadableTable};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata};
 
 use porfs_store::{ExtentId, ExtentStore, StoreError};
 
@@ -23,7 +23,7 @@ use crate::keys::{
     DIR_ENTRIES, FILE_EXTENTS, INODES, META, NEXT_INO_KEY, decode_extent_key, decode_extent_value,
     decode_rec, dirent_bounds, dirent_key, encode_rec, extent_bounds, extent_key, ino_key,
 };
-use crate::types::{Ino, InodeRec, MAX_NAME_LEN, NodeKind, ROOT_INO};
+use crate::types::{Ino, InodeRec, MAX_NAME_LEN, NodeKind, ROOT_INO, Statfs};
 
 /// One row of a file's extent map: interval `[off, off + len)` is covered by
 /// extent `id`.
@@ -132,6 +132,19 @@ impl Mds {
     /// during the last [`Mds::open`] (always 0 after [`Mds::format`]).
     pub fn last_reconcile_repairs(&self) -> u64 {
         self.last_reconcile_repairs
+    }
+
+    /// Storage and namespace totals for `statfs`-style reporting.
+    pub fn statfs(&self) -> Result<Statfs> {
+        let txn = self.db.begin_read().map_err(dberr)?;
+        let inodes = txn.open_table(INODES).map_err(dberr)?;
+        Ok(Statfs {
+            total_bytes: self.store.device_size(),
+            free_bytes: self.store.device_size().saturating_sub(self.store.tail()),
+            live_bytes: self.store.live_bytes(),
+            inodes: inodes.len().map_err(dberr)?,
+            extents: self.store.extent_count(),
+        })
     }
 
     /// Read an inode record, mapping a missing row to [`MdsError::NotFound`].

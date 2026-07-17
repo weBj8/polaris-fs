@@ -152,10 +152,16 @@ Gate: metadata ops survive crashes — ✅ (20-round unclean-reopen loop with fu
 verification, torn-tail reconcile, fsync durability; 92 workspace tests green, clippy 0);
 self-check passes ✅ (also detects planted corruption).
 
-**P4 · FUSE client v0** (2 wks)
-`fuser` mount: lookup/getattr/readdir/read/write/create/mkdir/unlink/rename/fsync;
-attribute-cache timeouts.
-Gate: pjdfstest basic suite passes.
+**P4 · FUSE client v0** (2 wks) ✅ DONE
+Delivered: `porfs-fuse` — fuser::Filesystem over the MDS via a dedicated worker thread
+(the `!Send` MDS never crosses threads; the channel seam is where P6 RPC plugs in),
+`porfs mount` subcommand, errno/attr mapping, attribute-cache TTLs, statfs.
+Gate: POSIX basic ops through a real mount — ✅ 11 real-mount integration tests
+(std::fs suite mirroring pjdfstest basic categories: multi-extent I/O, sparse,
+truncate, rename/link/unlink/readdir/setattr/fsync, remount persistence);
+pjdfstest itself is not packaged on this box — it becomes mandatory at P5.
+Found & fixed en route: test-suite unmount wedge (leaked open fds → EBUSY →
+session-join deadlock; lazy-detach fallback added).
 
 **P5 · POSIX completion I** (2 wks)
 xattr, sparse files, sharded big-directory index (1M entries listed fast), rename
@@ -381,4 +387,5 @@ past 50 nodes and is not part of GPFS-parity basics.
 1. ✅ Repo cleanup, ROADMAP v6, P1 (format v0 + extent store + bench + fio baseline)
 2. ✅ P2 (format v2: checkpoints + group commit + crash harness; 1000× kill -9 clean)
 3. ✅ P3 (porfs-mds on redb; namespace txns + COW data path + reconcile; 92 tests green)
-4. Next: **P4 · FUSE client v0** (fuser mount, basic POSIX ops; pjdfstest basic suite)
+4. ✅ P4 (porfs-fuse + porfs mount; 11 real-mount tests green; 103 workspace tests)
+5. Next: **P5 · POSIX completion I** (xattr, sparse, big-dir index, rename edges)

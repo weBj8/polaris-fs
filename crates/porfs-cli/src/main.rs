@@ -59,6 +59,25 @@ enum Commands {
         #[arg(long)]
         data: std::path::PathBuf,
     },
+    /// Mount an MDS instance via FUSE. Runs in the foreground until
+    /// unmounted (fusermount3 -u) or interrupted.
+    Mount {
+        /// redb metadata file of the MDS.
+        #[arg(long)]
+        meta: std::path::PathBuf,
+        /// Extent-store device of the MDS.
+        #[arg(long)]
+        data: std::path::PathBuf,
+        /// Directory to mount on (must exist).
+        #[arg(long)]
+        mountpoint: std::path::PathBuf,
+        /// Attribute-cache TTL in seconds.
+        #[arg(long, default_value_t = 1.0)]
+        attr_ttl: f64,
+        /// Lookup entry-cache TTL in seconds.
+        #[arg(long, default_value_t = 1.0)]
+        entry_ttl: f64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -72,7 +91,45 @@ fn main() -> Result<()> {
             queue_depth,
         } => bench::cmd_bench(&device, &size, &extent_size, queue_depth),
         Commands::MdsCheck { meta, data } => cmd_mds_check(&meta, &data),
+        Commands::Mount {
+            meta,
+            data,
+            mountpoint,
+            attr_ttl,
+            entry_ttl,
+        } => cmd_mount(&meta, &data, &mountpoint, attr_ttl, entry_ttl),
     }
+}
+
+fn cmd_mount(
+    meta: &Path,
+    data: &Path,
+    mountpoint: &Path,
+    attr_ttl: f64,
+    entry_ttl: f64,
+) -> Result<()> {
+    use fuser::{Config, MountOption};
+
+    let config = porfs_fuse::MountConfig {
+        attr_ttl: std::time::Duration::from_secs_f64(attr_ttl),
+        entry_ttl: std::time::Duration::from_secs_f64(entry_ttl),
+        ..Default::default()
+    };
+    let fs = porfs_fuse::PorfsFs::open(meta, data, config)
+        .with_context(|| format!("open MDS ({}, {})", meta.display(), data.display()))?;
+    // Owner-only access (no allow_other), no kernel permission checks
+    // (no default_permissions) for v0.
+    let mut fuse_config = Config::default();
+    fuse_config.mount_options = vec![MountOption::FSName("porfs".to_string())];
+    println!(
+        "porfs: serving {} on {} — unmount with `fusermount3 -u {}` (Ctrl-C detaches; run fusermount3 -u afterwards if needed)",
+        data.display(),
+        mountpoint.display(),
+        mountpoint.display()
+    );
+    fuser::mount2(fs, mountpoint, &fuse_config).context("fuse session error")?;
+    println!("porfs: unmounted {}", mountpoint.display());
+    Ok(())
 }
 
 fn cmd_mds_check(meta: &Path, data: &Path) -> Result<()> {

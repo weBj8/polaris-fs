@@ -13,6 +13,8 @@ path = "src/main.rs"
 porfs-format = { path = "../porfs-format" }
 porfs-store = { path = "../porfs-store" }
 porfs-mds = { path = "../porfs-mds" }
+porfs-fuse = { path = "../porfs-fuse" }
+fuser = "0.17"
 anyhow.workspace = true
 clap.workspace = true
 uuid.workspace = true
