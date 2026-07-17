@@ -1,0 +1,16 @@
+[package]
+name = "porfs-store"
+description = "PolarisFS append-only extent store on io_uring (format v0)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+porfs-format = { path = "../porfs-format" }
+io-uring.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

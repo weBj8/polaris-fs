@@ -1,1 +1,4 @@
 /target
+*.img
+/bench*
+/.omo/run-continuation

@@ -1,22 +1,22 @@
-[package]
-name = "porfs"
-version = "0.1.0"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 edition = "2024"
-description = "PolarisFS v2.0 - single-node basic implementation with file-backed SCM/QLC tiers"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
 
-[lib]
-name = "porfs"
-path = "src/lib.rs"
-
-[[bin]]
-name = "porfs"
-path = "src/main.rs"
-
-[dependencies]
-bytemuck = { version = "1.21", features = ["derive", "min_const_generics"] }
-clap = { version = "4.5", features = ["derive"] }
-fuser = "0.17"
+[workspace.dependencies]
+bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
+crc32c = "0.6"
+thiserror = "2"
+io-uring = "0.7"
 libc = "0.2"
+uuid = { version = "1", features = ["v4"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
 
-[dev-dependencies]
+# dev-dependencies
 tempfile = "3"
+assert_cmd = "2"
