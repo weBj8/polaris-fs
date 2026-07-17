@@ -174,10 +174,10 @@ MDS format, `--allow-other` / TTL mount options, ENAMETOOLONG.
 Gate: pjdfstest run against a real mount (scripts/pjdfstest.sh, root +
 rootless modes; chflags excluded as BSD-only) — mounter-owner paths green,
 two environment/kernel-forced classes documented as known issues below;
-1M-entry directory measured (scripts/bigdir-bench.sh): all 1M entries
-listed correctly, `ls -f`/`find` 14.2s (~70k entries/s, near-linear from
-100k) vs xfs 0.2s / tmpfs 0.4s; create 501/s vs xfs 60k/s (one redb txn
-per create — batching is later-phase work). 114 workspace tests green,
+1M-entry directory measured (scripts/bigdir-bench.sh, release binary): all
+1M entries listed correctly, `ls -f`/`find` 2.0s/2.6s (~500k entries/s,
+near-linear from 100k) vs xfs 0.2s/0.7s / tmpfs 0.4s/0.6s; create 1981/s
+vs xfs 56k/s (one redb txn per create — batching is later-phase work). 114 workspace tests green,
 kill9-soak 1000× zero corruption.
 Bugs found & fixed en route: FUSE readdir offset livelock (dot entries
 re-served forever), clean-unmount losing un-fsynced data (destroy barrier
@@ -423,8 +423,8 @@ past 50 nodes and is not part of GPFS-parity basics.
 3. ✅ P3 (porfs-mds on redb; namespace txns + COW data path + reconcile; 92 tests green)
 4. ✅ P4 (porfs-fuse + porfs mount; 11 real-mount tests green; 103 workspace tests)
 5. ✅ P5 (xattr/symlink/mknod/sparse/fsync/fdatasync/rename-matrix; hash-ordered
-   dirs + streaming readdir; 1M-dir listing 14.2s; 114 tests green; known-issue:
-   non-mounter-uid EACCES)
+   dirs + streaming readdir; 1M-dir listing 2.0s release; 114 tests green;
+   known-issue: non-mounter-uid EACCES)
 6. ✅ P6 (MVP freeze: mount --format one command; git-clone/fsck + busybox
    build + sqlite-WAL stress all clean on a real mount)
 7. Next: **P7 · RPC + chunkserver service** (length-prefixed frames over TCP;
