@@ -51,7 +51,7 @@ fn single_append_read_roundtrip() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
     assert_eq!(store.extent_count(), 0);
     assert_eq!(store.tail(), DATA_START);
 
@@ -70,7 +70,7 @@ fn batch_append_read_roundtrip() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 64 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 128 * MIB).unwrap();
 
     let sizes = [
         1usize,
@@ -109,7 +109,7 @@ fn batch_append_read_roundtrip() {
 fn oversize_append_rejected() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
     let big = vec![0u8; EXTENT_DATA_MAX as usize + 1];
     assert!(matches!(
         store.append(1, 0, &big),
@@ -126,7 +126,7 @@ fn data_corruption_detected() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let id = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let id = store.append(1, 0, &patterned(5000, 3)).unwrap();
         store.sync().unwrap();
         id
@@ -145,7 +145,7 @@ fn salvage_on_corrupt_header() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let ids = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let ids = store
             .append_batch(&[
                 (1, 0, &patterned(1000, 1)[..]),
@@ -187,7 +187,7 @@ fn persistence_across_reopen() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let (ids, uuid) = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let ids = store
             .append_batch(&[
                 (7, 0, &patterned(3000, 11)[..]),
@@ -216,7 +216,7 @@ fn discard_semantics() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let (keep, kill) = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let keep = store.append(1, 0, b"i stay").unwrap();
         let kill = store.append(1, 6, b"i die").unwrap();
         store.discard(kill).unwrap();
@@ -251,7 +251,7 @@ fn superblock_copy_a_corrupted_opens_from_b() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let id = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let id = store.append(1, 0, b"durable").unwrap();
         store.sync().unwrap();
         id
@@ -267,7 +267,7 @@ fn both_superblocks_corrupted_error() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     {
-        let _store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let _store = ExtentStore::create(&dev, 80 * MIB).unwrap();
     }
     corrupt(&dev, 0, b"GARBAGE!");
     corrupt(&dev, 4096, b"GARBAGE!");
@@ -301,7 +301,7 @@ fn pool_grows_across_batches() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 32 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 96 * MIB).unwrap();
     // First batch is small (pool sized to one block)...
     let small = store.append(1, 0, &patterned(500, 1)).unwrap();
     // ...then a batch with mixed sizes forces the pool to grow mid-stream.
@@ -339,7 +339,7 @@ fn read_batch_into_roundtrip() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
     let payloads = [
         patterned(100, 1),
         patterned(5000, 2),
@@ -368,7 +368,7 @@ fn read_batch_into_detects_corruption() {
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
     let id = {
-        let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
         let id = store.append(1, 0, &patterned(5000, 9)).unwrap();
         store.sync().unwrap();
         id
@@ -389,7 +389,7 @@ fn read_batch_into_rejects_bad_dsts() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 16 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 80 * MIB).unwrap();
     let id = store.append(1, 0, &patterned(5000, 4)).unwrap();
     // dsts length mismatch.
     let mut none: Vec<Vec<u8>> = Vec::new();
@@ -424,7 +424,7 @@ fn read_batch_into_mixed_sizes_and_reuse() {
     }
     let dir = test_dir();
     let dev = dir.path().join("dev.img");
-    let mut store = ExtentStore::create(&dev, 32 * MIB).unwrap();
+    let mut store = ExtentStore::create(&dev, 96 * MIB).unwrap();
     let ids = store
         .append_batch(&[
             (1, 0, &patterned(100, 5)[..]),
@@ -461,7 +461,7 @@ fn buffered_fallback_on_dev_shm() {
     let dev: PathBuf = shm.join(format!("porfs-test-{}", std::process::id()));
     let _ = std::fs::remove_file(&dev);
     let id = {
-        let mut store = ExtentStore::create(&dev, 8 * MIB).unwrap();
+        let mut store = ExtentStore::create(&dev, 72 * MIB).unwrap();
         assert!(!store.is_direct(), "tmpfs must not accept O_DIRECT");
         let id = store.append(1, 0, &patterned(10_000, 5)).unwrap();
         let gone = store.append(1, 0, b"gone").unwrap();

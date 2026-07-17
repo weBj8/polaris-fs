@@ -196,6 +196,11 @@ impl ExtentStore {
         self.next_extent_id += n as u64;
         self.extent_count += n as u64;
         self.live_bytes += items.iter().map(|item| item.2.len() as u64).sum::<u64>();
+        self.pending_appends += n;
+        // Group commit: one fdatasync amortizes the whole pending batch.
+        if self.commit_max_pending > 0 && self.pending_appends >= self.commit_max_pending {
+            self.sync()?;
+        }
         Ok(ids)
     }
 
@@ -358,6 +363,7 @@ impl ExtentStore {
                 ..meta
             },
         );
+        self.pending_tombs.insert(id);
         self.tail += BLOCK_SIZE;
         self.extent_count -= 1;
         self.live_bytes -= u64::from(meta.data_len);

@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use porfs_format::DATA_START;
 use porfs_store::{DEFAULT_QUEUE_DEPTH, ExtentStore};
 
-/// PolarisFS tool: format v0 device management and extent-store benchmark.
+/// PolarisFS tool: format v2 device management and extent-store benchmark.
 #[derive(Parser)]
 #[command(name = "porfs", version, about)]
 struct Cli {
@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a device with the PolarisFS v0 on-disk format.
+    /// Initialize a device with the PolarisFS v2 on-disk format.
     Mkfs {
         /// Device (regular file) to initialize.
         #[arg(long)]
@@ -103,6 +103,19 @@ fn cmd_info(device: &Path) -> Result<()> {
         human(store.live_bytes())
     );
     println!("sync_seq:       {}", store.sync_seq());
+    println!("confirmed_id:   {}", store.confirmed_id());
+    println!("checkpoint:");
+    println!("  slot_gen:     {}", store.checkpoint_slot_gen());
+    println!("  covered_tail: {}", store.checkpoint_covered_tail());
+    println!("  entry_count:  {}", store.checkpoint_entry_count());
+    println!(
+        "  mount_used:   {}",
+        if store.mount_used_checkpoint() {
+            "yes"
+        } else {
+            "no"
+        }
+    );
     println!("created_at:     {}", store.created_at());
     println!("last_sync_at:   {}", store.last_sync_at());
     println!("io_mode:        {}", io_mode(store.is_direct()));

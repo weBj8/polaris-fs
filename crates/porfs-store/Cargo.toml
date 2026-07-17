@@ -1,6 +1,6 @@
 [package]
 name = "porfs-store"
-description = "PolarisFS append-only extent store on io_uring (format v0)"
+description = "PolarisFS append-only extent store on io_uring (format v2)"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -17,13 +17,13 @@ const SB_CRC_OFFSET: usize = 4092;
 pub struct Superblock {
     /// `SB_MAGIC` at offset 0.
     pub magic: [u8; 8],
-    /// `FORMAT_VERSION` (= 1).
+    /// `FORMAT_VERSION` (= 2).
     pub format_version: u32,
     /// Flags; bit0 = clean unmount (`SB_FLAG_CLEAN`).
     pub flags: u32,
     /// Total device size in bytes.
     pub device_size: u64,
-    /// Start of the extent log region (= `DATA_START` = 1MiB).
+    /// Start of the extent log region (= `DATA_START` = 64MiB).
     pub data_start: u64,
     /// Next append offset; only confirmed (synced) extents are covered.
     pub tail: u64,

@@ -44,18 +44,18 @@ fn mkfs_info_bench_smoke() {
 
     let out = porfs(&["mkfs", "--device"])
         .arg(dev)
-        .args(["--size", "16MiB"])
+        .args(["--size", "80MiB"])
         .output()
         .unwrap();
-    assert_success(&out, &["created PolarisFS format v1 device", "uuid:"]);
+    assert_success(&out, &["created PolarisFS format v2 device", "uuid:"]);
 
     let out = porfs(&["info", "--device"]).arg(dev).output().unwrap();
     assert_success(
         &out,
         &[
-            "format_version: 1",
+            "format_version: 2",
             "extent_count:   0",
-            "data_start:     1048576",
+            "data_start:     67108864",
             "io_mode:",
         ],
     );

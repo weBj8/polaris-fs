@@ -2,7 +2,7 @@
 //! and the durability ordering mandated by `docs/format.md` (extent data
 //! fdatasynced first, superblock copy B then copy A afterwards).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
@@ -10,11 +10,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use io_uring::IoUring;
 use porfs_format::{
-    BLOCK_SIZE, DATA_START, FORMAT_VERSION, SB_A_OFFSET, SB_B_OFFSET, SB_FLAG_CLEAN, SB_MAGIC,
-    Superblock,
+    BLOCK_SIZE, CKPT_INTERVAL, CKPT_SLOT_CAP, DATA_START, FORMAT_VERSION, SB_A_OFFSET, SB_B_OFFSET,
+    SB_FLAG_CLEAN, SB_MAGIC, Superblock,
 };
 
 use crate::aligned::AlignedBuf;
+use crate::checkpoint::{CkptMeta, CkptSlot};
 use crate::engine::{self};
 use crate::{ExtentId, StoreError};
 
@@ -49,6 +50,24 @@ pub struct ExtentStore {
     /// Values written into the superblock: only fdatasync-confirmed state.
     pub(crate) confirmed_tail: u64,
     pub(crate) confirmed_count: u64,
+    /// Durability horizon + 1: `next_extent_id` as of the last successful sync
+    /// (all ids below it are confirmed). Derived from recovered state on open.
+    pub(crate) confirmed_next_id: u64,
+    /// Group-commit policy: auto-sync after this many appends since the last
+    /// sync (0 = disabled, the default, preserving P1 bench semantics).
+    pub(crate) commit_max_pending: usize,
+    /// Appends since the last sync.
+    pub(crate) pending_appends: usize,
+    /// Ids with a tombstone written but not yet synced (checkpoint liveness).
+    pub(crate) pending_tombs: HashSet<ExtentId>,
+    /// Syncs since the last checkpoint (auto-checkpoint pacing).
+    pub(crate) syncs_since_ckpt: u64,
+    /// Slot capacity check for `checkpoint()`; overridable in tests.
+    pub(crate) ckpt_slot_cap: u64,
+    /// Newest valid checkpoint slot seen at open or written since.
+    pub(crate) last_ckpt: Option<CkptMeta>,
+    /// True when the last `open` loaded its index from a checkpoint.
+    pub(crate) mount_used_ckpt: bool,
     pub(crate) queue_depth: u32,
     pub(crate) direct: bool,
     pub(crate) ring: Option<IoUring>,
@@ -63,8 +82,9 @@ pub struct ExtentStore {
 }
 
 impl ExtentStore {
-    /// Initialize a device with the v0 format: size it, terminate any stale
-    /// log, and write both superblocks (sync_seq = 1, clean unmount flag set).
+    /// Initialize a device with the v2 format: size it, invalidate any stale
+    /// checkpoint slots, terminate any stale log, and write both superblocks
+    /// (sync_seq = 1, clean unmount flag set).
     ///
     /// `size_bytes` is rounded down to a 4KiB multiple. For regular files the
     /// device is (re)sized with `ftruncate`; other file types (e.g. block
@@ -105,6 +125,14 @@ impl ExtentStore {
             last_sync_at: now,
             confirmed_tail: DATA_START,
             confirmed_count: 0,
+            confirmed_next_id: 0,
+            commit_max_pending: 0,
+            pending_appends: 0,
+            pending_tombs: HashSet::new(),
+            syncs_since_ckpt: 0,
+            ckpt_slot_cap: CKPT_SLOT_CAP,
+            last_ckpt: None,
+            mount_used_ckpt: false,
             queue_depth: DEFAULT_QUEUE_DEPTH,
             direct,
             ring: engine::new_ring(direct, DEFAULT_QUEUE_DEPTH),
@@ -112,83 +140,44 @@ impl ExtentStore {
             pool_buf_len: 0,
             pool_dirty: false,
         };
-        // Zero the first block of the log region so any stale log terminates here.
+        // Invalidate stale checkpoint slots and terminate any stale log.
         let block = AlignedBuf::zeroed(BLOCK_SIZE as usize)?;
+        store.file.write_all_at(&block[..], CkptSlot::A.offset())?;
+        store.file.write_all_at(&block[..], CkptSlot::B.offset())?;
         store.file.write_all_at(&block[..], DATA_START)?;
         store.write_superblocks(true)?;
-        Ok(store)
-    }
-
-    /// Open an existing device: validate both superblocks (magic, version,
-    /// CRC), pick the valid copy with the highest `sync_seq`, then scan the
-    /// extent log from `DATA_START`, rebuilding the in-memory index.
-    ///
-    /// The scan stops at the first record with a bad magic, bad header CRC, or
-    /// invalid `disk_len`; the tail is salvaged to that record's start and
-    /// everything past it is treated as an unconfirmed write and dropped.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let (file, direct) = engine::open_device(path.as_ref(), false)?;
-        let device_size = file.metadata()?.len() & !(BLOCK_SIZE - 1);
-        let mut block = AlignedBuf::zeroed(BLOCK_SIZE as usize)?;
-        let mut best: Option<Superblock> = None;
-        for offset in [SB_A_OFFSET, SB_B_OFFSET] {
-            let candidate = file
-                .read_exact_at(&mut block[..], offset)
-                .ok()
-                .and_then(|()| Superblock::from_bytes(&block[..]).ok())
-                .and_then(|sb| sb.validate().map(|()| sb).ok());
-            match (candidate, &best) {
-                (Some(sb), None) => best = Some(sb),
-                (Some(sb), Some(prev)) if sb.sync_seq > prev.sync_seq => best = Some(sb),
-                _ => {}
-            }
-        }
-        let sb = best.ok_or(StoreError::NoValidSuperblock)?;
-        let mut store = Self {
-            file,
-            device_size,
-            tail: DATA_START,
-            next_extent_id: 0,
-            index: HashMap::new(),
-            extent_count: 0,
-            live_bytes: 0,
-            sync_seq: sb.sync_seq,
-            uuid: sb.uuid,
-            created_at: sb.created_at,
-            last_sync_at: sb.last_sync_at,
-            confirmed_tail: DATA_START,
-            confirmed_count: 0,
-            queue_depth: DEFAULT_QUEUE_DEPTH,
-            direct,
-            ring: engine::new_ring(direct, DEFAULT_QUEUE_DEPTH),
-            pool: Vec::new(),
-            pool_buf_len: 0,
-            pool_dirty: false,
-        };
-        store.scan()?;
-        // Everything found by the scan is as confirmed as the device knows.
-        store.confirmed_tail = store.tail;
-        store.confirmed_count = store.extent_count;
-        // Mark the filesystem as mounted: clear the clean-unmount flag on disk.
-        store.write_superblocks(false)?;
         Ok(store)
     }
 
     /// Confirm all outstanding writes: fdatasync the data region, then write
     /// superblock copy B followed by copy A (authoritative), per format.md §2.
     /// `sync_seq` is bumped once per call.
+    ///
+    /// Side effects: resets the group-commit counters, advances the durability
+    /// horizon ([`ExtentStore::confirmed_id`]) to cover everything written so
+    /// far, and writes an automatic checkpoint every `CKPT_INTERVAL` syncs
+    /// (capacity fallback `Ok(false)` is ignored: mount just full-scans).
     pub fn sync(&mut self) -> Result<(), StoreError> {
         // Extent data must reach durable storage before the superblock tail may
         // cover it (no inverted superblock -> unflushed extent pointers).
         self.file.sync_data()?;
         self.confirmed_tail = self.tail;
         self.confirmed_count = self.extent_count;
+        self.confirmed_next_id = self.next_extent_id;
+        self.pending_appends = 0;
+        self.pending_tombs.clear();
         self.sync_seq = self
             .sync_seq
             .checked_add(1)
             .ok_or(StoreError::Internal("sync_seq overflow"))?;
         self.last_sync_at = unix_now();
-        self.write_superblocks(false)
+        self.write_superblocks(false)?;
+        self.syncs_since_ckpt += 1;
+        if self.syncs_since_ckpt >= CKPT_INTERVAL {
+            self.syncs_since_ckpt = 0;
+            self.checkpoint()?;
+        }
+        Ok(())
     }
 
     /// Number of live extents (tombstones excluded).

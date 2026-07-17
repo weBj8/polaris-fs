@@ -1,13 +1,18 @@
-//! PolarisFS append-only extent store (on-disk format v0) on io_uring.
+//! PolarisFS append-only extent store (on-disk format v2) on io_uring.
 //!
 //! The store owns its device file and an io_uring ring (no async runtime).
 //! Writes are self-contained 4KiB-aligned blocks appended at the tail; extents
-//! become *confirmed* only after [`ExtentStore::sync`]. On [`ExtentStore::open`]
-//! the log is scanned from `DATA_START` and truncated at the first bad record
-//! (salvage semantics: anything past the first bad record is treated as an
-//! unconfirmed write and dropped). See `docs/format.md` for the contract.
+//! become *confirmed* only after [`ExtentStore::sync`] (see
+//! [`ExtentStore::confirmed_id`] for the durability horizon). On
+//! [`ExtentStore::open`] the index is rebuilt from the newest usable
+//! checkpoint plus a scan of the uncovered log tail (fast mount), or a full
+//! scan from `DATA_START`; either way the scan is bounded by the superblock's
+//! confirmed tail and truncated at the first bad record (salvage semantics:
+//! anything past it is treated as an unconfirmed write and dropped).
+//! See `docs/format.md` for the contract.
 
 mod aligned;
+mod checkpoint;
 mod engine;
 mod ops;
 mod scan;
