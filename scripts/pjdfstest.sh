@@ -12,7 +12,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${CARGO_TARGET_TMPDIR:-$REPO_ROOT/target}/pjdfstest-work"
 SRC="$REPO_ROOT/target/pjdfstest-src"
-PORFS="$REPO_ROOT/target/debug/porfs"
+PORFS="$REPO_ROOT/target/release/porfs"
 SYNC_DIR="$WORK/ns-sync"
 # The mountpoint must be traversable (o+x) by arbitrary uids — pjdfstest
 # drops to uid 65534, and any non-traversable parent component (e.g. a

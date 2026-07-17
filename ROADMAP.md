@@ -190,9 +190,21 @@ kernel interaction; pjdfstest multi-uid subtests affected; to be root-caused
 by P11 close-to-open consistency); (2) device-node mknod EPERM in
 unprivileged environments (kernel-forced nodev).
 
-**P6 · MVP freeze (gate phase)** (1 wk)
-`porfs mkfs + mount` one command; real-workload smoke: git clone, kernel build, sqlite stress.
-Gate: all three run clean with zero data errors. **First "usable" milestone.**
+**P6 · MVP freeze (gate phase)** (1 wk) ✅ DONE
+Delivered: one command from nothing to a mounted fs — `porfs mount --meta M
+--data D --mountpoint /mnt --format 16GiB` (existing pair mounts as-is;
+half-pair refused); `scripts/mvp-smoke.sh` runs the gate workloads on a real
+mount (release binary) and verifies each.
+Gate: all three clean, zero data errors — ✅ git clone (14.1MB pack,
+`git fsck --strict` clean); ✅ busybox build (substituted for "kernel build"
+by owner decision — a full kernel tree is disproportionate for this box;
+busybox uses the same Kconfig/Kbuild machinery, ~700 compile units, binary
+smoke-tested; one environment-only patch: busybox 1.36.1's tc applet is
+incompatible with kernel ≥ 6.16 headers (CBQ structs removed), disabled);
+✅ sqlite stress (WAL + synchronous=FULL, 20k rows + updates + deletes,
+exact SUM/COUNT verification, `integrity_check` ok, no WAL leftovers);
+post-gate `porfs mds-check` clean with zero reconcile repairs after a clean
+unmount. **First "usable" milestone reached.**
 
 ### Act 2: multi-node parallelism (P7–P13) — become "distributed"
 
@@ -413,5 +425,7 @@ past 50 nodes and is not part of GPFS-parity basics.
 5. ✅ P5 (xattr/symlink/mknod/sparse/fsync/fdatasync/rename-matrix; hash-ordered
    dirs + streaming readdir; 1M-dir listing 14.2s; 114 tests green; known-issue:
    non-mounter-uid EACCES)
-6. Next: **P6 · MVP freeze** (mkfs+mount one command; git clone / kernel build /
-   sqlite smoke)
+6. ✅ P6 (MVP freeze: mount --format one command; git-clone/fsck + busybox
+   build + sqlite-WAL stress all clean on a real mount)
+7. Next: **P7 · RPC + chunkserver service** (length-prefixed frames over TCP;
+   static membership; extent I/O as a service)

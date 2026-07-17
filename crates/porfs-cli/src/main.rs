@@ -90,6 +90,11 @@ enum Commands {
         /// allow_other). Required for multi-user semantics and pjdfstest.
         #[arg(long, default_value_t = false)]
         allow_other: bool,
+        /// One-command form: format the MDS pair with this size first when
+        /// it does not exist yet (e.g. --format 4GiB), then mount. An
+        /// existing pair is mounted as-is.
+        #[arg(long)]
+        format: Option<String>,
     },
 }
 
@@ -112,28 +117,70 @@ fn main() -> Result<()> {
             entry_ttl,
             no_default_permissions,
             allow_other,
-        } => cmd_mount(
-            &meta,
-            &data,
-            &mountpoint,
+            format,
+        } => cmd_mount(MountOpts {
+            meta: &meta,
+            data: &data,
+            mountpoint: &mountpoint,
             attr_ttl,
             entry_ttl,
             no_default_permissions,
             allow_other,
-        ),
+            format: format.as_deref(),
+        }),
     }
 }
 
-fn cmd_mount(
-    meta: &Path,
-    data: &Path,
-    mountpoint: &Path,
+/// Everything the `mount` subcommand takes, grouped so `cmd_mount` stays
+/// readable (and under the argument-count ceiling).
+struct MountOpts<'a> {
+    meta: &'a Path,
+    data: &'a Path,
+    mountpoint: &'a Path,
     attr_ttl: f64,
     entry_ttl: f64,
     no_default_permissions: bool,
     allow_other: bool,
-) -> Result<()> {
+    format: Option<&'a str>,
+}
+
+fn cmd_mount(opts: MountOpts<'_>) -> Result<()> {
     use fuser::{Config, MountOption};
+
+    let MountOpts {
+        meta,
+        data,
+        mountpoint,
+        attr_ttl,
+        entry_ttl,
+        no_default_permissions,
+        allow_other,
+        format,
+    } = opts;
+
+    if let Some(size) = format {
+        match (meta.exists(), data.exists()) {
+            (true, true) => {
+                println!("porfs: MDS pair exists, mounting as-is (--format skipped)");
+            }
+            (false, false) => {
+                let size = parse_size(size)?;
+                porfs_mds::Mds::format(meta, data, size).with_context(|| {
+                    format!("format MDS pair ({}, {})", meta.display(), data.display())
+                })?;
+                println!(
+                    "porfs: formatted MDS pair ({}, {})",
+                    meta.display(),
+                    data.display()
+                );
+            }
+            _ => bail!(
+                "half an MDS pair exists (meta: {}, data: {}); remove the leftover",
+                meta.display(),
+                data.display()
+            ),
+        }
+    }
 
     let config = porfs_fuse::MountConfig {
         attr_ttl: std::time::Duration::from_secs_f64(attr_ttl),

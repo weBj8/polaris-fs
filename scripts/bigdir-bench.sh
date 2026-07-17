@@ -7,7 +7,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORFS="$REPO_ROOT/target/debug/porfs"
+PORFS="$REPO_ROOT/target/release/porfs"
 WORK="${CARGO_TARGET_TMPDIR:-$REPO_ROOT/target}/bigdir-work"
 MNT="/tmp/porfs-bigdir-mnt.$$"
 N="${1:-1000000}"
