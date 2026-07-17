@@ -1,0 +1,22 @@
+[package]
+name = "porfs"
+version = "0.1.0"
+edition = "2024"
+description = "PolarisFS v2.0 - single-node basic implementation with file-backed SCM/QLC tiers"
+
+[lib]
+name = "porfs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "porfs"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = { version = "1.21", features = ["derive", "min_const_generics"] }
+clap = { version = "4.5", features = ["derive"] }
+fuser = "0.17"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
