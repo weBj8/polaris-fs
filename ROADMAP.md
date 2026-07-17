@@ -1,312 +1,378 @@
-# PolarisFS ROADMAP v6 —— GPFS 全基本功能对齐（40 阶段）
+# PolarisFS ROADMAP v6 — full GPFS feature parity (40 phases)
 
-> 2026-07-17 · 取代 v5（旧版进 git 历史）；v2.0 DASE 设计稿归档于 `docs/design-v2-dase-archive.md` 仅作参考。
-> 前提：1 名人类开发者 + AI 结对。
-> 一句话：**开源的、现代的 GPFS。原理照搬，功能全集对齐，技术栈全面现代化；多用开源库，代码短小精悍。**
+> 2026-07-17 · supersedes v5 (old versions live in git history); the v2.0 DASE design
+> draft is archived at `docs/design-v2-dase-archive.md` for reference only.
+> Team: 1 human developer + AI pair.
+> One line: **an open-source, modern GPFS. Copy the principles and the full feature
+> set; modernize the entire technology stack; lean on open-source libraries.**
 
-## 0. 定位与技术栈决策
+## 0. Positioning & technology decisions
 
-**目标**：10–50 节点小集群起步、功能对齐 GPFS 的共享 POSIX 并行文件系统。
-GPFS 已经是很老的东西（kmod 客户端、90 年代内核假设、运维要专职团队、闭源绑定、百万行级代码）。
-我们重写，不是兼容——**功能对标不打折，架构现代化，代码压到两个数量级之下。**
+**Goal**: a shared POSIX parallel filesystem with GPFS feature parity, starting at
+10–50 node clusters. GPFS is old (kmod client, 1990s kernel assumptions, dedicated
+ops teams, closed source, million-line codebase). We rewrite — full feature parity,
+modern architecture, no feature cuts.
 
-### 0.1 GPFS 基本功能对齐清单（全部进路线图，不打折）
+### 0.1 GPFS feature-parity checklist (all of it is in the plan; no cuts)
 
-| GPFS 功能 | 我们的阶段 | GPFS 功能 | 我们的阶段 |
+| GPFS feature | Our phase | GPFS feature | Our phase |
 |---|---|---|---|
-| 分布式 byte-range token（metanode） | P14–P15 | 快照（全局/fileset） | P21–P22 |
-| data-shipping 兜底 | P14 | 可写克隆 | P22 |
-| 条带化 | P8 | fileset/junction | P22 |
-| 2/3 副本 + 元数据副本 | P9 | user/group/fileset 三级配额 | P23 |
-| failure group 放置 | P10 | NFSv4 ACL | P24 |
-| mmap/O_APPEND/fcntl 强语义 | P17 | storage pool + 放置策略 | P25 |
-| 在线加盘/restripe | P28 | ILM 策略引擎（mmapplypolicy） | P26 |
-| 在线退盘/排水 | P29 | QoS（mmchqos） | P27 |
-| declustered 重建 | P30 | 加密 at rest | P36 |
-| fsck（mmfsck） | P31 | 压缩 | P37 |
-| 滚动升级 | P32 | WORM/不可变（mmchattr -i） | P38 |
-| 备份支持（mmbackup） | P33 | 多集群远程挂载 + AFM | P39 |
-| NFS/S3 导出（CES，砍 SMB） | P40 | 性能监控（mmpmon） | P12 |
+| Distributed byte-range tokens (metanode) | P14–P15 | Snapshots (global/fileset) | P21–P22 |
+| Data-shipping fallback | P14 | Writable clones | P22 |
+| Striping | P8 | Filesets/junctions | P22 |
+| 2/3-way replication + metadata replicas | P9 | user/group/fileset quotas | P23 |
+| Failure-group placement | P10 | NFSv4 ACLs | P24 |
+| mmap/O_APPEND/fcntl strong semantics | P17 | Storage pools + placement policy | P25 |
+| Online disk add/restripe | P28 | ILM policy engine (mmapplypolicy) | P26 |
+| Online disk remove/drain | P29 | QoS (mmchqos) | P27 |
+| Declustered rebuild | P30 | At-rest encryption | P36 |
+| fsck (mmfsck) | P31 | Compression | P37 |
+| Rolling upgrades | P32 | WORM/immutability (mmchattr -i) | P38 |
+| Backup support (mmbackup) | P33 | Multi-cluster remote mount + AFM | P39 |
+| NFS/S3 export (CES; SMB dropped) | P40 | Performance monitoring (mmpmon) | P12 |
 
-### 0.2 我们多于 GPFS 的（差异化卖点）
+### 0.2 What we have that GPFS doesn't (differentiators)
 
-- **CRC32C 端到端全链路 + 内建 scrub**（GPFS 磁盘层无端到端校验）
-- **现代客户端**：FUSE + io_uring + passthrough，无 kmod，不绑内核版本
-- **Rust 内存安全**（数据面/控制面全量）+ Zig 热路径组件（无 GC 手工 ring）
-- log-structured 落盘 → 快照零拷贝、崩溃恢复不重放
-- 开源 + 通用硬件，无订阅制
+- **CRC32C end-to-end checksums + built-in scrub** (GPFS has no disk-layer E2E checksums)
+- **Modern client**: FUSE + io_uring + passthrough, no kmod, no kernel-version lock-in
+- **Rust memory safety** (data + control plane) with Zig hot-path components (manual rings, no GC)
+- Log-structured on-disk layout → zero-copy snapshots, no journal replay on recovery
+- Open source on commodity hardware, no subscriptions
 
-### 0.3 抄与不抄
+### 0.3 What we copy vs. don't copy
 
-**抄 GPFS 什么（原理层）**：
-- byte-range token/租约：客户端持租约才能缓存写，冲突时回调收回（P14）
-- **分布式锁管理（metanode 思想，GPFS 的灵魂，原样保留）**：每文件锁仲裁者（arbitrator）
-  由 hash(inode) 散列到集群各节点；锁表全内存不落盘，故障靠 租约超时 + epoch fencing +
-  grace-period 重建（P14–P15）
-- data-shipping 兜底、大缓冲池 + 条带化并行直读多存储节点
-- failure group、storage pool、ILM、fileset 这些数据管理概念整套对齐
+**Copied from GPFS (principles)**:
+- Byte-range tokens/leases: clients cache writes only while holding a lease;
+  conflicts trigger revocation callbacks (P14)
+- **Distributed lock management (the metanode idea — GPFS's soul, kept intact)**:
+  each file's lock arbitrator is hashed by inode across cluster nodes; lock tables
+  are memory-only; failures are rebuilt via lease timeouts + epoch fencing +
+  grace-period re-registration (P14–P15)
+- Data-shipping fallback; large buffer pools + striped parallel reads from many
+  storage nodes
+- The full data-management concept set: failure groups, storage pools, ILM, filesets
 
-**不抄 GPFS 的部分**：不引入 quorum/group services 集群状态机——成员关系与 epoch 由单 MDS
-颁发（namespace 仍单 MDS 串行化，这是**控制面**简化；**锁面是分布式的**，两者解耦）。
-不绑 SAN 共享盘假设：走 client→chunkserver 直连（GPFS-NSD 服务端模式的现代化）。
+**Not copied**: no quorum/group-services cluster state machine — membership and
+epochs are issued by the single MDS (namespace stays serialized on one MDS; that is
+a **control-plane** simplification only. **The lock plane is distributed**; the two
+are decoupled). No shared-SAN-disk assumption: clients talk directly to chunkservers
+(a modernization of the GPFS-NSD server model).
 
-| GPFS 的技术栈 | 我们的技术栈 | 理由 |
+| GPFS technology | Our technology | Why |
 |---|---|---|
-| 内核模块客户端（mmfs） | **FUSE**，无 kmod | 不绑内核版本，崩了不拖垮机器 |
-| read/write 逐次系统调用过 /dev/fuse | **FUSE over io_uring**（内核 ≥6.15）+ **FUSE passthrough**（≥6.9 热数据直通） | 现代内核白送的性能路径 |
-| 多线程 epoll 守护进程 | **io_uring 全链路**（extent store/RPC/bench） | per-core 提交批量化，榨干 NVMe |
-| C + 私有守护进程 | **Rust 为主体**，**Zig 热路径组件**（P20 fuse-io_uring transport、P40 数据面） | 内存安全与零开销各取所长 |
-| quorum/group services | MDS 颁发成员与 epoch | 去掉最重的集群状态机 |
+| Kernel-module client (mmfs) | **FUSE**, no kmod | No kernel-version lock-in; a crash doesn't take the machine down |
+| Per-request syscalls through /dev/fuse | **FUSE over io_uring** (kernel ≥6.15) + **FUSE passthrough** (≥6.9 hot-data shortcut) | Free performance from the modern kernel |
+| Multi-threaded epoll daemons | **io_uring everywhere** (extent store/RPC/bench) | Per-core batched submission; saturate NVMe |
+| C + proprietary daemons | **Rust as the main language**, **Zig hot-path components** (P20 fuse-io_uring transport, P40 data plane) | Memory safety and zero-overhead where each matters |
+| quorum/group services | MDS-issued membership & epochs | Drops the heaviest cluster state machine |
 
-**内核基线**：≥6.9（passthrough）；甜点 ≥6.15（fuse io_uring）。开发机 7.1。
+**Kernel baseline**: ≥6.9 (passthrough); sweet spot ≥6.15 (fuse io_uring). Dev box runs 7.1.
 
-### 0.4 开源库选型（能借就不造，代码短小精悍）
+### 0.4 Library selection (borrow, don't build)
 
-| 子系统 | 选用 | 不自己造的理由 |
+| Subsystem | Choice | Why not build it |
 |---|---|---|
-| FUSE 客户端 | `fuser`（P20 起叠加自研 io_uring transport，Zig） | libfuse 协议的成熟 Rust 实现 |
-| io_uring | `io-uring` crate（数据面零运行时依赖） | 薄绑定；自研只写 ring 提交策略 |
-| 控制面 async | `tokio` + `tokio-util` codec | 生态默认，RPC/定时器全齐 |
-| 数据面 runtime（可选） | `glommio`（thread-per-core on io_uring，P7 决策） | 省自建 reactor |
-| 元数据持久化 | `redb`（纯 Rust ACID KV；P3 决策：redb vs 自存 extent store 二选一） | 嵌入式 B-tree+WAL 现成 |
-| MDS 热备复制 | `raft-rs`（TiKV 生产级 Raft，P16 直接套小状态机） | **不写 Raft 是本路线图的纪律** |
-| 序列化 | `serde`+`bincode`（RPC/元数据）；`bytemuck`（盘格式 Pod） | — |
-| 校验 | `crc32c`（SSE4.2 硬件指令） | 数据路径刚需 |
-| 并发结构 | `dashmap` / `parking_lot` / `crossbeam` | — |
-| 日志/指标 | `tracing`；`metrics` + `metrics-exporter-prometheus` | P12 直接可用 |
-| EC（P35） | `reed-solomon-simd`（或 `reed-solomon-erasure`） | 生产级编解码 |
-| 压缩（P37） | `zstd` | — |
-| 加密（P36） | RustCrypto：`aes-xts` / `aes-gcm` | — |
-| NFS 网关（P40） | `nfsserve` crate | NFS server 骨架现成 |
-| S3 网关（P40） | `s3s` crate | S3 协议层现成 |
-| CLI / 错误 | `clap` derive；`thiserror`（库）/`anyhow`（bin） | — |
+| FUSE client | `fuser` (plus our own io_uring transport in Zig from P20) | Mature Rust implementation of the libfuse protocol |
+| io_uring | `io-uring` crate (no runtime dependency on the data plane) | Thin bindings; we only write ring submission policy |
+| Control-plane async | `tokio` + `tokio-util` codec | Ecosystem default; RPC/timers included |
+| Data-plane runtime (optional) | `glommio` (thread-per-core on io_uring; decision at P7) | Saves a hand-rolled reactor |
+| Metadata persistence | `redb` (pure-Rust ACID KV; P3 decision: redb vs extent-store-backed, leaning redb) | Embedded B-tree+WAL already exists |
+| MDS standby replication | `raft-rs` (TiKV's production Raft, P16 wraps a tiny state machine) | **Not writing Raft is a rule of this roadmap** |
+| Serialization | `serde`+`bincode` (RPC/metadata); `bytemuck` (on-disk Pod) | — |
+| Checksums | `crc32c` crate (SSE4.2) + in-house PCLMULQDQ folding path (P1, property-tested against the crate) | Data-path necessity; the fast path is already done |
+| Concurrency | `dashmap` / `parking_lot` / `crossbeam` | — |
+| Logs/metrics | `tracing`; `metrics` + `metrics-exporter-prometheus` | P12 plugs straight in |
+| EC (P35) | `reed-solomon-simd` (or `reed-solomon-erasure`) | Production-grade codecs |
+| Compression (P37) | `zstd` | — |
+| Encryption (P36) | RustCrypto: `aes-xts` / `aes-gcm` | — |
+| NFS gateway (P40) | `nfsserve` crate | NFS server skeleton exists |
+| S3 gateway (P40) | `s3s` crate | S3 protocol layer exists |
+| CLI / errors | `clap` derive; `thiserror` (libs) / `anyhow` (bins) | — |
 
-**代码量纪律（短小精悍）**：原则只有一条——**能用成熟开源库就不自己造**，
-自研只写差异化的部分（盘格式、extent 策略、租约协议、条带映射）。
-行数是参考不是上限：不为凑行数挪动代码，不设单文件/单阶段行数天花板。
-**难度纪律：功能清单不打折（40 阶段全做）；唯一允许砍的是"有现成库能解决的自研冲动"。**
+**Code-size discipline ("small and sharp")**: one rule only — **if a mature
+open-source library solves it, don't write it yourself**; in-house code covers the
+differentiating parts (on-disk format, extent policy, lease protocol, striping
+maps). Line counts are references, not ceilings: never shuffle code to fit a budget,
+no per-file/per-phase LOC caps.
+**Difficulty discipline: the feature list is never cut (all 40 phases ship); the
+only thing we ever cut is the urge to build what a library already solves.**
 
-## 1. 目标架构
+## 1. Target architecture
 
 ```
-        ┌──── polaris-mds（单活 + 热备）────┐
-        │ 目录树/inode + 文件→chunk 映射(CRUSH)│
-        │ 集群成员 + epoch 颁发(控制面唯一中心) │
-        └──┬──────────────┬──────────────┬───┘
-      元数据 RPC      数据/租约并行直连(io_uring)
+        ┌──── polaris-mds (single active + hot standby) ────┐
+        │ dir tree/inodes + file→chunk map (CRUSH pure fn)   │
+        │ cluster membership + epoch issuing (only center)   │
+        └──┬──────────────┬──────────────┬──────────────────┘
+     metadata RPC      data/lease RPC, parallel (io_uring)
    ┌───────▼──┐   ┌──────▼─────┐  ┌─────▼──────┐
-   │ FUSE 客户端│  │chunkserver1│  │chunkserver2│ ×N
+   │ FUSE client│  │chunkserver1│  │chunkserver2│ ×N
    │ passthrough│─▶│ io_uring   │  │ io_uring   │
    │ writeback │   │ extent+WAL │  │ CRC32C     │
-   └─────┬────┘   │ +锁仲裁者   │  │ +锁仲裁者   │
+   └─────┬────┘   │ +lock arb. │  │ +lock arb. │
          └────────┴────────────┴───┴────────────┘
-   分布式租约层：hash(inode)→每文件 arbitrator(首活者)，
-   内存锁表 + 回调收回 + data-shipping + epoch/grace 恢复
+   Distributed lease plane: hash(inode) → per-file arbitrator (first alive),
+   in-memory lock tables + revocation callbacks + data-shipping + epoch/grace recovery
 ```
 
-- 一致性 v1 承诺 **close-to-open**；P14–P17 逐步补到 GPFS 级强语义。
-- 冗余 v1：2 副本链式写；EC 进 P35。
+- v1 consistency promise: **close-to-open**; P14–P17 builds up to GPFS-grade strong semantics.
+- v1 redundancy: 2-way chain replication; EC lands in P35.
 
-## 2. 四十阶段
+## 2. The forty phases
 
-### 第一段：单机 MVP（P1–P6）——先证明自己能当一个文件系统用
+### Act 1: single-node MVP (P1–P6) — prove it can be a filesystem at all
 
-**P1 · 磁盘格式 v0 + io_uring extent store + bench**（~2 周）✅ 已完成
-交付：`docs/format.md`、`porfs-format`、`porfs-store`（追加式 extent log + CRC32C + 双 superblock + 扫描自愈 + 零拷贝 `read_batch_into`）、`porfs mkfs/info/bench`（1266+301 行自有代码）。
-Gate（语义校准后）：**顺序写 ≥85% 同设备 fio 裸写（含 CRC 开销）——✅ 实测 95.5%**；
-**顺序读分层考核**：io_uring 纯流水线 ≥ fio 裸读（引擎零损耗证明）——✅ 实测 111%；
-带校验读 vs **fio+verify 同场基线**（fio 裸读不做任何校验，与带 CRC 读直接对比在低内存带宽
-机器上是关公战秦琼：带校验+拷贝读每逻辑字节 ~4 倍总线流量 vs fio 1 倍，开发机 APU 单核
-DRAM 仅 6.9GB/s < 2× 盘速，物理不可达——服务器/台式机双通道内存无此墙）；
-CRC 破坏检出 100% ✅；`cargo test` 全绿（30 项）✅；clippy 零警告 ✅。
+**P1 · On-disk format v0 + io_uring extent store + bench** (~2 wks) ✅ DONE
+Delivered: `docs/format.md`, `porfs-format`, `porfs-store` (append-only extent log +
+CRC32C + dual superblocks + salvage scan + zero-copy `read_batch_into`),
+`porfs mkfs/info/bench`.
+Gate (semantics calibrated): **seq write ≥85% of same-device raw fio (CRC included)
+— ✅ measured 94%**; **seq read, two layers**: pure io_uring pipeline ≥ raw fio read
+(engine has zero loss) — ✅ measured 111%; verified read vs a **fio+verify baseline**
+(raw fio does no checksums; comparing a verified read against unverified fio on a
+low-memory-bandwidth box is apples-to-oranges: verified+copied read moves ~4 bytes
+of bus traffic per logical byte vs fio's 1, and this dev APU has 6.9GB/s single-core
+DRAM < 2× device speed — physically unreachable here; dual-channel servers have no
+such wall); CRC corruption detection 100% ✅; `cargo test` green (34) ✅; clippy zero ✅.
 
-**P2 · WAL + 组提交 + 崩溃恢复**（1–2 周）
-组提交 WAL、检查点、挂载免全扫；superblock 代际切换。
-Gate：`kill -9` 千次循环零损坏、已确认写零丢失。
+**P2 · WAL + group commit + crash recovery** (1–2 wks) ✅ DONE
+Delivered: the extent log IS the WAL; group-commit policy + `confirmed_id` durability
+horizon; checkpoint slots (ping-pong, generational) for scan-free mount; superblock
+generation switching; `scripts/kill9-soak.sh`.
+Gate: **1000 kill -9 iterations, zero corruption, zero confirmed-write loss — ✅
+(63s, all 1000 mounts via checkpoint)**.
 
-**P3 · MDS v0（单机库形态）**（2 周）
-目录树/inode 表 + 文件→extent 映射；持久化方案二选一：`redb`（ACID KV 现成）或自存 extent store（P3 开工时决策，倾向 redb）；事务式 rename/create。
-Gate：元数据操作崩溃后可恢复，自检通过。
+**P3 · MDS v0 (library form, single node)** (2 wks)
+Directory tree/inode tables + file→extent map; persistence decision: `redb` (ACID KV,
+leaning) vs. self-hosted in extent store (decide at kickoff); transactional rename/create.
+Gate: metadata ops survive crashes; self-check passes.
 
-**P4 · FUSE 客户端 v0**（2 周）
-`fuser` 挂载：lookup/getattr/readdir/read/write/create/mkdir/unlink/rename/fsync；属性缓存超时。
-Gate：pjdfstest 基础项通过。
+**P4 · FUSE client v0** (2 wks)
+`fuser` mount: lookup/getattr/readdir/read/write/create/mkdir/unlink/rename/fsync;
+attribute-cache timeouts.
+Gate: pjdfstest basic suite passes.
 
-**P5 · POSIX 补全 I**（2 周）
-xattr、稀疏文件（洞）、大目录分片索引（百万级 entry 秒列）、rename 边界情形、fsync/fdatasync 语义。
-Gate：pjdfstest 全量过；百万文件目录 ls/find 性能达标。
+**P5 · POSIX completion I** (2 wks)
+xattr, sparse files, sharded big-directory index (1M entries listed fast), rename
+edge cases, fsync/fdatasync semantics.
+Gate: full pjdfstest pass; 1M-file directory ls/find hits performance targets.
 
-**P6 · MVP 封版（Gate 阶段）**（1 周）
-`porfs mkfs + mount` 一条命令可用；真实负载 smoke：git clone、内核编译、sqlite 压测。
-Gate：三个负载全跑通无数据错误。**第一个"可用"里程碑。**
+**P6 · MVP freeze (gate phase)** (1 wk)
+`porfs mkfs + mount` one command; real-workload smoke: git clone, kernel build, sqlite stress.
+Gate: all three run clean with zero data errors. **First "usable" milestone.**
 
-### 第二段：多机并行（P7–P13）——变成"分布式"
+### Act 2: multi-node parallelism (P7–P13) — become "distributed"
 
-**P7 · RPC + chunkserver 服务化**（2 周）
-length-prefixed 二进制帧 over TCP（tokio-util codec + bincode；数据面评估 glommio），静态集群成员，extent 读写接口服务化。
-Gate：跨机 extent 读写正确，断线重连语义明确。
+**P7 · RPC + chunkserver service** (2 wks)
+Length-prefixed binary frames over TCP (tokio-util codec + bincode; evaluate glommio
+for the data plane), static membership, extent read/write as a service.
+Gate: cross-machine extent I/O correct; reconnect semantics documented.
 
-**P8 · 条带化并行读**（2 周）
-文件→chunk→chunkserver 映射为纯函数（CRUSH 式，无中心查表）；客户端并行直读。
-Gate：4 客户端聚合读 ≥ 盘池带宽 70%。
+**P8 · Striped parallel read** (2 wks)
+File→chunk→chunkserver mapping as a pure function (CRUSH-style, no central lookup);
+clients read in parallel.
+Gate: 4-client aggregate read ≥ 70% of pool bandwidth.
 
-**P9 · 并行写 + 2 副本链式写**（2 周）
-主副本转发从副本，两端确认才 ACK；副本一致性校验；元数据双副本。
-Gate：杀任一 chunkserver 不丢已确认写；读自动走幸存副本。
+**P9 · Parallel write + 2-way chain replication** (2 wks)
+Primary forwards to secondary; ACK only after both; replica consistency checks;
+metadata dual-replicated.
+Gate: killing any chunkserver loses zero confirmed writes; reads fail over to the survivor.
 
-**P10 · failure group + 放置策略**（1–2 周）
-节点/盘标注故障域（机架/机箱），副本强制跨 failure group；CRUSH 输入带拓扑。
-Gate：整 rack 断电（模拟）不丢数据、可读。
+**P10 · Failure groups + placement policy** (1–2 wks)
+Nodes/disks tagged with failure domains (rack/chassis); replicas forced across
+failure groups; CRUSH input carries topology.
+Gate: simulated full-rack power loss loses nothing and stays readable.
 
-**P11 · close-to-open 一致性**（1–2 周）
-客户端属性/页缓存超时模型文档化 + 实现；open 强制重校验。
-Gate：多机 open/close 交叉读写校验零错误。
+**P11 · Close-to-open consistency** (1–2 wks)
+Client attribute/page-cache timeout model documented + implemented; open forces revalidation.
+Gate: multi-machine open/close cross-read/write verification shows zero errors.
 
-**P12 · 可观测性**（1 周）
-prometheus 指标（延迟直方图/带宽/副本水位）、`porfsadm` CLI、`tracing` 结构化日志规范。
-Gate：仪表盘能定位"慢在哪一层"。
+**P12 · Observability** (1 wk)
+prometheus metrics (latency histograms/bandwidth/replica watermarks), `porfsadm` CLI,
+`tracing` structured-log conventions.
+Gate: dashboards answer "which layer is slow".
 
-**P13 · 生产 v0.1 投放（Gate 阶段）**
-自有集群跑"可重建数据"4 周零事故。**连自己都不用 → 降级为学习项目。**
+**P13 · Production v0.1 rollout (gate phase)**
+Run "rebuildable data" (dataset replicas/distribution files) on our own cluster,
+4 weeks, zero incidents. **If we won't run it ourselves → downgrade to a learning project.**
 
-### 第三段：分布式一致性（P14–P18）——GPFS 的灵魂
+### Act 3: distributed consistency (P14–P18) — GPFS's soul
 
-**P14 · 分布式租约管理器（DLM）核心**（6–8 周）——全路线图最难阶段
-每文件 arbitrator = hash(inode, epoch) → 有序候选列表首活者（chunkserver 兼任，metanode 思想）；
-内存态 byte-range 锁表；租约 30s 超时 + I/O 顺带续约；冲突 → 回调收回 → 限期 flush + 释放，
-逾期视为客户端死亡；收回期间冲突写降级 data-shipping；多区间按 (inode, offset) 全局序防死锁；
-fcntl 阻塞锁映射为仲裁者等待队列 + 超时兜底。
-**排期预案（功能不打折）：8 周做不稳 → write-lease 移出 v1 范围延后交付，v1 先承诺 close-to-open；DLM 仍在路线图上，做完为止。**
-Gate：单 arbitrator 存活时共享写交叉校验零错误；回调收回 p99 < 2× 租约超时。
+**P14 · Distributed lease manager (DLM) core** (6–8 wks) — hardest phase of the roadmap
+Per-file arbitrator = first alive node of an ordered candidate list from
+hash(inode, epoch) (chunkservers double as arbitrators — the metanode idea);
+in-memory byte-range lock tables; 30s lease timeout + renewal piggybacked on I/O;
+conflict → revocation callback → bounded-time flush + release, overdue = client dead;
+conflicting writes degrade to data-shipping during revocation; multi-range ops
+acquire in (inode, offset) global order (no deadlocks); fcntl blocking locks map to
+arbitrator wait queues + timeout fallback.
+**Schedule contingency (features not cut): if not stable in 8 weeks → write-lease
+moves out of v1 scope and ships later; v1 launches on close-to-open; the DLM stays
+on the roadmap until done.**
+Gate: zero errors in shared-write cross-verification with a live arbitrator;
+revocation callback p99 < 2× lease timeout.
 
-**P15 · arbitrator 故障转移 + 租约恢复**（3–4 周）
-MDS 颁发 epoch；arbitrator 死亡 → 候选次位者新 epoch 接管 → grace period 内客户端重报租约
-重建锁表，逾期作废；epoch fencing 防脑裂（旧 epoch 消息一律拒绝）。
-Gate：杀 arbitrator 恢复 <10s；恢复窗口零脏数据；旧 epoch 消息零效力。
+**P15 · Arbitrator failover + lease recovery** (3–4 wks)
+MDS issues epochs; arbitrator death → next candidate takes over with a new epoch →
+clients re-register held leases inside a grace period to rebuild the lock table,
+expired ones are voided; epoch fencing kills split-brain (stale-epoch messages are
+rejected outright).
+Gate: lease service recovers <10s after killing an arbitrator; zero dirty data in
+the recovery window; stale-epoch messages have zero effect.
 
-**P16 · MDS 热备 + failover**（3–4 周）
-`raft-rs` 套小状态机做 WAL 复制与选主（不写 Raft）；成员/epoch 状态随状态机重建；半自动切换。
-Gate：杀 MDS → 备机接管 <30s，业务毛刺可接受。
+**P16 · MDS hot standby + failover** (3–4 wks)
+`raft-rs` wraps a tiny state machine for WAL replication and leader election (we do
+not write Raft); membership/epoch state rebuilt with the state machine; semi-automatic switchover.
+Gate: killing the MDS → standby takes over <30s with acceptable business blip.
 
-**P17 · POSIX 强语义 II**（3–4 周）
-mmap 跨机一致（与租约绑定，脏页回收）；O_APPEND 多写者原子；跨目录 rename 原子；
-fcntl 跨机死锁检测（仲裁者 wait-for 图）。
-Gate：并发 mmap/O_APPEND/rename 交叉校验零错误；注入死锁能被检测并解开。
+**P17 · POSIX strong semantics II** (3–4 wks)
+Cross-machine mmap coherence (bound to leases, dirty-page recall); multi-writer
+O_APPEND atomicity; cross-directory atomic rename; cross-machine fcntl deadlock
+detection (wait-for graph at the arbitrator).
+Gate: concurrent mmap/O_APPEND/rename cross-verification zero errors; injected
+deadlocks are detected and broken.
 
-**P18 · 72h 故障注入 soak（Gate 阶段）**
-随机杀 MDS/arbitrator/chunkserver/客户端 + 网络分区 + 共享写校验器常驻。
-Gate：72h 零数据错误、服务可恢复。
+**P18 · 72h fault-injection soak (gate phase)**
+Random kills of MDS/arbitrator/chunkserver/clients + network partitions + resident
+shared-write verifier.
+Gate: 72h, zero data errors, service recoverable.
 
-### 第四段：客户端性能（P19–P20）——现代内核特性全开
+### Act 4: client performance (P19–P20) — modern kernel features fully on
 
-**P19 · 客户端性能 I**（2 周）
-FUSE writeback cache + max_readahead/max_write 调优；条带聚合预取；大 I/O 合并；并发度调优。
-Gate：fuser 框架内单客户端顺序读 ≥ 裸盘 40%。
+**P19 · Client performance I** (2 wks)
+FUSE writeback cache + max_readahead/max_write tuning; stripe-aligned prefetch;
+large-I/O coalescing; concurrency tuning.
+Gate: single-client seq read ≥ 40% of raw device inside the fuser framework.
 
-**P20 · 客户端性能 II**（4 周）
-本地 chunk 读缓存 + **FUSE passthrough**（热数据直通，≥6.9）→ **FUSE over io_uring transport**
-（≥6.15；Zig 第一候选落点：无 GC、手工 ring 管理、C ABI 供 Rust 调用）。
-Gate：单客户端顺序读 ≥ 裸盘 70%（FUSE 基线通常 <30%）；小 I/O 延迟 ≤ 裸设备 +50µs。
+**P20 · Client performance II** (4 wks)
+Local chunk read cache + **FUSE passthrough** (hot data shortcut, ≥6.9) → **FUSE
+over io_uring transport** (≥6.15; first Zig candidate: no GC, hand-managed rings,
+C ABI into Rust).
+Gate: single-client seq read ≥ 70% of raw device (typical FUSE baseline <30%);
+small-I/O latency ≤ raw device +50µs.
 
-### 第五段：数据服务（P21–P27）——GPFS 数据管理全套
+### Act 5: data services (P21–P27) — the GPFS data-management set
 
-**P21 · COW 全局快照**（2–3 周）
-log-structured 天然 write-in-free-space → 秒级零拷贝快照；保留策略（最近 N 份/按时间窗）。
-Gate：快照千次无泄漏；快照内数据与打快照时刻逐字节一致。
+**P21 · COW global snapshots** (2–3 wks)
+Log-structured write-in-free-space → instant zero-copy snapshots; retention policy
+(last N / time window).
+Gate: 1000 snapshots, no leaks; snapshot content byte-identical to snapshot time.
 
-**P22 · fileset + 可写克隆**（3 周）
-独立 inode 空间的目录子树 + junction 挂载点；fileset 级快照；快照→可写克隆。
-Gate：fileset 配额/快照独立生效；克隆写不污染原快照。
+**P22 · Filesets + writable clones** (3 wks)
+Directory subtrees with independent inode space + junction mountpoints; fileset-level
+snapshots; snapshot → writable clone.
+Gate: fileset quotas/snapshots act independently; clone writes never touch the source snapshot.
 
-**P23 · 三级配额**（2 周）
-user/group/fileset 配额；软/硬限制 + grace time；配额记账崩溃可恢复。
-Gate：超限写入被拒且不误伤未超限用户；grace 过期软限转硬限。
+**P23 · Three-level quotas** (2 wks)
+user/group/fileset quotas; soft/hard limits + grace time; crash-safe quota accounting.
+Gate: over-limit writes rejected without hurting under-limit users; expired grace
+turns soft into hard.
 
-**P24 · NFSv4 ACL**（2–3 周）
-NFSv4 ACL 模型 + 与 mode bit 双向映射；继承规则；getfacl/setfacl 兼容。
-Gate：ACL 语义测试套件过；与 mode bit 混用行为可预测。
+**P24 · NFSv4 ACLs** (2–3 wks)
+NFSv4 ACL model + bidirectional mode-bit mapping; inheritance rules; getfacl/setfacl compatible.
+Gate: ACL semantic test suite passes; mixed ACL/mode behavior is predictable.
 
-**P25 · 存储池 + 放置策略**（2–3 周）
-chunkserver 分组为 pool（如 nvme/sata）；文件/目录级 pool 指派；新写按池落盘。
-Gate：同文件跨池条带正确；池满只拒该池写。
+**P25 · Storage pools + placement policy** (2–3 wks)
+Chunkservers grouped into pools (e.g. nvme/sata); per-file/directory pool assignment;
+new writes land by pool.
+Gate: cross-pool striping of one file is correct; a full pool only rejects its own writes.
 
-**P26 · ILM 策略引擎**（3–4 周）
-类 mmapplypolicy：规则语言（大小/年龄/池/路径模式）→ 扫描 → 池间迁移/预热/驱逐；
-迁移中文件可正常读写（逐 extent 搬移 + 租约保护）。
-Gate：百万文件扫描迁移零错误；迁移中业务降级 <20%。
+**P26 · ILM policy engine** (3–4 wks)
+mmapplypolicy-style: rule language (size/age/pool/path patterns) → scan → inter-pool
+migration/prefetch/eviction; files stay readable/writable during migration
+(extent-by-extent moves + lease protection).
+Gate: 1M-file scan+migrate zero errors; business degradation during migration <20%.
 
-**P27 · scrub + GC + QoS**（3 周）
-后台 CRC scrub（发现静默损坏→副本修复）；extent GC 回收空洞；mClock 四类队列
-（client/recovery/scrub/migration）限速。
-Gate：scrub/GC 期间业务降级 <25%；注入位翻转 100% 被 scrub 修复。
+**P27 · Scrub + GC + QoS** (3 wks)
+Background CRC scrub (silent-corruption detection → replica repair); extent GC to
+reclaim holes; mClock-style four-class queues (client/recovery/scrub/migration) with throttling.
+Gate: business degradation during scrub/GC <25%; injected bit-flips 100% repaired by scrub.
 
-### 第六段：弹性与运维（P28–P33）——GPFS 运维灵魂
+### Act 6: elasticity & operations (P28–P33) — GPFS's operational soul
 
-**P28 · 在线扩容 + restripe**（3 周）
-在线加 chunkserver/加盘；增量 rebalance（新老文件按新宽度条带化，类 mmrestripefs）；rebalance 限速不伤业务。
-Gate：扩一倍节点后聚合带宽近似线性增长；扩容全程业务在线。
+**P28 · Online expansion + restripe** (3 wks)
+Add chunkservers/disks online; incremental rebalance (new files stripe at the new
+width, mmrestripefs-style); throttled so it never hurts the business.
+Gate: doubling nodes ~linearly grows aggregate bandwidth; business stays online throughout.
 
-**P29 · 在线缩容 + 排水退役**（2–3 周）
-节点/盘排水（drain）：数据迁出 → 标记只读 → 摘除；等价 mmdeldisk。
-Gate：排水过程零数据不可用窗口。
+**P29 · Online shrink + drain & retire** (2–3 wks)
+Node/disk drain: data migrated out → marked read-only → removed; mmdeldisk equivalent.
+Gate: zero data-unavailability windows during a drain.
 
-**P30 · declustered 副本重建**（2–3 周）
-盘/节点故障后副本欠额检测 → 全池并行重建（declustered）→ 自动恢复额定副本数；重建限速。
-Gate：杀一块盘后副本自动恢复；重建期间业务降级 <30%。
+**P30 · Declustered replica rebuild** (2–3 wks)
+Detect under-replication after disk/node failure → pool-wide parallel rebuild
+(declustered) → auto-restore target replica count; rebuild throttling.
+Gate: replicas auto-heal after killing a disk; business degradation during rebuild <30%.
 
-**P31 · porfs-fsck**（3 周）
-在线巡检（只读一致性检查）+ 离线修复（目录树/inode/extent 映射/配额账本）；等价 mmfsck。
-Gate：注入 20 类损坏（孤儿 inode、断链目录、错配额等）全部检出并可修复。
+**P31 · porfs-fsck** (3 wks)
+Online read-only consistency inspection + offline repair (directory tree/inodes/
+extent maps/quota ledgers); mmfsck equivalent.
+Gate: 20 injected corruption classes (orphan inodes, broken directory links, wrong
+quotas, ...) all detected and repairable.
 
-**P32 · 滚动升级**（2 周）
-协议版本协商（min-common-version）；N-1→N 在线升级演练；盘格式版本门（改格式先升 format.md）。
-Gate：混合版本集群跑满负载零错误；逐台升级业务无感知。
+**P32 · Rolling upgrades** (2 wks)
+Protocol version negotiation (min-common-version); N-1→N online upgrade drills;
+on-disk format version gate (format.md bumps first).
+Gate: mixed-version cluster at full load, zero errors; node-by-node upgrades invisible to the business.
 
-**P33 · 备份与恢复**（2–3 周）
-快照一致性点导出 + 增量清单（类 mmbackup 思路，对接 restic/rsync/tar）；全量+增量恢复演练。
-Gate：备份→灾难恢复 RTO/RPO 达标并写进运维手册。
+**P33 · Backup & restore** (2–3 wks)
+Snapshot-consistent export + incremental manifests (mmbackup-style, integrates
+restic/rsync/tar); full+incremental restore drills.
+Gate: backup→disaster-restore RTO/RPO documented in the ops manual and met.
 
-### 第七段：v1.0 封版（P34）
+### Act 7: v1.0 freeze (P34)
 
-**P34 · v1.0 封版（Gate 阶段）**（2 周）
-运维手册（安装/升级/回滚/巡检/故障处置）；长稳 30 天；安全基线审计。
-Gate：按手册由非作者完成一次部署 + 一次故障处置。
+**P34 · v1.0 freeze (gate phase)** (2 wks)
+Ops manual (install/upgrade/rollback/inspection/incident response); 30-day
+long-haul; security baseline audit.
+Gate: a non-author deploys once and handles one incident, manual only.
 
-### 第八段：企业与生态（P35–P40）——对齐 GPFS 高级基本盘，全部承诺交付
+### Act 8: enterprise & ecosystem (P35–P40) — GPFS's advanced base, all committed
 
-**P35 · EC 8+2 冷池 + DoM 小文件**（4–6 周）
-容量池纠删码（`reed-solomon-simd`，8+2 起步，接口预留 LDC 宽条带）；≤1MB 小文件随元数据存放免数据路径（DoM）。
-Gate：EC 池读带宽 ≥ 单盘 6×；杀任意 2 盘零丢失。
+**P35 · EC 8+2 cold pool + DoM small files** (4–6 wks)
+Erasure coding for capacity pools (`reed-solomon-simd`, 8+2 first, interfaces ready
+for LDC wide stripes); ≤1MB small files stored with metadata, skipping the data path (DoM).
+Gate: EC pool read bandwidth ≥ 6× single disk; killing any 2 disks loses nothing.
 
-**P36 · 加密**（3 周）
-at-rest：per-fileset AES-256-XTS（RustCrypto），密钥外置（KMS 对接）；传输：RPC 全链路 TLS。
-Gate：加密池性能降级 <15%；拔盘数据不可读。
+**P36 · Encryption** (3 wks)
+At rest: per-fileset AES-256-XTS (RustCrypto), keys external (KMS integration);
+in transit: TLS on all RPC.
+Gate: encrypted-pool performance hit <15%; a pulled disk is unreadable.
 
-**P37 · 异步压缩/去重**（3–4 周）
-容量池后台 zstd 压缩 + 指纹去重（永在写延迟路径外）；per-pool 开关。
-Gate：可压缩数据集容量节省 ≥1.8×；写路径零回归。
+**P37 · Async compression/dedup** (3–4 wks)
+Background zstd compression + fingerprint dedup on capacity pools (never on the
+write latency path); per-pool switches.
+Gate: ≥1.8× capacity saving on compressible datasets; zero write-path regression.
 
-**P38 · WORM/不可变文件**（2 周）
-immutability + retention period（类 mmchattr --immutable）；合规删除审计日志。
-Gate：retention 内任何路径（含 root）无法改/删；过期可删。
+**P38 · WORM/immutable files** (2 wks)
+Immutability + retention period (mmchattr --immutable style); compliant delete audit log.
+Gate: no path (including root) can modify/delete inside retention; deletable after expiry.
 
-**P39 · 多集群 + AFM**（5–7 周）
-远程挂载另一集群命名空间（GPFS multi-cluster 对齐）+ AFM 式站点读写缓存（异步预热、断网可写回）。
-Gate：跨集群读缓存命中后走本地带宽；断网写恢复后一致性校验零错误；语义文档化。
+**P39 · Multi-cluster + AFM** (5–7 wks)
+Remote-mount another cluster's namespace (GPFS multi-cluster parity) + AFM-style
+site read/write caching (async prefetch, disconnected write-back).
+Gate: cross-cluster reads run at local bandwidth after cache hits; post-outage write
+recovery verifies zero errors; semantics documented.
 
-**P40 · 生态与硬件终章**（可并行拆分）
-NFSv4/S3 网关（`nfsserve`/`s3s` 库打底，CES 对齐；SMB 不做——无成熟 Rust 库且非目标市场）+
-RDMA/零拷贝数据面（Zig 第二落点）。
-MDS 分片是全路线图唯一"预案"项：>50 节点才启动，不属于 GPFS 对齐的基本盘。
+**P40 · Ecosystem & hardware finale** (parallelizable)
+NFSv4/S3 gateways (`nfsserve`/`s3s` crates as the base, CES parity; SMB dropped — no
+mature Rust library and not our market) + RDMA/zero-copy data plane (second Zig
+candidate). MDS sharding is the roadmap's only "contingency" item: it starts only
+past 50 nodes and is not part of GPFS-parity basics.
 
-## 3. 产能与纪律
+## 3. Capacity & discipline
 
-- P1–P34 合计约 14–20 个月（每周 10–15h）；全职约 6–8 个月。P35–P40 全部承诺交付，排序按真实需求。
-- 每个 Gate 不过就不进下一阶段；P6/P13/P18/P34 是"要不要继续"的决策点。
-- 人手（AI agent 配额）增加时，第五/六段内部可适度并行（P21–P33 多为正交子系统）。
-- 改盘格式前先改 `docs/format.md` 并升 version——格式是契约，代码是仆从。
+- P1–P34 total ≈ 14–20 months (10–15h/week); ≈ 6–8 months full-time. P35–P40 are all
+  committed, ordered by real demand.
+- No phase starts before the previous gate passes; P6/P13/P18/P34 are the
+  "do we continue" decision points.
+- With more hands (AI agent quota), acts 5–6 may parallelize internally
+  (P21–P33 are mostly orthogonal subsystems).
+- Format changes edit `docs/format.md` and bump the version first — the format is
+  the contract, code is its servant.
 
-## 4. 当前行动
+## 4. Current actions
 
-1. ✅ 仓库清理、ROADMAP v6、P1（format v0 + extent store + bench + fio 基线）
-2. 下一步：**P2 · WAL + 组提交 + 崩溃恢复**
+1. ✅ Repo cleanup, ROADMAP v6, P1 (format v0 + extent store + bench + fio baseline)
+2. ✅ P2 (format v2: checkpoints + group commit + crash harness; 1000× kill -9 clean)
+3. Next: **P3 · MDS v0** (persistence decision: redb vs extent-store-backed)
