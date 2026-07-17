@@ -12,6 +12,7 @@ thiserror.workspace = true
 redb = "4"
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
+twox-hash = "2"
 
 [dev-dependencies]
 tempfile.workspace = true

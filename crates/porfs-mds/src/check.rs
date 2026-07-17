@@ -1,8 +1,8 @@
 //! Consistency verification over the metadata tables and the store index:
-//! `self_check` is the offline-fsck-style pass the P3 gate runs after every
-//! (clean or crashed) remount. It detects; it does not repair — the only
-//! repair in v0 is the mount-time reconcile in `Mds::open`, whose count is
-//! reported here as `orphans_repaired`.
+//! `self_check` is the offline-fsck-style pass the crash-recovery gates run
+//! after every (clean or crashed) remount. It detects; it does not repair —
+//! the only repair is the mount-time reconcile in `Mds::open`, whose count
+//! is reported here as `orphans_repaired`.
 
 use std::collections::HashMap;
 
@@ -10,20 +10,26 @@ use redb::{ReadableDatabase, ReadableTable};
 
 use crate::error::{MdsError, Result, dberr};
 use crate::keys::{
-    DIR_ENTRIES, FILE_EXTENTS, INODES, decode_extent_key, decode_extent_value, decode_rec, ino_key,
+    DIR_ENTRIES, FILE_EXTENTS, INODES, XATTRS, decode_extent_key, decode_extent_value, decode_rec,
+    ino_key,
 };
 use crate::mds::Mds;
-use crate::types::{CheckReport, Ino, NodeKind, ROOT_INO};
+use crate::types::{CheckReport, Ino, MAX_SYMLINK_LEN, NodeKind, ROOT_INO};
 
 impl Mds {
     /// Verify metadata consistency and count the live objects:
     ///
     /// 1. every directory entry's child inode exists;
     /// 2. every non-root directory has exactly one parent entry and
-    ///    `nlink == 1`; every file's `nlink` equals its directory-entry count;
+    ///    `nlink == 1`; every non-directory inode's `nlink` equals its
+    ///    directory-entry count;
     /// 3. every `file_extents` row belongs to a live **file** inode;
     /// 4. every mapped extent exists in the store index and is not
-    ///    tombstoned.
+    ///    tombstoned;
+    /// 5. symlink records carry a target within the length cap, non-
+    ///    symlinks carry none; `rdev` is nonzero-capable only on device
+    ///    nodes;
+    /// 6. every `xattrs` row belongs to a live inode.
     ///
     /// The first failure returns [`MdsError::Corrupt`]; success returns the
     /// counts. Takes `&mut self` (rather than `&self`) because pass 4 probes
@@ -34,14 +40,15 @@ impl Mds {
             orphans_repaired: self.last_reconcile_repairs,
             ..CheckReport::default()
         };
-        // Passes 1-3 run in one read snapshot; pass 4 needs `&mut self.store`
-        // (read path), so the snapshot is dropped first.
+        // Passes 1-3 and 5-6 run in one read snapshot; pass 4 needs
+        // `&mut self.store` (read path), so the snapshot is dropped first.
         let mut mapped: Vec<(Ino, u64)> = Vec::new();
         {
             let txn = self.db.begin_read().map_err(dberr)?;
             let inodes = txn.open_table(INODES).map_err(dberr)?;
             let entries = txn.open_table(DIR_ENTRIES).map_err(dberr)?;
             let fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let xattrs = txn.open_table(XATTRS).map_err(dberr)?;
 
             let mut refs: HashMap<Ino, u32> = HashMap::new();
             for item in entries.iter().map_err(dberr)? {
@@ -61,6 +68,7 @@ impl Mds {
                 report.inodes += 1;
                 let ino = Ino::from_be_bytes(*key.value());
                 let rec = decode_rec(value.value())?;
+                check_rec_shape(ino, &rec)?;
                 if ino == ROOT_INO {
                     if rec.kind != NodeKind::Dir {
                         return Err(MdsError::Corrupt(
@@ -70,28 +78,23 @@ impl Mds {
                     continue; // the root has no parent entry by definition
                 }
                 let count = refs.get(&ino).copied().unwrap_or(0);
-                match rec.kind {
-                    NodeKind::Dir => {
-                        if count != 1 {
-                            return Err(MdsError::Corrupt(format!(
-                                "dir ino {ino} has {count} parent entries, want 1"
-                            )));
-                        }
-                        if rec.nlink != 1 {
-                            return Err(MdsError::Corrupt(format!(
-                                "dir ino {ino} has nlink {}, want 1",
-                                rec.nlink
-                            )));
-                        }
+                if rec.kind == NodeKind::Dir {
+                    if count != 1 {
+                        return Err(MdsError::Corrupt(format!(
+                            "dir ino {ino} has {count} parent entries, want 1"
+                        )));
                     }
-                    NodeKind::File => {
-                        if rec.nlink != count {
-                            return Err(MdsError::Corrupt(format!(
-                                "file ino {ino} has nlink {} but {count} dir entries",
-                                rec.nlink
-                            )));
-                        }
+                    if rec.nlink != 1 {
+                        return Err(MdsError::Corrupt(format!(
+                            "dir ino {ino} has nlink {}, want 1",
+                            rec.nlink
+                        )));
                     }
+                } else if rec.nlink != count {
+                    return Err(MdsError::Corrupt(format!(
+                        "ino {ino} has nlink {} but {count} dir entries",
+                        rec.nlink
+                    )));
                 }
             }
 
@@ -116,6 +119,26 @@ impl Mds {
                 }
                 mapped.push((ino, extent_id));
             }
+
+            for item in xattrs.iter().map_err(dberr)? {
+                let (key, _value) = item.map_err(dberr)?;
+                report.xattrs += 1;
+                let key = key.value();
+                if key.len() < 8 {
+                    return Err(MdsError::Corrupt(format!(
+                        "xattrs key is {} bytes, expected at least 8",
+                        key.len()
+                    )));
+                }
+                let ino = Ino::from_be_bytes(key[..8].try_into().map_err(|_| {
+                    MdsError::Corrupt("xattrs key ino slice is not 8 bytes".to_string())
+                })?);
+                if inodes.get(&ino_key(ino)).map_err(dberr)?.is_none() {
+                    return Err(MdsError::Corrupt(format!(
+                        "xattr row references missing ino {ino}"
+                    )));
+                }
+            }
         }
 
         for (ino, extent_id) in mapped {
@@ -127,4 +150,44 @@ impl Mds {
         }
         Ok(report)
     }
+}
+
+/// Per-record shape invariants: symlink target presence/length and `rdev`
+/// placement by kind.
+fn check_rec_shape(ino: Ino, rec: &crate::types::InodeRec) -> Result<()> {
+    match rec.kind {
+        NodeKind::Symlink => {
+            let target = rec
+                .link_target
+                .as_ref()
+                .ok_or_else(|| MdsError::Corrupt(format!("symlink ino {ino} has no target")))?;
+            if target.is_empty() || target.len() > MAX_SYMLINK_LEN {
+                return Err(MdsError::Corrupt(format!(
+                    "symlink ino {ino} target is {} bytes, want 1..={MAX_SYMLINK_LEN}",
+                    target.len()
+                )));
+            }
+            if rec.size != target.len() as u64 {
+                return Err(MdsError::Corrupt(format!(
+                    "symlink ino {ino} size {} != target length {}",
+                    rec.size,
+                    target.len()
+                )));
+            }
+        }
+        _ => {
+            if rec.link_target.is_some() {
+                return Err(MdsError::Corrupt(format!(
+                    "non-symlink ino {ino} carries a link target"
+                )));
+            }
+        }
+    }
+    if !matches!(rec.kind, NodeKind::Chr | NodeKind::Blk) && rec.rdev != 0 {
+        return Err(MdsError::Corrupt(format!(
+            "non-device ino {ino} has rdev {:#x}",
+            rec.rdev
+        )));
+    }
+    Ok(())
 }

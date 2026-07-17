@@ -20,8 +20,9 @@ use porfs_store::{ExtentId, ExtentStore, StoreError};
 
 use crate::error::{MdsError, Result, dberr};
 use crate::keys::{
-    DIR_ENTRIES, FILE_EXTENTS, INODES, META, NEXT_INO_KEY, decode_extent_key, decode_extent_value,
-    decode_rec, dirent_bounds, dirent_key, encode_rec, extent_bounds, extent_key, ino_key,
+    DIR_ENTRIES, FILE_EXTENTS, INODES, MDS_SCHEMA_VERSION, META, NEXT_INO_KEY, SCHEMA_VERSION_KEY,
+    XATTRS, decode_dirent_name, decode_extent_key, decode_extent_value, decode_rec, dirent_bounds,
+    dirent_hash_bounds, encode_rec, extent_bounds, extent_key, ino_key, name_hash,
 };
 use crate::types::{Ino, InodeRec, MAX_NAME_LEN, NodeKind, ROOT_INO, Statfs};
 
@@ -87,12 +88,15 @@ impl Mds {
             // opened, and every read path assumes the schema exists.
             txn.open_table(DIR_ENTRIES).map_err(dberr)?;
             txn.open_table(FILE_EXTENTS).map_err(dberr)?;
-            let root = InodeRec::new(NodeKind::Dir, 0o755, now_ts());
+            txn.open_table(XATTRS).map_err(dberr)?;
+            let root = InodeRec::new(NodeKind::Dir, 0o755, 0, 0, now_ts());
             let root_bytes = encode_rec(&root)?;
             inodes
                 .insert(&ino_key(ROOT_INO), root_bytes.as_slice())
                 .map_err(dberr)?;
             meta.insert(NEXT_INO_KEY, ROOT_INO + 1).map_err(dberr)?;
+            meta.insert(SCHEMA_VERSION_KEY, MDS_SCHEMA_VERSION)
+                .map_err(dberr)?;
         }
         txn.commit().map_err(dberr)?;
         Ok(Self {
@@ -111,6 +115,7 @@ impl Mds {
     pub fn open(meta_path: impl AsRef<Path>, data_path: impl AsRef<Path>) -> Result<Self> {
         let store = ExtentStore::open(data_path)?;
         let db = Database::open(meta_path.as_ref()).map_err(dberr)?;
+        check_schema_version(&db, meta_path.as_ref())?;
         let mut mds = Self {
             db,
             store,
@@ -248,6 +253,33 @@ pub(crate) fn now_ts() -> (i64, u32) {
         .map_or((0, 0), |d| (d.as_secs() as i64, d.subsec_nanos()))
 }
 
+/// Enforce the metadata schema version on open: an absent version key marks
+/// a pre-P5 legacy database, and any other value marks a newer/older
+/// incompatible schema. Both are rejected with a clear error (dev-box
+/// precedent, same as the v0->v2 extent-format rejection).
+fn check_schema_version(db: &Database, meta_path: &Path) -> Result<()> {
+    let txn = db.begin_read().map_err(dberr)?;
+    let meta = txn.open_table(META).map_err(dberr)?;
+    let version = meta
+        .get(SCHEMA_VERSION_KEY)
+        .map_err(dberr)?
+        .map(|v| v.value());
+    match version {
+        None => Err(MdsError::UnsupportedSchema(format!(
+            "{} has no schema_version row: legacy (pre-P5) metadata layout; \
+             re-format (the dev-box layout changed: hash-ordered dir entries, \
+             xattrs, symlink/special inodes)",
+            meta_path.display()
+        ))),
+        Some(v) if v != MDS_SCHEMA_VERSION => Err(MdsError::UnsupportedSchema(format!(
+            "{} has metadata schema version {v}, this build supports {MDS_SCHEMA_VERSION}; \
+             re-format",
+            meta_path.display()
+        ))),
+        Some(_) => Ok(()),
+    }
+}
+
 /// POSIX name rules: nonempty, at most 255 bytes, no `/`, not `.` or `..`.
 fn name_is_valid(name: &str) -> bool {
     !name.is_empty()
@@ -259,6 +291,9 @@ fn name_is_valid(name: &str) -> bool {
 
 /// Validate a single path component.
 pub(crate) fn validate_name(name: &str) -> Result<()> {
+    if name.len() > MAX_NAME_LEN {
+        return Err(MdsError::NameTooLong(name.len()));
+    }
     if name_is_valid(name) {
         Ok(())
     } else {
@@ -287,18 +322,26 @@ pub(crate) fn require_dir(rec: &InodeRec, ino: Ino) -> Result<()> {
     }
 }
 
-/// Resolve a directory entry to its child inode.
+/// Resolve a directory entry to its child inode. The key is
+/// `parent | hash(name) | name`; the lookup scans the hash prefix (the
+/// collision class) and compares the full-name suffix, so same-hash
+/// different-name entries coexist.
 pub(crate) fn entry_child(
     entries: &impl ReadableTable<&'static [u8], &'static [u8; 8]>,
     parent: Ino,
     name: &str,
 ) -> Result<Ino> {
-    let key = dirent_key(parent, name);
-    let guard = entries
-        .get(key.as_slice())
-        .map_err(dberr)?
-        .ok_or_else(|| MdsError::NotFound(format!("{name:?} under ino {parent}")))?;
-    Ok(Ino::from_be_bytes(*guard.value()))
+    let (start, end) = dirent_hash_bounds(parent, name_hash(name));
+    let range = entries
+        .range(start.as_slice()..end.as_slice())
+        .map_err(dberr)?;
+    for item in range {
+        let (key, value) = item.map_err(dberr)?;
+        if decode_dirent_name(key.value())? == name {
+            return Ok(Ino::from_be_bytes(*value.value()));
+        }
+    }
+    Err(MdsError::NotFound(format!("{name:?} under ino {parent}")))
 }
 
 /// True when directory `ino` has no entries.

@@ -29,8 +29,8 @@ fn run_mds_check(meta: &std::path::Path, data: &std::path::Path) -> Output {
 fn mds_check_healthy_mds() {
     let dir = test_dir();
     let mut mds = format_mds(dir.path());
-    let d = mds.mkdir(ROOT_INO, "d", 0o755).unwrap();
-    let f = mds.create(d, "hello", 0o644).unwrap();
+    let d = mds.mkdir(ROOT_INO, "d", 0o755, 0, 0).unwrap();
+    let f = mds.create(d, "hello", 0o644, 0, 0).unwrap();
     mds.write(f, 0, b"world").unwrap();
     mds.fsync(f).unwrap();
     drop(mds);

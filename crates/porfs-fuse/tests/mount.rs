@@ -89,7 +89,14 @@ impl MountGuard {
     /// (after a note) when the kernel rejects the mount — treated as a skip.
     fn mount(mds_dir: &Path, mountpoint: &Path) -> Option<Self> {
         let (meta, data) = pair(mds_dir);
-        let fs = match PorfsFs::open(&meta, &data, MountConfig::default()) {
+        // default_permissions off: the tests run as the dev user while
+        // inodes report uid 0, and these tests verify storage semantics,
+        // not enforcement (enforcement is pjdfstest's job, run as root).
+        let config = MountConfig {
+            default_permissions: false,
+            ..MountConfig::default()
+        };
+        let fs = match PorfsFs::open(&meta, &data, config) {
             Ok(fs) => fs,
             Err(err) => {
                 eprintln!("skipping: MDS open failed: {err}");
@@ -110,29 +117,68 @@ impl MountGuard {
         }
     }
 
-    /// Unmount now (idempotent; Drop covers panic paths). A leaked open fd
-    /// makes the plain unmount fail with EBUSY and the session join below
-    /// would then block forever, so a busy mountpoint is force-detached
-    /// lazily — exactly what a real admin does with `fusermount -uz`.
+    /// Unmount now (idempotent; Drop covers panic paths).
     fn unmount(mut self) {
         if let Some(session) = self.session.take() {
-            if !fusermount(&self.mountpoint, &["-u"]) {
-                let _ = fusermount(&self.mountpoint, &["-u", "-z"]);
-            }
-            let _ = session.umount_and_join();
+            teardown(session, &self.mountpoint);
         }
     }
+}
+
+/// A leaked open fd makes the plain unmount fail with EBUSY and the
+/// session join would then block forever (a lazy detach keeps the FUSE
+/// connection alive until every fd closes — and a panicking test unwinds
+/// past its `close` calls). So on EBUSY first close any fds this process
+/// still holds under the mountpoint, retry, and only then fall back to a
+/// lazy detach — exactly what a real admin does with `fusermount -uz`.
+fn teardown(session: BackgroundSession, mountpoint: &Path) {
+    if !fusermount(mountpoint, &["-u"]) {
+        let leaked = close_leaked_fds(mountpoint);
+        if leaked > 0 {
+            eprintln!(
+                "porfs-test: closed {leaked} leaked fd(s) under {}",
+                mountpoint.display()
+            );
+        }
+        if !fusermount(mountpoint, &["-u"]) {
+            let _ = fusermount(mountpoint, &["-u", "-z"]);
+        }
+    }
+    let _ = session.umount_and_join();
+}
+
+/// Close every fd this process still holds inside `mp`, returning how
+/// many were closed (see [`teardown`]).
+fn close_leaked_fds(mp: &Path) -> usize {
+    let mut fds = Vec::new();
+    if let Ok(dir) = fs::read_dir("/proc/self/fd") {
+        for entry in dir.flatten() {
+            let Ok(target) = fs::read_link(entry.path()) else {
+                continue;
+            };
+            if target.starts_with(mp) {
+                if let Some(fd) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.parse::<i32>().ok())
+                {
+                    fds.push(fd);
+                }
+            }
+        }
+    }
+    for fd in &fds {
+        unsafe { libc::close(*fd) };
+    }
+    fds.len()
 }
 
 impl Drop for MountGuard {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
-            if !fusermount(&self.mountpoint, &["-u"]) {
-                let _ = fusermount(&self.mountpoint, &["-u", "-z"]);
-            }
-            let _ = session.umount_and_join();
+            teardown(session, &self.mountpoint);
+            let _ = fusermount(&self.mountpoint, &["-u"]);
         }
-        let _ = fusermount(&self.mountpoint, &["-u"]);
     }
 }
 
@@ -443,4 +489,252 @@ fn remount_preserves_tree_and_data() {
     let mut mds = porfs_mds::Mds::open(&meta, &data).unwrap();
     let report = mds.self_check().unwrap();
     assert_eq!(report.inodes, 5); // root, dir, sub, a.bin, b.bin
+}
+
+// ---- P5: xattr / symlink / mknod / seek / punch-hole / durability ----
+
+use std::ffi::CString;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::FileTypeExt;
+
+fn cpath(p: &Path) -> CString {
+    CString::new(p.as_os_str().as_bytes()).unwrap()
+}
+
+fn cname(n: &str) -> CString {
+    CString::new(n).unwrap()
+}
+
+#[test]
+fn xattr_roundtrip_and_flags() {
+    if !require_mount("xattr_roundtrip_and_flags") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let file = fx.mp.join("f");
+    fs::write(&file, b"x").unwrap();
+    let path = cpath(&file);
+    unsafe {
+        let name = cname("user.alpha");
+        assert_eq!(
+            libc::setxattr(path.as_ptr(), name.as_ptr(), b"one".as_ptr().cast(), 3, 0),
+            0
+        );
+        // XATTR_CREATE on an existing name: EEXIST.
+        assert_eq!(
+            libc::setxattr(path.as_ptr(), name.as_ptr(), b"two".as_ptr().cast(), 3, 1),
+            -1
+        );
+        assert_eq!(*libc::__errno_location(), libc::EEXIST);
+        // XATTR_REPLACE on a missing name: ENODATA.
+        let missing = cname("user.missing");
+        assert_eq!(
+            libc::setxattr(path.as_ptr(), missing.as_ptr(), b"v".as_ptr().cast(), 1, 2),
+            -1
+        );
+        assert_eq!(*libc::__errno_location(), libc::ENODATA);
+        // Size query (buf null, size 0), then read.
+        let need = libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0);
+        assert_eq!(need, 3);
+        let mut buf = [0u8; 8];
+        let got = libc::getxattr(path.as_ptr(), name.as_ptr(), buf.as_mut_ptr().cast(), 8);
+        assert_eq!(got, 3);
+        assert_eq!(&buf[..3], b"one");
+        // listxattr: size query then list.
+        let lneed = libc::listxattr(path.as_ptr(), std::ptr::null_mut(), 0);
+        assert!(lneed > 0);
+        let mut lbuf = vec![0u8; lneed as usize];
+        assert_eq!(
+            libc::listxattr(path.as_ptr(), lbuf.as_mut_ptr().cast(), lneed as usize),
+            lneed
+        );
+        assert!(lbuf.windows(10).any(|w| w == b"user.alpha"));
+        // removexattr; a second remove reports ENODATA.
+        assert_eq!(libc::removexattr(path.as_ptr(), name.as_ptr()), 0);
+        assert_eq!(libc::removexattr(path.as_ptr(), name.as_ptr()), -1);
+        assert_eq!(*libc::__errno_location(), libc::ENODATA);
+    }
+    fx.guard.unmount();
+}
+
+#[test]
+fn symlink_and_readlink() {
+    if !require_mount("symlink_and_readlink") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    fs::write(fx.mp.join("target"), b"data").unwrap();
+    std::os::unix::fs::symlink("target", fx.mp.join("link")).unwrap();
+    assert_eq!(
+        fs::read_link(fx.mp.join("link")).unwrap(),
+        Path::new("target")
+    );
+    assert!(
+        fs::symlink_metadata(fx.mp.join("link"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    // Reads through the link reach the target.
+    assert_eq!(fs::read(fx.mp.join("link")).unwrap(), b"data");
+    fx.guard.unmount();
+}
+
+#[test]
+fn mknod_fifo_and_socket() {
+    if !require_mount("mknod_fifo_and_socket") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let fifo = cpath(&fx.mp.join("pipe"));
+    let sock = cpath(&fx.mp.join("sock"));
+    unsafe {
+        assert_eq!(libc::mkfifo(fifo.as_ptr(), 0o640), 0);
+        let mode = libc::mknod(sock.as_ptr(), libc::S_IFSOCK | 0o640, 0);
+        assert_eq!(mode, 0);
+    }
+    let meta = fs::metadata(fx.mp.join("pipe")).unwrap();
+    assert!(meta.file_type().is_fifo());
+    assert_eq!(meta.mode() & 0o777, 0o640);
+    assert!(
+        fs::metadata(fx.mp.join("sock"))
+            .unwrap()
+            .file_type()
+            .is_socket()
+    );
+    fx.guard.unmount();
+}
+
+#[test]
+fn seek_data_and_hole() {
+    if !require_mount("seek_data_and_hole") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let file = fx.mp.join("sparse");
+    {
+        let mut f = fs::File::create(&file).unwrap();
+        f.write_all(&[0xAA; 4096]).unwrap();
+        f.seek(SeekFrom::Start(1 << 20)).unwrap();
+        f.write_all(&[0xBB; 4096]).unwrap();
+    }
+    let path = cpath(&file);
+    unsafe {
+        let fd = libc::open(path.as_ptr(), libc::O_RDONLY);
+        assert!(fd >= 0);
+        // Offset 0 is inside the first block: SEEK_DATA = 0.
+        assert_eq!(libc::lseek(fd, 0, 3), 0);
+        // SEEK_HOLE from 0: the gap starts right after the first block.
+        assert_eq!(libc::lseek(fd, 0, 4), 4096);
+        // Inside the gap: SEEK_DATA jumps to the second block at 1MiB.
+        assert_eq!(libc::lseek(fd, 100_000, 3), 1 << 20);
+        // SEEK_HOLE inside the gap is the position itself.
+        assert_eq!(libc::lseek(fd, 100_000, 4), 100_000);
+        // Past the last block: no more data -> ENXIO.
+        let eof_data = libc::lseek(fd, (1 << 20) + 4096, 3);
+        assert_eq!(eof_data, -1);
+        assert_eq!(*libc::__errno_location(), libc::ENXIO);
+        assert_eq!(libc::close(fd), 0);
+    }
+    fx.guard.unmount();
+}
+
+#[test]
+fn punch_hole_zeroes_range() {
+    if !require_mount("punch_hole_zeroes_range") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let file = fx.mp.join("dense");
+    let content: Vec<u8> = (0..(1 << 20)).map(|i| (i % 251) as u8).collect();
+    fs::write(&file, &content).unwrap();
+    let path = cpath(&file);
+    unsafe {
+        let fd = libc::open(path.as_ptr(), libc::O_RDWR);
+        assert!(fd >= 0);
+        // PUNCH_HOLE|KEEP_SIZE over [256KiB, 768KiB).
+        assert_eq!(libc::fallocate(fd, 3, 256 << 10, 512 << 10), 0);
+        assert_eq!(libc::close(fd), 0);
+    }
+    let after = fs::read(&file).unwrap();
+    assert_eq!(after.len(), content.len()); // size unchanged
+    assert_eq!(&after[..(256 << 10)], &content[..(256 << 10)]);
+    assert!(after[(256 << 10)..(768 << 10)].iter().all(|b| *b == 0));
+    assert_eq!(&after[(768 << 10)..], &content[(768 << 10)..]);
+    fx.guard.unmount();
+}
+
+#[test]
+fn fsync_and_fdatasync_through_mount() {
+    if !require_mount("fsync_and_fdatasync_through_mount") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let a = fs::File::create(fx.mp.join("a")).unwrap();
+    a.sync_all().unwrap();
+    let b = fs::File::create(fx.mp.join("b")).unwrap();
+    b.sync_data().unwrap();
+    drop(a);
+    drop(b);
+    fx.guard.unmount();
+}
+
+#[test]
+fn clean_unmount_flushes_unfsynced_data() {
+    if !require_mount("clean_unmount_flushes_unfsynced_data") {
+        return;
+    }
+    let mds_dir = test_dir();
+    format_mds(mds_dir.path());
+    let content = b"never fsynced, must still survive a polite unmount";
+    {
+        let mp_dir = test_dir();
+        let Some(guard) = MountGuard::mount(mds_dir.path(), mp_dir.path()) else {
+            return;
+        };
+        // No fsync on purpose: a clean unmount is a durability barrier.
+        fs::write(mp_dir.path().join("f"), content).unwrap();
+        guard.unmount();
+    }
+    {
+        let mp_dir = test_dir();
+        let Some(guard) = MountGuard::mount(mds_dir.path(), mp_dir.path()) else {
+            return;
+        };
+        assert_eq!(fs::read(mp_dir.path().join("f")).unwrap(), content);
+        guard.unmount();
+    }
+    let (meta, data) = pair(mds_dir.path());
+    let mds = porfs_mds::Mds::open(&meta, &data).unwrap();
+    assert_eq!(mds.last_reconcile_repairs(), 0);
+}
+
+#[test]
+fn statfs_reports_device_geometry() {
+    if !require_mount("statfs_reports_device_geometry") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let path = cpath(&fx.mp);
+    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+    assert_eq!(unsafe { libc::statfs(path.as_ptr(), &mut stats) }, 0);
+    // f_blocks counts frsize-sized blocks: total must equal the device size.
+    assert_eq!(stats.f_bsize as u64, 4096);
+    assert_eq!(stats.f_blocks * stats.f_bsize as u64, DEV_SIZE);
+    assert!(stats.f_bfree < stats.f_blocks);
+    fx.guard.unmount();
+}
+
+#[test]
+fn overlong_name_is_enametoolong() {
+    if !require_mount("overlong_name_is_enametoolong") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let long = "x".repeat(256);
+    let err = fs::write(fx.mp.join(&long), b"").unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(libc::ENAMETOOLONG));
+    let err = fs::rename(fx.mp.join(&long), fx.mp.join("b")).unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(libc::ENAMETOOLONG));
+    fx.guard.unmount();
 }

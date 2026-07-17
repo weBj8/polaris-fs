@@ -7,16 +7,20 @@
 //! Metadata schema (all integers inside keys are big-endian so byte order
 //! equals numeric order — redb range scans depend on it):
 //!
-//! | table          | key                                    | value                          |
-//! |----------------|----------------------------------------|--------------------------------|
-//! | `inodes`       | ino (u64 BE)                           | bincode inode record           |
-//! | `dir_entries`  | parent ino BE ++ name bytes            | child ino (u64 BE)             |
-//! | `file_extents` | ino BE ++ logical offset BE            | extent id BE ++ length BE      |
-//! | `meta`         | `"next_ino"`                           | inode allocation counter       |
+//! | table          | key                                          | value                          |
+//! |----------------|----------------------------------------------|--------------------------------|
+//! | `inodes`       | ino (u64 BE)                                 | bincode inode record           |
+//! | `dir_entries`  | parent ino BE ++ xxhash64(name) BE ++ name   | child ino (u64 BE)             |
+//! | `file_extents` | ino BE ++ logical offset BE                  | extent id BE ++ length BE      |
+//! | `xattrs`       | ino BE ++ attribute name bytes               | value bytes (<= 64 KiB)        |
+//! | `meta`         | `"next_ino"` / `"schema_version"`            | counters                       |
 //!
 //! `file_extents` is an interval map: row `(off) -> (id, len)` covers
 //! `[off, off + len)` of the file with extent `id`; rows of one file never
-//! overlap and holes read back as zeros.
+//! overlap and holes read back as zeros. `dir_entries` is hash-ordered
+//! within a directory (the GPFS extensible-hashing principle; P7+ shards
+//! hash ranges across chunkservers), so `readdir` returns entries in hash
+//! order — POSIX allows any order.
 //!
 //! Durability contract:
 //! - Namespace mutations commit as one redb transaction (durable per commit),
@@ -37,7 +41,12 @@ mod keys;
 mod mds;
 mod namespace;
 mod types;
+mod xattr;
 
 pub use error::{MdsError, Result};
 pub use mds::Mds;
-pub use types::{CheckReport, Ino, InodeAttr, MAX_NAME_LEN, NodeKind, ROOT_INO, SetAttr, Statfs};
+pub use types::{
+    CheckReport, DirEntry, Ino, InodeAttr, MAX_NAME_LEN, MAX_SYMLINK_LEN, MAX_XATTR_NAME_LEN,
+    MAX_XATTR_VALUE_LEN, NodeKind, NodeSpec, ROOT_INO, ReaddirBatch, SetAttr, Statfs, XATTR_CREATE,
+    XATTR_REPLACE,
+};

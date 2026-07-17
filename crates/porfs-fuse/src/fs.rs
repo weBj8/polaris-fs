@@ -2,24 +2,28 @@
 //!
 //! Every handler forwards one job to the MDS worker thread (`worker`
 //! module), mapping inputs and results/errnos mechanically (`map` module).
-//! The only state beyond the MDS itself is `parents`, an in-memory
-//! child->parent inode map fed by successful lookups/creates/renames so
-//! `readdir` can fill in the `..` entry (the MDS stores no parent pointers;
-//! P5's big-directory work may replace this with persistent ones).
+//! State beyond the MDS itself:
+//! - `parents`: an in-memory child->parent inode map fed by successful
+//!   lookups/creates/renames so `readdir` can fill in the `..` entry (the
+//!   MDS stores no parent pointers);
+//! - `dir_states`: per-open-directory stream state for the streaming
+//!   `readdir` (the MDS paginates via continuation cookies; the kernel's
+//!   u64 offsets are synthetic and only 0 means "rewind").
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use fuser::{
-    AccessFlags, BsdFileFlags, Errno, FileHandle, Filesystem, FopenFlags, Generation, INodeNo,
-    LockOwner, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow,
-    WriteFlags,
+    AccessFlags, BsdFileFlags, Errno, FileHandle, FileType, Filesystem, FopenFlags, Generation,
+    INodeNo, LockOwner, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
+    ReplyEmpty, ReplyEntry, ReplyLseek, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request,
+    TimeOrNow, WriteFlags,
 };
-use porfs_mds::{Ino, InodeAttr, Mds, MdsError, NodeKind, ROOT_INO, SetAttr};
+use porfs_mds::{Ino, InodeAttr, MAX_SYMLINK_LEN, Mds, MdsError, NodeKind, ROOT_INO, SetAttr};
 
 use crate::config::MountConfig;
 use crate::map::{errno, file_attr, file_type, from_system_time, perm_bits};
@@ -29,10 +33,48 @@ use crate::worker::Worker;
 /// numbers are never reused, so stale-handle detection needs none).
 const GENERATION: Generation = Generation(0);
 
+/// Entries fetched per MDS roundtrip while streaming a directory. 128
+/// entries keeps a 1M-entry `ls` at ~8k channel hops — sub-second — while
+/// bounding per-call memory.
+const READDIR_BATCH: usize = 128;
+
+/// `mode & S_IFMT` values the kernel passes to `mknod` (stable Linux ABI).
+const S_IFMT: u32 = 0o170000;
+const S_IFREG: u32 = 0o100000;
+const S_IFIFO: u32 = 0o010000;
+const S_IFSOCK: u32 = 0o140000;
+const S_IFCHR: u32 = 0o020000;
+const S_IFBLK: u32 = 0o060000;
+
+/// `lseek` whence values (Linux).
+const SEEK_DATA: i32 = 3;
+const SEEK_HOLE: i32 = 4;
+
+/// `fallocate` mode bits (Linux).
+const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+const FALLOC_FL_PUNCH_HOLE: i32 = 0x02;
+
+/// Stream state of one open directory handle: the raw `dir_entries` key of
+/// the last entry handed to the kernel (the resume cookie), the next
+/// synthetic offset to hand out, and whether the scan is exhausted. The
+/// synthetic offsets only get meaning 0 (rewind), 1 (after "."), 2 (after
+/// ".."); every later offset just says "keep streaming from the cookie" —
+/// `seekdir` to a mid-stream position is not reconstructible, a documented
+/// v1 limitation (POSIX-conformant sequential scans, which is what `ls`,
+/// `find`, and pjdfstest do, are exact).
+#[derive(Default)]
+struct DirState {
+    cookie: Option<Vec<u8>>,
+    next_offset: u64,
+    done: bool,
+}
+
 /// The PolarisFS filesystem exposed to the kernel.
 pub struct PorfsFs {
     worker: Worker,
     parents: Mutex<HashMap<Ino, Ino>>,
+    dir_states: Mutex<HashMap<u64, DirState>>,
+    next_fh: AtomicU64,
     config: MountConfig,
 }
 
@@ -65,6 +107,8 @@ impl PorfsFs {
         Ok(Self {
             worker: Worker::spawn(open)?,
             parents: Mutex::new(HashMap::new()),
+            dir_states: Mutex::new(HashMap::new()),
+            next_fh: AtomicU64::new(1),
             config,
         })
     }
@@ -80,6 +124,11 @@ impl PorfsFs {
         f: impl FnOnce(&mut Mds) -> R + Send + 'static,
     ) -> Result<R, Errno> {
         self.worker.call(f).ok_or(Errno::EIO)
+    }
+
+    /// Allocate a kernel file handle id.
+    fn alloc_fh(&self) -> FileHandle {
+        FileHandle(self.next_fh.fetch_add(1, Ordering::Relaxed))
     }
 
     /// Record (or refresh) the parent of `child` for future `..` entries.
@@ -142,7 +191,31 @@ fn lookup_with_attr(mds: &mut Mds, parent: Ino, name: &str) -> porfs_mds::Result
     Ok((ino, attr))
 }
 
+/// The getxattr/listxattr size-query protocol: with `size == 0` the caller
+/// wants the required buffer size; otherwise the value must fit or the
+/// reply is ERANGE.
+fn reply_xattr(reply: ReplyXattr, size: u32, payload: Vec<u8>) {
+    if size == 0 {
+        reply.size(payload.len() as u32);
+    } else if payload.len() > size as usize {
+        reply.error(Errno::ERANGE);
+    } else {
+        reply.data(&payload);
+    }
+}
+
 impl Filesystem for PorfsFs {
+    /// Clean-unmount barrier: confirm every appended extent (redb commits
+    /// are durable per transaction already), so a remount never has to
+    /// salvage writes that were never fsynced by the application. Without
+    /// this a polite `fusermount3 -u` loses un-fsynced data — legal on
+    /// crash, wrong on clean unmount.
+    fn destroy(&mut self) {
+        if self.call(|mds| mds.fsync(ROOT_INO)).is_err() {
+            eprintln!("porfs: destroy: mds worker gone, unconfirmed tail may be salvaged");
+        }
+    }
+
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let name = match name_string(name) {
             Ok(name) => name,
@@ -204,9 +277,63 @@ impl Filesystem for PorfsFs {
         }
     }
 
+    fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
+        match self.call(move |mds| mds.readlink(ino.0)) {
+            Ok(Ok(target)) => reply.data(target.as_bytes()),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
+    fn mknod(
+        &self,
+        req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        rdev: u32,
+        reply: ReplyEntry,
+    ) {
+        let kind = match mode & S_IFMT {
+            S_IFREG => NodeKind::File,
+            S_IFIFO => NodeKind::Fifo,
+            S_IFSOCK => NodeKind::Socket,
+            S_IFCHR => NodeKind::Chr,
+            S_IFBLK => NodeKind::Blk,
+            _ => return reply.error(Errno::EINVAL),
+        };
+        let name = match name_string(name) {
+            Ok(name) => name,
+            Err(err) => return reply.error(err),
+        };
+        let (uid, gid) = (req.uid(), req.gid());
+        let mode = perm_bits(mode) & !perm_bits(umask);
+        let job = move |mds: &mut Mds| {
+            let spec = porfs_mds::NodeSpec {
+                kind,
+                mode,
+                rdev,
+                uid,
+                gid,
+            };
+            let ino = mds.mknod(parent.0, &name, spec)?;
+            let attr = mds.getattr(ino)?;
+            Ok((ino, attr))
+        };
+        match self.call(job) {
+            Ok(Ok((ino, attr))) => {
+                self.note_parent(ino, parent.0);
+                reply.entry(&self.config.entry_ttl, &file_attr(&attr), GENERATION);
+            }
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
     fn mkdir(
         &self,
-        _req: &Request,
+        req: &Request,
         parent: INodeNo,
         name: &OsStr,
         mode: u32,
@@ -217,9 +344,10 @@ impl Filesystem for PorfsFs {
             Ok(name) => name,
             Err(err) => return reply.error(err),
         };
+        let (uid, gid) = (req.uid(), req.gid());
         let mode = perm_bits(mode) & !perm_bits(umask);
         let job = move |mds: &mut Mds| {
-            let ino = mds.mkdir(parent.0, &name, mode)?;
+            let ino = mds.mkdir(parent.0, &name, mode, uid, gid)?;
             let attr = mds.getattr(ino)?;
             Ok((ino, attr))
         };
@@ -277,6 +405,44 @@ impl Filesystem for PorfsFs {
         }
     }
 
+    fn symlink(
+        &self,
+        req: &Request,
+        parent: INodeNo,
+        link_name: &OsStr,
+        target: &Path,
+        reply: ReplyEntry,
+    ) {
+        let name = match name_string(link_name) {
+            Ok(name) => name,
+            Err(err) => return reply.error(err),
+        };
+        let Some(target) = target.to_str() else {
+            return reply.error(Errno::EINVAL);
+        };
+        if target.is_empty() {
+            return reply.error(Errno::ENOENT); // Linux: symlink("") -> ENOENT
+        }
+        if target.len() > MAX_SYMLINK_LEN {
+            return reply.error(Errno::ENAMETOOLONG);
+        }
+        let target = target.to_owned();
+        let (uid, gid) = (req.uid(), req.gid());
+        let job = move |mds: &mut Mds| {
+            let ino = mds.symlink(parent.0, &name, &target, uid, gid)?;
+            let attr = mds.getattr(ino)?;
+            Ok((ino, attr))
+        };
+        match self.call(job) {
+            Ok(Ok((ino, attr))) => {
+                self.note_parent(ino, parent.0);
+                reply.entry(&self.config.entry_ttl, &file_attr(&attr), GENERATION);
+            }
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
     fn rename(
         &self,
         _req: &Request,
@@ -288,7 +454,7 @@ impl Filesystem for PorfsFs {
         reply: ReplyEmpty,
     ) {
         if !flags.is_empty() {
-            // RENAME_EXCHANGE / RENAME_NOREPLACE / RENAME_WHITEOUT are P5+.
+            // RENAME_EXCHANGE / RENAME_NOREPLACE / RENAME_WHITEOUT are P6+.
             return reply.error(Errno::EINVAL);
         }
         let name = match name_string(name) {
@@ -344,8 +510,15 @@ impl Filesystem for PorfsFs {
 
     fn open(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         match self.call(move |mds| mds.getattr(ino.0)) {
-            Ok(Ok(attr)) if attr.kind == NodeKind::Dir => reply.error(Errno::EISDIR),
-            Ok(Ok(_)) => reply.opened(FileHandle(0), FopenFlags::empty()),
+            Ok(Ok(attr)) => match attr.kind {
+                NodeKind::Dir => reply.error(Errno::EISDIR),
+                // Fifos must open successfully: the kernel pipes I/O through
+                // its own fifo implementation, but it still calls our open.
+                NodeKind::File | NodeKind::Fifo => reply.opened(FileHandle(0), FopenFlags::empty()),
+                NodeKind::Symlink | NodeKind::Socket | NodeKind::Chr | NodeKind::Blk => {
+                    reply.error(Errno::ENXIO)
+                }
+            },
             Ok(Err(err)) => reply.error(errno(&err)),
             Err(err) => reply.error(err),
         }
@@ -406,10 +579,17 @@ impl Filesystem for PorfsFs {
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
-        _datasync: bool,
+        datasync: bool,
         reply: ReplyEmpty,
     ) {
-        match self.call(move |mds| mds.fsync(ino.0)) {
+        let job = move |mds: &mut Mds| {
+            if datasync {
+                mds.fdatasync(ino.0)
+            } else {
+                mds.fsync(ino.0)
+            }
+        };
+        match self.call(job) {
             Ok(Ok(())) => reply.ok(),
             Ok(Err(err)) => reply.error(errno(&err)),
             Err(err) => reply.error(err),
@@ -419,7 +599,18 @@ impl Filesystem for PorfsFs {
     fn opendir(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         match self.call(move |mds| mds.getattr(ino.0)) {
             Ok(Ok(attr)) if attr.kind != NodeKind::Dir => reply.error(Errno::ENOTDIR),
-            Ok(Ok(_)) => reply.opened(FileHandle(0), FopenFlags::empty()),
+            Ok(Ok(_)) => {
+                let fh = self.alloc_fh();
+                match self.dir_states.lock() {
+                    Ok(mut map) => {
+                        map.insert(fh.0, DirState::default());
+                    }
+                    Err(poisoned) => {
+                        poisoned.into_inner().insert(fh.0, DirState::default());
+                    }
+                }
+                reply.opened(fh, FopenFlags::empty());
+            }
             Ok(Err(err)) => reply.error(errno(&err)),
             Err(err) => reply.error(err),
         }
@@ -429,26 +620,91 @@ impl Filesystem for PorfsFs {
         &self,
         _req: &Request,
         ino: INodeNo,
-        _fh: FileHandle,
+        fh: FileHandle,
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let entries = match self.call(move |mds| mds.readdir(ino.0)) {
-            Ok(Ok(entries)) => entries,
-            Ok(Err(err)) => return reply.error(errno(&err)),
-            Err(err) => return reply.error(err),
+        let mut guard = match self.dir_states.lock() {
+            Ok(map) => map,
+            Err(poisoned) => poisoned.into_inner(),
         };
-        let parent = self.parent_of(ino.0);
-        // The full listing is rebuilt per call (v0); the kernel resumes at
-        // the offset of the first entry that did not fit.
-        let mut all: Vec<(String, Ino, NodeKind)> = Vec::with_capacity(entries.len() + 2);
-        all.push((".".to_string(), ino.0, NodeKind::Dir));
-        all.push(("..".to_string(), parent, NodeKind::Dir));
-        all.extend(entries);
-        for (index, (name, child, kind)) in all.iter().enumerate().skip(offset as usize) {
-            let next_offset = (index + 1) as u64;
-            if reply.add(INodeNo(*child), next_offset, file_type(*kind), name) {
+        let state = guard.entry(fh.0).or_default();
+        if offset == 0 {
+            *state = DirState::default();
+        }
+        // The `off` carried by each reply.add entry is the position the
+        // kernel passes back to fetch the NEXT entry: "." is position 0
+        // (next = 1), ".." position 1 (next = 2), MDS entries start at
+        // position 2 (cookie = None) and resume from state.cookie at
+        // positions >= 3. Each dot entry is served exactly once: an
+        // offset past a dot's position means the kernel already consumed
+        // it — re-serving it (with the same off) would make the kernel
+        // request that same offset forever (livelock).
+        if offset == 0 && reply.add(ino, 1, FileType::Directory, ".") {
+            return reply.ok();
+        }
+        if offset <= 1 {
+            let parent = self.parent_of(ino.0);
+            if reply.add(INodeNo(parent), 2, FileType::Directory, "..") {
+                return reply.ok();
+            }
+        }
+        if offset <= 2 {
+            state.cookie = None;
+            state.next_offset = 3;
+            state.done = false;
+        }
+        loop {
+            if state.done {
                 break;
+            }
+            let after = state.cookie.clone();
+            let batch = match self
+                .call(move |mds| mds.readdir_batch(ino.0, after.as_deref(), READDIR_BATCH))
+            {
+                Ok(Ok(batch)) => batch,
+                Ok(Err(err)) => return reply.error(errno(&err)),
+                Err(err) => return reply.error(err),
+            };
+            let exhausted = batch.next_cookie.is_none();
+            let fetched = batch.entries.len();
+            for entry in batch.entries {
+                let name = entry.name.as_str();
+                if reply.add(
+                    INodeNo(entry.ino),
+                    state.next_offset,
+                    file_type(entry.kind),
+                    name,
+                ) {
+                    // Buffer full: the next kernel call resumes after the
+                    // last entry that DID fit (state.cookie) — total work
+                    // across a full listing stays O(n).
+                    return reply.ok();
+                }
+                state.cookie = Some(entry.cookie);
+                state.next_offset += 1;
+            }
+            if exhausted || fetched == 0 {
+                state.done = true;
+            }
+        }
+        reply.ok();
+    }
+
+    fn releasedir(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        _flags: OpenFlags,
+        reply: ReplyEmpty,
+    ) {
+        match self.dir_states.lock() {
+            Ok(mut map) => {
+                map.remove(&fh.0);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().remove(&fh.0);
             }
         }
         reply.ok();
@@ -462,6 +718,7 @@ impl Filesystem for PorfsFs {
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
+        // fsync on a directory is a metadata barrier (legal per POSIX).
         match self.call(move |mds| mds.fsync(ino.0)) {
             Ok(Ok(())) => reply.ok(),
             Ok(Err(err)) => reply.error(errno(&err)),
@@ -472,8 +729,8 @@ impl Filesystem for PorfsFs {
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
         match self.call(|mds| mds.statfs()) {
             Ok(Ok(stats)) => {
-                let total_blocks = stats.total_bytes / 512;
-                let free_blocks = stats.free_bytes / 512;
+                let total_blocks = stats.total_bytes / 4096;
+                let free_blocks = stats.free_bytes / 4096;
                 reply.statfs(
                     total_blocks,
                     free_blocks,
@@ -490,31 +747,122 @@ impl Filesystem for PorfsFs {
         }
     }
 
-    fn getxattr(
+    fn setxattr(
         &self,
         _req: &Request,
-        _ino: INodeNo,
-        _name: &OsStr,
-        _size: u32,
-        reply: ReplyXattr,
+        ino: INodeNo,
+        name: &OsStr,
+        value: &[u8],
+        flags: i32,
+        _position: u32,
+        reply: ReplyEmpty,
     ) {
-        // xattrs are P5; report "not supported" rather than "no attribute".
-        reply.error(Errno::ENOTSUP)
+        let name = match name_string(name) {
+            Ok(name) => name,
+            Err(err) => return reply.error(err),
+        };
+        let value = value.to_vec();
+        let flags = flags as u32;
+        match self.call(move |mds| mds.setxattr(ino.0, &name, &value, flags)) {
+            Ok(Ok(())) => reply.ok(),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
     }
 
-    fn listxattr(&self, _req: &Request, _ino: INodeNo, _size: u32, reply: ReplyXattr) {
-        reply.error(Errno::ENOTSUP)
+    fn getxattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: ReplyXattr) {
+        let name = match name_string(name) {
+            Ok(name) => name,
+            Err(err) => return reply.error(err),
+        };
+        match self.call(move |mds| mds.getxattr(ino.0, &name)) {
+            Ok(Ok(value)) => reply_xattr(reply, size, value),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
+    fn listxattr(&self, _req: &Request, ino: INodeNo, size: u32, reply: ReplyXattr) {
+        match self.call(move |mds| mds.listxattr(ino.0)) {
+            Ok(Ok(names)) => {
+                // Linux wire format: NUL-separated name list.
+                let mut payload = Vec::new();
+                for name in &names {
+                    payload.extend_from_slice(name.as_bytes());
+                    payload.push(0);
+                }
+                reply_xattr(reply, size, payload);
+            }
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
+    fn removexattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let name = match name_string(name) {
+            Ok(name) => name,
+            Err(err) => return reply.error(err),
+        };
+        match self.call(move |mds| mds.removexattr(ino.0, &name)) {
+            Ok(Ok(())) => reply.ok(),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
+    fn fallocate(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
+        length: u64,
+        mode: i32,
+        reply: ReplyEmpty,
+    ) {
+        if mode != FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE {
+            // v1 supports hole-punching only; plain preallocation and every
+            // other mode are ENOSYS.
+            return reply.error(Errno::ENOSYS);
+        }
+        match self.call(move |mds| mds.punch_hole(ino.0, offset, length)) {
+            Ok(Ok(())) => reply.ok(),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
+    }
+
+    fn lseek(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: i64,
+        whence: i32,
+        reply: ReplyLseek,
+    ) {
+        if offset < 0 || (whence != SEEK_DATA && whence != SEEK_HOLE) {
+            return reply.error(Errno::EINVAL);
+        }
+        let data = whence == SEEK_DATA;
+        match self.call(move |mds| mds.seek(ino.0, offset as u64, data)) {
+            Ok(Ok(pos)) => reply.offset(pos as i64),
+            Ok(Err(MdsError::OutOfRange(_))) => reply.error(Errno::ENXIO),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
     }
 
     fn access(&self, _req: &Request, _ino: INodeNo, _mask: AccessFlags, reply: ReplyEmpty) {
-        // v0 performs no permission checks (no default_permissions mount
-        // option either); NFSv4 ACLs land in P24.
+        // With default_permissions the kernel performs permission checks
+        // itself and never calls this; without it v0 allows everything
+        // (NFSv4 ACLs land in P24).
         reply.ok();
     }
 
     fn create(
         &self,
-        _req: &Request,
+        req: &Request,
         parent: INodeNo,
         name: &OsStr,
         mode: u32,
@@ -526,9 +874,10 @@ impl Filesystem for PorfsFs {
             Ok(name) => name,
             Err(err) => return reply.error(err),
         };
+        let (uid, gid) = (req.uid(), req.gid());
         let mode = perm_bits(mode) & !perm_bits(umask);
         let job = move |mds: &mut Mds| {
-            let ino = mds.create(parent.0, &name, mode)?;
+            let ino = mds.create(parent.0, &name, mode, uid, gid)?;
             let attr = mds.getattr(ino)?;
             Ok((ino, attr))
         };

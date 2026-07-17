@@ -78,9 +78,14 @@ impl Mds {
     pub fn setattr(&mut self, ino: Ino, set: SetAttr) -> Result<InodeAttr> {
         let mut rec = self.get_rec(ino)?;
         if let Some(size) = set.size {
-            if rec.kind != NodeKind::File {
+            if rec.kind == NodeKind::Dir {
                 return Err(MdsError::IsDir(format!(
                     "ino {ino} is a directory; cannot resize"
+                )));
+            }
+            if rec.kind != NodeKind::File {
+                return Err(MdsError::InvalidOp(format!(
+                    "ino {ino} is not a regular file; cannot resize"
                 )));
             }
             if size != rec.size {
@@ -119,10 +124,140 @@ impl Mds {
     /// (the store's group commit — fdatasync of the data region plus the
     /// dual-superblock update). redb commits are already durable per
     /// transaction, so after `fsync` returns, both the namespace state and
-    /// the file data of `ino` survive a crash.
+    /// the file data of `ino` survive a crash. Legal on any node kind —
+    /// fsync on a directory is a metadata barrier.
     pub fn fsync(&mut self, ino: Ino) -> Result<()> {
         self.get_rec(ino)?; // fsync on a missing inode is an error
         self.store.sync()?;
+        Ok(())
+    }
+
+    /// Data-only durability barrier (POSIX `fdatasync`): confirms appended
+    /// extents like [`Mds::fsync`], but treats the inode as data-only —
+    /// redb metadata commits are durable per transaction, so there is no
+    /// separate metadata barrier to skip on this implementation; the
+    /// distinction matters for the API contract (P6 RPC) and for rejecting
+    /// non-file nodes ([`MdsError::InvalidOp`]).
+    pub fn fdatasync(&mut self, ino: Ino) -> Result<()> {
+        let rec = self.get_rec(ino)?;
+        if rec.kind != NodeKind::File {
+            return Err(MdsError::InvalidOp(format!(
+                "fdatasync on non-file ino {ino}"
+            )));
+        }
+        self.store.sync()?;
+        Ok(())
+    }
+
+    /// Seek within the extent map (POSIX `SEEK_DATA` / `SEEK_HOLE`):
+    /// - data: the smallest offset `>= pos` covered by an extent row —
+    ///   `pos` itself when it falls inside a row; [`MdsError::OutOfRange`]
+    ///   (POSIX `ENXIO`) when no data remains at or past `pos`;
+    /// - hole: the smallest offset `>= pos` NOT covered by any row,
+    ///   clamped to the file size (the implicit hole at EOF);
+    ///   [`MdsError::OutOfRange`] when `pos` is already at/past EOF.
+    pub fn seek(&mut self, ino: Ino, pos: u64, data: bool) -> Result<u64> {
+        let rec = self.get_rec(ino)?;
+        if rec.kind != NodeKind::File {
+            return Err(MdsError::InvalidOp(format!("seek on non-file ino {ino}")));
+        }
+        if pos >= rec.size {
+            return Err(MdsError::OutOfRange(format!(
+                "seek from {pos} at/past EOF {}",
+                rec.size
+            )));
+        }
+        let rows = self.extent_rows(ino, pos, rec.size)?;
+        if data {
+            // rows all intersect [pos, size), so the first row is the answer.
+            match rows.first() {
+                Some(row) if row.off <= pos => Ok(pos),
+                Some(row) => Ok(row.off),
+                None => Err(MdsError::OutOfRange(format!("no data at or past {pos}"))),
+            }
+        } else {
+            for row in &rows {
+                if row.off > pos {
+                    return Ok(pos); // pos is in a hole before the next row
+                }
+                if row.end() > pos {
+                    return Ok(row.end().min(rec.size)); // skip past the row
+                }
+            }
+            Ok(pos) // no rows at/past pos: pos itself is in a hole
+        }
+    }
+
+    /// Deallocate the range `[offset, offset + len)` without changing the
+    /// file size (POSIX `fallocate(FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE)`).
+    /// Map rows fully covered by the range are dropped (the region becomes
+    /// a hole and reads back as zeros); rows straddling the range edge have
+    /// their punched bytes zero-filled in place (rewritten as a new extent
+    /// of the same span) — v1 keeps rows unsplit, correctness first.
+    pub fn punch_hole(&mut self, ino: Ino, offset: u64, len: u64) -> Result<()> {
+        let mut rec = self.get_rec(ino)?;
+        if rec.kind != NodeKind::File {
+            return Err(MdsError::InvalidOp(format!(
+                "punch_hole on non-file ino {ino}"
+            )));
+        }
+        if len == 0 {
+            return Ok(());
+        }
+        let end = offset.saturating_add(len);
+        if offset >= rec.size {
+            return Ok(()); // past EOF: nothing to punch
+        }
+        let end = end.min(rec.size);
+        let rows = self.extent_rows(ino, offset, end)?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+        // Rewrite straddlers with zeroed punch bytes BEFORE the metadata
+        // commit; fully covered rows just die.
+        let mut replacements: Vec<(u64, Vec<u8>)> = Vec::new();
+        let mut dead: Vec<ExtentId> = Vec::new();
+        for row in &rows {
+            let covered = row.off >= offset && row.end() <= end;
+            let old = self.store.read(row.id)?;
+            dead.push(row.id);
+            if covered {
+                continue;
+            }
+            let mut bytes = old;
+            let zstart = offset.max(row.off) - row.off;
+            let zend = end.min(row.end()) - row.off;
+            bytes[zstart as usize..zend as usize].fill(0);
+            replacements.push((row.off, bytes));
+        }
+        let items: Vec<(u64, u64, &[u8])> = replacements
+            .iter()
+            .map(|(off, bytes)| (ino, *off, bytes.as_slice()))
+            .collect();
+        let new_ids = self.store.append_batch(&items)?;
+        let txn = self.db.begin_write().map_err(dberr)?;
+        {
+            let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let mut inodes = txn.open_table(INODES).map_err(dberr)?;
+            for row in &rows {
+                fext.remove(extent_key(ino, row.off).as_slice())
+                    .map_err(dberr)?;
+            }
+            for ((off, bytes), id) in replacements.iter().zip(new_ids.iter()) {
+                let value = encode_extent_value(*id, bytes.len() as u64);
+                fext.insert(extent_key(ino, *off).as_slice(), &value)
+                    .map_err(dberr)?;
+            }
+            let now = now_ts();
+            rec.mtime = now;
+            rec.ctime = now;
+            let bytes = encode_rec(&rec)?;
+            inodes
+                .insert(&ino_key(ino), bytes.as_slice())
+                .map_err(dberr)?;
+        }
+        txn.commit().map_err(dberr)?;
+        self.discard_tolerant(&dead)?;
         Ok(())
     }
 

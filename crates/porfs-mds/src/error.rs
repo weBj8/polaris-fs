@@ -25,6 +25,26 @@ pub enum MdsError {
     /// Empty, longer than 255 bytes, contains `/`, or is `.` / `..`.
     #[error("invalid name: {0:?}")]
     InvalidName(String),
+    /// Longer than 255 bytes (POSIX `ENAMETOOLONG`).
+    #[error("name too long: {0} bytes")]
+    NameTooLong(usize),
+    /// The requested extended attribute does not exist (POSIX `ENODATA`).
+    #[error("no such attribute: {0}")]
+    NoAttr(String),
+    /// Offset/length arguments outside the valid range (POSIX `ENXIO` or
+    /// `ERANGE`, mapped by the caller).
+    #[error("out of range: {0}")]
+    OutOfRange(String),
+    /// A size limit was exceeded (name/value too long; POSIX `E2BIG` /
+    /// `ENAMETOOLONG`, mapped by the caller).
+    #[error("too big: {0}")]
+    TooBig(String),
+    /// The operation is not meaningful for this node kind (POSIX `EINVAL`).
+    #[error("invalid operation: {0}")]
+    InvalidOp(String),
+    /// The metadata database was written by an incompatible schema version.
+    #[error("unsupported metadata schema: {0}")]
+    UnsupportedSchema(String),
     /// Extent-store failure.
     #[error("store error: {0}")]
     Store(#[from] StoreError),

@@ -15,7 +15,7 @@ const KIB: u64 = 1024;
 fn write_read_roundtrip() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let data = pattern(0, 4096);
     assert_eq!(mds.write(f, 0, &data).unwrap(), data.len());
     assert_eq!(mds.getattr(f).unwrap().size, 4096);
@@ -29,7 +29,7 @@ fn write_read_roundtrip() {
 fn sparse_holes_read_as_zeros() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let data = pattern(0, 2048);
     mds.write(f, KIB, &data).unwrap();
     assert_eq!(mds.getattr(f).unwrap().size, KIB + 2048);
@@ -44,7 +44,7 @@ fn sparse_holes_read_as_zeros() {
 fn exact_overwrite_replaces_extent() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 8192);
     let b = pattern(1_000_000, 8192);
     mds.write(f, 0, &a).unwrap();
@@ -57,7 +57,7 @@ fn exact_overwrite_replaces_extent() {
 fn partial_head_overwrite_merges() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 8192);
     mds.write(f, 0, &a).unwrap();
     // Overwrite the second half: the kept first half is RMW-merged.
@@ -72,7 +72,7 @@ fn partial_head_overwrite_merges() {
 fn partial_tail_overwrite_merges() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 8192);
     mds.write(f, 0, &a).unwrap();
     // Overwrite the first half: the kept second half is RMW-merged.
@@ -87,7 +87,7 @@ fn partial_tail_overwrite_merges() {
 fn partial_middle_overwrite_merges_both_sides() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 12288);
     mds.write(f, 0, &a).unwrap();
     // Overwrite the middle third of one extent: both sides are kept via RMW.
@@ -103,7 +103,7 @@ fn partial_middle_overwrite_merges_both_sides() {
 fn append_growth_with_gap() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 4096);
     let b = pattern(5_000_000, 4096);
     mds.write(f, 0, &a).unwrap();
@@ -119,7 +119,7 @@ fn append_growth_with_gap() {
 fn multi_extent_file_roundtrip() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "big", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "big", 0o644, 0, 0).unwrap();
     // 9 MiB in one write: 4 MiB + 4 MiB + 1 MiB = three extents.
     let len = (2 * EXTENT_DATA_MAX + (1 << 20)) as usize;
     let data = pattern(0, len);
@@ -139,7 +139,7 @@ fn multi_extent_file_roundtrip() {
 fn truncate_shrink_straddler_keeps_prefix() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 8192);
     mds.write(f, 0, &a).unwrap();
     // 8192 -> 4096 cuts the single extent in half (straddler rewrite).
@@ -162,7 +162,7 @@ fn truncate_shrink_straddler_keeps_prefix() {
 fn truncate_shrink_drops_trailing_extents() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 8192);
     let b = pattern(6_000_000, 8192);
     mds.write(f, 0, &a).unwrap();
@@ -183,7 +183,7 @@ fn truncate_shrink_drops_trailing_extents() {
 fn truncate_grow_reads_back_zeros() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 4096);
     mds.write(f, 0, &a).unwrap();
     let attr = mds
@@ -205,7 +205,7 @@ fn truncate_grow_reads_back_zeros() {
 fn read_past_eof_is_clamped() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let a = pattern(0, 4096);
     mds.write(f, 0, &a).unwrap();
     assert_eq!(mds.read(f, 0, 1 << 20).unwrap(), a);
@@ -218,7 +218,7 @@ fn read_past_eof_is_clamped() {
 fn setattr_updates_fields() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     let before = mds.getattr(f).unwrap();
     let attr = mds
         .setattr(
@@ -244,7 +244,7 @@ fn setattr_updates_fields() {
 fn data_ops_on_dirs_fail() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let d = mds.mkdir(ROOT_INO, "d", 0o755).unwrap();
+    let d = mds.mkdir(ROOT_INO, "d", 0o755, 0, 0).unwrap();
     assert!(matches!(mds.write(d, 0, b"x"), Err(MdsError::IsDir(_))));
     assert!(matches!(mds.read(d, 0, 1), Err(MdsError::IsDir(_))));
     assert!(matches!(
@@ -275,12 +275,12 @@ fn data_ops_on_dirs_fail() {
 fn unlinked_file_data_is_gone() {
     let dir = test_dir();
     let mds = &mut format_mds(dir.path());
-    let f = mds.create(ROOT_INO, "f", 0o644).unwrap();
+    let f = mds.create(ROOT_INO, "f", 0o644, 0, 0).unwrap();
     mds.write(f, 0, &pattern(0, 8192)).unwrap();
     mds.unlink(ROOT_INO, "f").unwrap();
     let report = mds.self_check().unwrap();
     assert_eq!(report.extents, 0);
     // Recreating reuses no stale data.
-    let g = mds.create(ROOT_INO, "g", 0o644).unwrap();
+    let g = mds.create(ROOT_INO, "g", 0o644, 0, 0).unwrap();
     assert!(mds.read(g, 0, 100).unwrap().is_empty());
 }

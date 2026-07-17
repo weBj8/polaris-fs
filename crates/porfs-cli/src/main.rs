@@ -19,7 +19,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a device with the PolarisFS v2 on-disk format.
+    /// Initialize a device with the PolarisFS v2 on-disk format. With
+    /// --meta, also format the redb metadata half of an MDS pair (the
+    /// future "mkfs one command" shape of P6).
     Mkfs {
         /// Device (regular file) to initialize.
         #[arg(long)]
@@ -27,6 +29,9 @@ enum Commands {
         /// Device size, e.g. 4GiB, 512MiB, or plain bytes.
         #[arg(long)]
         size: String,
+        /// Optional redb metadata file: format a full MDS pair.
+        #[arg(long)]
+        meta: Option<std::path::PathBuf>,
     },
     /// Dump superblock fields and store state of a device.
     Info {
@@ -77,12 +82,20 @@ enum Commands {
         /// Lookup entry-cache TTL in seconds.
         #[arg(long, default_value_t = 1.0)]
         entry_ttl: f64,
+        /// Disable kernel-side permission enforcement (default_permissions
+        /// is on unless this flag is passed).
+        #[arg(long, default_value_t = false)]
+        no_default_permissions: bool,
+        /// Allow access by users other than the mount owner (FUSE
+        /// allow_other). Required for multi-user semantics and pjdfstest.
+        #[arg(long, default_value_t = false)]
+        allow_other: bool,
     },
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
-        Commands::Mkfs { device, size } => cmd_mkfs(&device, &size),
+        Commands::Mkfs { device, size, meta } => cmd_mkfs(&device, &size, meta.as_deref()),
         Commands::Info { device } => cmd_info(&device),
         Commands::Bench {
             device,
@@ -97,7 +110,17 @@ fn main() -> Result<()> {
             mountpoint,
             attr_ttl,
             entry_ttl,
-        } => cmd_mount(&meta, &data, &mountpoint, attr_ttl, entry_ttl),
+            no_default_permissions,
+            allow_other,
+        } => cmd_mount(
+            &meta,
+            &data,
+            &mountpoint,
+            attr_ttl,
+            entry_ttl,
+            no_default_permissions,
+            allow_other,
+        ),
     }
 }
 
@@ -107,20 +130,33 @@ fn cmd_mount(
     mountpoint: &Path,
     attr_ttl: f64,
     entry_ttl: f64,
+    no_default_permissions: bool,
+    allow_other: bool,
 ) -> Result<()> {
     use fuser::{Config, MountOption};
 
     let config = porfs_fuse::MountConfig {
         attr_ttl: std::time::Duration::from_secs_f64(attr_ttl),
         entry_ttl: std::time::Duration::from_secs_f64(entry_ttl),
+        default_permissions: !no_default_permissions,
         ..Default::default()
     };
     let fs = porfs_fuse::PorfsFs::open(meta, data, config)
         .with_context(|| format!("open MDS ({}, {})", meta.display(), data.display()))?;
-    // Owner-only access (no allow_other), no kernel permission checks
-    // (no default_permissions) for v0.
+    // Owner-only access (no allow_other); kernel permission enforcement
+    // (default_permissions) is on unless explicitly disabled.
     let mut fuse_config = Config::default();
     fuse_config.mount_options = vec![MountOption::FSName("porfs".to_string())];
+    if config.default_permissions {
+        fuse_config
+            .mount_options
+            .push(MountOption::DefaultPermissions);
+    }
+    if allow_other {
+        fuse_config
+            .mount_options
+            .push(MountOption::CUSTOM("allow_other".to_string()));
+    }
     println!(
         "porfs: serving {} on {} — unmount with `fusermount3 -u {}` (Ctrl-C detaches; run fusermount3 -u afterwards if needed)",
         data.display(),
@@ -146,23 +182,44 @@ fn cmd_mds_check(meta: &Path, data: &Path) -> Result<()> {
     Ok(())
 }
 
-fn cmd_mkfs(device: &Path, size: &str) -> Result<()> {
+fn cmd_mkfs(device: &Path, size: &str, meta: Option<&Path>) -> Result<()> {
     let size = parse_size(size)?;
-    let store = ExtentStore::create(device, size)
-        .with_context(|| format!("mkfs on {}", device.display()))?;
-    println!(
-        "created PolarisFS format v{} device",
-        porfs_format::FORMAT_VERSION
-    );
-    println!("  device:       {}", device.display());
-    println!(
-        "  device_size:  {} ({})",
-        store.device_size(),
-        human(store.device_size())
-    );
-    println!("  uuid:         {}", uuid::Uuid::from_bytes(store.uuid()));
-    println!("  data_start:   {DATA_START}");
-    println!("  io_mode:      {}", io_mode(store.is_direct()));
+    match meta {
+        None => {
+            let store = ExtentStore::create(device, size)
+                .with_context(|| format!("mkfs on {}", device.display()))?;
+            println!(
+                "created PolarisFS format v{} device",
+                porfs_format::FORMAT_VERSION
+            );
+            println!("  device:       {}", device.display());
+            println!(
+                "  device_size:  {} ({})",
+                store.device_size(),
+                human(store.device_size())
+            );
+            println!("  uuid:         {}", uuid::Uuid::from_bytes(store.uuid()));
+            println!("  data_start:   {DATA_START}");
+            println!("  io_mode:      {}", io_mode(store.is_direct()));
+        }
+        Some(meta) => {
+            let mds = porfs_mds::Mds::format(meta, device, size).with_context(|| {
+                format!("mkfs MDS pair ({}, {})", meta.display(), device.display())
+            })?;
+            let stats = mds.statfs()?;
+            println!(
+                "created PolarisFS MDS pair (extent format v{})",
+                porfs_format::FORMAT_VERSION
+            );
+            println!("  meta:         {}", meta.display());
+            println!("  device:       {}", device.display());
+            println!(
+                "  device_size:  {} ({})",
+                stats.total_bytes,
+                human(stats.total_bytes)
+            );
+        }
+    }
     Ok(())
 }
 

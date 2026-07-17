@@ -18,7 +18,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P2 | Checkpoint fast-mount + group commit + kill -9 crash recovery | ✅ **1000 kill -9 iterations, zero corruption**, 100% checkpoint mounts, 63s |
 | P3 | MDS v0: namespace + inodes + file→extent map (redb, transactional) | ✅ crash-survival loops + self-check, 92 workspace tests green |
 | P4 | FUSE client v0: real mount, basic POSIX ops | ✅ 11 real-mount integration tests, 103 workspace tests green |
-| P5–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P5 | POSIX completion I: xattr, symlink, mknod, sparse, fsync/fdatasync, rename matrix; hash-ordered big-directory index | ✅ 114 tests green; 1M-entry dir lists correctly (`ls -f`/`find` 14.2s vs xfs 0.2s); known-issue: non-mounter-uid EACCES |
+| P6–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 

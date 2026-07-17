@@ -19,6 +19,11 @@ pub struct MountConfig {
     /// convey it to the kernel; the field documents the intended policy for
     /// when the transport grows the knob.
     pub negative_ttl: Duration,
+    /// Mount with `default_permissions`: the kernel enforces mode/uid/gid
+    /// on every access (default true). Disable for benches and for the
+    /// in-process mount tests, where the mount owner intentionally differs
+    /// from the inode owners.
+    pub default_permissions: bool,
 }
 
 impl Default for MountConfig {
@@ -27,6 +32,7 @@ impl Default for MountConfig {
             attr_ttl: Duration::from_secs(1),
             entry_ttl: Duration::from_secs(1),
             negative_ttl: Duration::ZERO,
+            default_permissions: true,
         }
     }
 }

@@ -10,6 +10,9 @@ use porfs_mds::{InodeAttr, MdsError, NodeKind};
 
 /// MDS error -> POSIX errno. `Store`/`Db`/`Corrupt` collapse to EIO: the
 /// kernel has no richer vocabulary for "our backing store failed".
+/// `OutOfRange`/`TooBig`/`InvalidOp` map to the generic members of their
+/// errno families; the few call sites that need a specific member (ERANGE
+/// vs ENXIO, E2BIG vs ENAMETOOLONG) override locally.
 pub(crate) fn errno(err: &MdsError) -> Errno {
     match err {
         MdsError::NotFound(_) => Errno::ENOENT,
@@ -18,6 +21,12 @@ pub(crate) fn errno(err: &MdsError) -> Errno {
         MdsError::NotEmpty(_) => Errno::ENOTEMPTY,
         MdsError::Exists(_) => Errno::EEXIST,
         MdsError::InvalidName(_) => Errno::EINVAL,
+        MdsError::NameTooLong(_) => Errno::ENAMETOOLONG,
+        MdsError::NoAttr(_) => Errno::ENODATA,
+        MdsError::OutOfRange(_) => Errno::ERANGE,
+        MdsError::TooBig(_) => Errno::E2BIG,
+        MdsError::InvalidOp(_) => Errno::EINVAL,
+        MdsError::UnsupportedSchema(_) => Errno::EIO,
         MdsError::Store(_) | MdsError::Db(_) | MdsError::Corrupt(_) => Errno::EIO,
     }
 }
@@ -48,6 +57,11 @@ pub(crate) fn file_type(kind: NodeKind) -> FileType {
     match kind {
         NodeKind::File => FileType::RegularFile,
         NodeKind::Dir => FileType::Directory,
+        NodeKind::Symlink => FileType::Symlink,
+        NodeKind::Fifo => FileType::NamedPipe,
+        NodeKind::Socket => FileType::Socket,
+        NodeKind::Chr => FileType::CharDevice,
+        NodeKind::Blk => FileType::BlockDevice,
     }
 }
 
@@ -66,7 +80,7 @@ pub(crate) fn file_attr(attr: &InodeAttr) -> FileAttr {
         nlink: attr.nlink,
         uid: attr.uid,
         gid: attr.gid,
-        rdev: 0,
+        rdev: attr.rdev,
         blksize: 4096,
         flags: 0,
     }
