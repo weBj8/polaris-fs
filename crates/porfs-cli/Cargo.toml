@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 porfs-format = { path = "../porfs-format" }
 porfs-store = { path = "../porfs-store" }
+porfs-mds = { path = "../porfs-mds" }
 anyhow.workspace = true
 clap.workspace = true
 uuid.workspace = true

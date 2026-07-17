@@ -1,4 +1,4 @@
-//! `porfs` — PolarisFS command line tool (P1 scope: mkfs / info / bench).
+//! `porfs` — PolarisFS command line tool (mkfs / info / bench / mds-check).
 
 mod bench;
 
@@ -49,6 +49,16 @@ enum Commands {
         #[arg(long, default_value_t = DEFAULT_QUEUE_DEPTH)]
         queue_depth: u32,
     },
+    /// Open an MDS pair (redb metadata + extent-store device), run the
+    /// mount-time reconcile and the consistency self-check, print a summary.
+    MdsCheck {
+        /// redb metadata file of the MDS.
+        #[arg(long)]
+        meta: std::path::PathBuf,
+        /// Extent-store device of the MDS.
+        #[arg(long)]
+        data: std::path::PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -61,7 +71,22 @@ fn main() -> Result<()> {
             extent_size,
             queue_depth,
         } => bench::cmd_bench(&device, &size, &extent_size, queue_depth),
+        Commands::MdsCheck { meta, data } => cmd_mds_check(&meta, &data),
     }
+}
+
+fn cmd_mds_check(meta: &Path, data: &Path) -> Result<()> {
+    let mut mds = porfs_mds::Mds::open(meta, data)
+        .with_context(|| format!("open MDS ({}, {})", meta.display(), data.display()))?;
+    let report = mds.self_check().context("mds self-check failed")?;
+    println!("mds-check: OK");
+    println!("meta:             {}", meta.display());
+    println!("data:             {}", data.display());
+    println!("inodes:           {}", report.inodes);
+    println!("dir_entries:      {}", report.entries);
+    println!("extent_map_rows:  {}", report.extents);
+    println!("orphans_repaired: {}", report.orphans_repaired);
+    Ok(())
 }
 
 fn cmd_mkfs(device: &Path, size: &str) -> Result<()> {

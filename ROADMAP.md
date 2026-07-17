@@ -142,10 +142,15 @@ generation switching; `scripts/kill9-soak.sh`.
 Gate: **1000 kill -9 iterations, zero corruption, zero confirmed-write loss — ✅
 (63s, all 1000 mounts via checkpoint)**.
 
-**P3 · MDS v0 (library form, single node)** (2 wks)
-Directory tree/inode tables + file→extent map; persistence decision: `redb` (ACID KV,
-leaning) vs. self-hosted in extent store (decide at kickoff); transactional rename/create.
-Gate: metadata ops survive crashes; self-check passes.
+**P3 · MDS v0 (library form, single node)** (2 wks) ✅ DONE
+Delivered: `porfs-mds` — directory tree/inode table/file→extent interval map on **redb**
+(ACID, one write txn per namespace mutation → atomic rename; persistence decision: redb
+over extent-store-backed, matching the future MDS/chunkserver device split), log-structured
+COW write path (append extents → commit map → tombstone replaced), truncate/sparse holes,
+reconcile-on-mount for un-fsynced writes, `porfs mds-check`.
+Gate: metadata ops survive crashes — ✅ (20-round unclean-reopen loop with full model
+verification, torn-tail reconcile, fsync durability; 92 workspace tests green, clippy 0);
+self-check passes ✅ (also detects planted corruption).
 
 **P4 · FUSE client v0** (2 wks)
 `fuser` mount: lookup/getattr/readdir/read/write/create/mkdir/unlink/rename/fsync;
@@ -375,4 +380,5 @@ past 50 nodes and is not part of GPFS-parity basics.
 
 1. ✅ Repo cleanup, ROADMAP v6, P1 (format v0 + extent store + bench + fio baseline)
 2. ✅ P2 (format v2: checkpoints + group commit + crash harness; 1000× kill -9 clean)
-3. Next: **P3 · MDS v0** (persistence decision: redb vs extent-store-backed)
+3. ✅ P3 (porfs-mds on redb; namespace txns + COW data path + reconcile; 92 tests green)
+4. Next: **P4 · FUSE client v0** (fuser mount, basic POSIX ops; pjdfstest basic suite)

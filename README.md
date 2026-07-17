@@ -16,7 +16,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 |---|---|---|
 | P1 | On-disk format v0 + io_uring extent store + bench | ✅ write = 94% of raw fio, verified read = 79% of raw fio (fio does no checksums), 34 tests green |
 | P2 | Checkpoint fast-mount + group commit + kill -9 crash recovery | ✅ **1000 kill -9 iterations, zero corruption**, 100% checkpoint mounts, 63s |
-| P3–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P3 | MDS v0: namespace + inodes + file→extent map (redb, transactional) | ✅ crash-survival loops + self-check, 92 workspace tests green |
+| P4–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
