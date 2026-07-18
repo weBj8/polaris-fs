@@ -8,7 +8,7 @@ use porfs_cluster::io::{
     Pool, stripe_read, stripe_read_range, stripe_read_replicated, stripe_write,
     stripe_write_replicated,
 };
-use porfs_cluster::{Membership, STRIPE_UNIT, StripeMap};
+use porfs_cluster::{FailureDomain, Member, Membership, STRIPE_UNIT, StripeMap};
 use porfs_rpc::server::{Server, serve};
 use porfs_store::ExtentStore;
 use tempfile::TempDir;
@@ -61,6 +61,36 @@ fn replicated_map_selects_distinct_servers() {
     }
 }
 
+#[test]
+fn replicated_map_separates_racks() {
+    let membership = Membership::with_topology(vec![
+        Member {
+            addr: "127.0.0.1:9100".parse().unwrap(),
+            failure_domain: FailureDomain::new(1, 1),
+        },
+        Member {
+            addr: "127.0.0.1:9101".parse().unwrap(),
+            failure_domain: FailureDomain::new(1, 2),
+        },
+        Member {
+            addr: "127.0.0.1:9102".parse().unwrap(),
+            failure_domain: FailureDomain::new(2, 3),
+        },
+        Member {
+            addr: "127.0.0.1:9103".parse().unwrap(),
+            failure_domain: FailureDomain::new(2, 4),
+        },
+    ]);
+    let map = StripeMap::from_membership(&membership);
+    for chunk in 0..400 {
+        let (primary, secondary) = map.place_replicas(7, chunk);
+        assert_ne!(
+            membership.failure_domain(primary).rack,
+            membership.failure_domain(secondary).rack
+        );
+    }
+}
+
 // ---- gate bench helpers ----
 
 /// N in-process chunkservers, each on its own sparse device.
@@ -72,11 +102,20 @@ struct Cluster {
 }
 
 async fn start_cluster(n: usize) -> Cluster {
+    start_cluster_with_topology(
+        (0..n)
+            .map(|index| FailureDomain::new(index as u64, index as u64))
+            .collect(),
+    )
+    .await
+}
+
+async fn start_cluster_with_topology(failure_domains: Vec<FailureDomain>) -> Cluster {
     let mut dirs = Vec::new();
-    let mut addrs = Vec::new();
+    let mut members = Vec::new();
     let mut servers = Vec::new();
     let mut shutdowns = Vec::new();
-    for _ in 0..n {
+    for failure_domain in failure_domains {
         let dir = tempfile::tempdir().unwrap();
         let device = dir.path().join("dev.img");
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -88,12 +127,15 @@ async fn start_cluster(n: usize) -> Cluster {
         )
         .await
         .unwrap();
-        addrs.push(server.addr());
+        members.push(Member {
+            addr: server.addr(),
+            failure_domain,
+        });
         servers.push(server);
         shutdowns.push(shutdown_tx);
         dirs.push(dir);
     }
-    let membership = Membership::new(addrs);
+    let membership = Membership::with_topology(members);
     Cluster {
         _dirs: dirs,
         membership,
@@ -181,6 +223,45 @@ async fn replicated_read_fails_over_to_secondary() {
     let failover_pool = Pool::new(&cluster.membership);
     assert_eq!(
         stripe_read_replicated(&failover_pool, &layout, 2)
+            .await
+            .unwrap(),
+        data
+    );
+    cluster.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gate_full_rack_loss_keeps_replicated_data_readable() {
+    let cluster = start_cluster_with_topology(vec![
+        FailureDomain::new(1, 1),
+        FailureDomain::new(1, 2),
+        FailureDomain::new(2, 3),
+        FailureDomain::new(2, 4),
+    ])
+    .await;
+    let map = StripeMap::from_membership(&cluster.membership);
+    let pool = Pool::new(&cluster.membership);
+    let data = pattern(35, (3 * STRIPE_UNIT + 777) as usize);
+    let layout = stripe_write_replicated(&pool, &map, 502, 1, data.clone(), 4)
+        .await
+        .unwrap();
+    for loc in &layout.chunks {
+        assert_ne!(
+            cluster.membership.failure_domain(loc.primary.server).rack,
+            cluster.membership.failure_domain(loc.secondary.server).rack
+        );
+    }
+
+    for (server, shutdown) in cluster.shutdowns.iter().enumerate() {
+        if cluster.membership.failure_domain(server).rack == 1 {
+            let _ = shutdown.send(true);
+        }
+    }
+    tokio::time::sleep(SHUTDOWN_SETTLE).await;
+
+    let survivor_pool = Pool::new(&cluster.membership);
+    assert_eq!(
+        stripe_read_replicated(&survivor_pool, &layout, 4)
             .await
             .unwrap(),
         data

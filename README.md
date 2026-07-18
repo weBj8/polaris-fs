@@ -22,7 +22,9 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P6 | MVP freeze: one-command format+mount; real-workload smoke | ✅ git clone/fsck + busybox build + sqlite WAL stress, all zero data errors on a real mount |
 | P7 | RPC + chunkserver: wire protocol v1, extent I/O as a service | ✅ kill -9 keeps confirmed extents over TCP; reconnect semantics documented; 128 tests green |
 | P8 | Striped parallel read: CRUSH-style rendezvous placement, per-server pipelined reads | ✅ 4-client striped aggregate = 77–84% of measured pool capacity (scripts/stripe-bench.sh) |
-| P9–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P9 | Parallel write + 2-way chain replication | ✅ primary-to-secondary durability acknowledgement and survivor reads |
+| P10 | Failure groups + placement policy | ✅ rack-separated replicas; simulated full-rack loss stays readable |
+| P11–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
@@ -34,7 +36,7 @@ cargo build --release
 ./target/release/porfs bench --device demo.img --size 1GiB --extent-size 1MiB --queue-depth 32
 ```
 
-## Production usage (current state, P8)
+## Production usage (current state, P10)
 
 **Format a filesystem and mount it** (one command; both files live on the
 machine you mount on):
@@ -65,20 +67,23 @@ service since P7):
     --device /var/lib/porfs/chunk0.img --size 16TiB \
     --listen 0.0.0.0:9100
 # extents are then readable/writable over TCP from any client using the
-# porfs-rpc / porfs-cluster client libraries (wire protocol v1,
+# porfs-rpc / porfs-cluster client libraries (wire protocol v2,
 # docs/protocol.md — length-prefixed frames, CRC-verified reads,
-# write-id-idempotent writes, exponential-backoff reconnect).
+# two-way chain replication, write-id idempotency, exponential-backoff reconnect).
 ```
 
 **Mounting from another machine on the LAN: not yet.** The FUSE client
 embeds the metadata server (MDS) in-process today, so a mount must be
 local to the MDS files; chunkservers are the only piece that is already a
 network service. The metadata RPC service lands in Act 2 (P16 wraps the
-MDS protocol over the same seam the chunkserver uses), and the write path
-starts striping to remote chunkservers at P9. Until then the supported
+MDS protocol over the same seam the chunkserver uses). The P9 cluster library
+supports remote striped writes, but the FUSE mount does not use it yet. Until
+metadata RPC lands, the supported
 topologies are: (a) format + mount on one machine, (b) chunkservers on
 LAN machines serving extent I/O to client-library users (e.g. the striped
-reader, `scripts/stripe-bench.sh`).
+reader, replicated writer, `scripts/stripe-bench.sh`). For replicated
+layouts, construct cluster membership with real rack/chassis tags; P10 forces
+the two copies onto different racks.
 
 ## Tests and gates
 

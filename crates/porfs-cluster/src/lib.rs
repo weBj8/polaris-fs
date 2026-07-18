@@ -1,4 +1,4 @@
-//! Cluster layer: static membership and CRUSH-style striping.
+//! Cluster layer: static topology-aware membership and CRUSH-style striping.
 //!
 //! Placement of a file's chunks on chunkservers is a **pure function** of
 //! `(inode, chunk_index)` and the membership — rendezvous hashing (the
@@ -16,37 +16,96 @@ use std::net::SocketAddr;
 /// overhead amortizes over the largest frame the wire allows.
 pub const STRIPE_UNIT: u64 = 4 << 20;
 
+/// A chunkserver's physical failure domain.
+///
+/// Rack is the mandatory replica-separation boundary. Chassis is retained as
+/// part of the topology so placement policy can become more granular without
+/// changing membership's input shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FailureDomain {
+    /// Rack containing the server and its disk.
+    pub rack: u64,
+    /// Chassis containing the server and its disk.
+    pub chassis: u64,
+}
+
+impl FailureDomain {
+    /// Construct a physical failure domain.
+    pub const fn new(rack: u64, chassis: u64) -> Self {
+        Self { rack, chassis }
+    }
+}
+
+/// A chunkserver endpoint and its physical topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    /// Network endpoint of the chunkserver.
+    pub addr: SocketAddr,
+    /// Failure domain of the server and its disk.
+    pub failure_domain: FailureDomain,
+}
+
 /// Static cluster membership (P7): server index = identity.
 #[derive(Debug, Clone)]
 pub struct Membership {
+    members: Vec<Member>,
     addrs: Vec<SocketAddr>,
 }
 
 impl Membership {
     /// Membership from server addresses in index order.
+    ///
+    /// This compatibility constructor assigns every server a distinct rack and
+    /// chassis. Production callers must use [`Self::with_topology`] so
+    /// replicated placement receives real failure-domain information.
     pub fn new(addrs: Vec<SocketAddr>) -> Self {
-        assert!(!addrs.is_empty(), "membership must not be empty");
-        Self { addrs }
+        Self::with_topology(
+            addrs
+                .into_iter()
+                .enumerate()
+                .map(|(index, addr)| Member {
+                    addr,
+                    failure_domain: FailureDomain::new(index as u64, index as u64),
+                })
+                .collect(),
+        )
+    }
+
+    /// Membership from endpoints tagged with their physical topology.
+    pub fn with_topology(members: Vec<Member>) -> Self {
+        assert!(!members.is_empty(), "membership must not be empty");
+        let addrs = members.iter().map(|member| member.addr).collect();
+        Self { members, addrs }
     }
 
     /// Number of servers in the pool.
     pub fn len(&self) -> usize {
-        self.addrs.len()
+        self.members.len()
     }
 
     /// Always false: membership is non-empty by construction.
     pub fn is_empty(&self) -> bool {
-        self.addrs.is_empty()
+        self.members.is_empty()
     }
 
     /// Address of server `index`.
     pub fn addr(&self, index: usize) -> SocketAddr {
-        self.addrs[index]
+        self.members[index].addr
     }
 
     /// All addresses, in index order.
     pub fn addrs(&self) -> &[SocketAddr] {
         &self.addrs
+    }
+
+    /// All members, in index order.
+    pub fn members(&self) -> &[Member] {
+        &self.members
+    }
+
+    /// Failure domain of server `index`.
+    pub fn failure_domain(&self, index: usize) -> FailureDomain {
+        self.members[index].failure_domain
     }
 }
 
@@ -56,26 +115,41 @@ impl Membership {
 /// on it; removing one moves only its own.
 #[derive(Debug, Clone)]
 pub struct StripeMap {
-    members: usize,
+    failure_domains: Vec<FailureDomain>,
 }
 
 impl StripeMap {
     /// A placement function over `members` servers.
     pub fn new(members: usize) -> Self {
         assert!(members > 0, "stripe map needs at least one member");
-        Self { members }
+        Self {
+            failure_domains: (0..members)
+                .map(|index| FailureDomain::new(index as u64, index as u64))
+                .collect(),
+        }
+    }
+
+    /// A placement function over a topology-tagged membership.
+    pub fn from_membership(membership: &Membership) -> Self {
+        Self {
+            failure_domains: membership
+                .members()
+                .iter()
+                .map(|member| member.failure_domain)
+                .collect(),
+        }
     }
 
     /// Number of members this map places onto.
     pub fn members(&self) -> usize {
-        self.members
+        self.failure_domains.len()
     }
 
     /// The chunkserver index holding chunk `chunk_index` of `inode`.
     pub fn place(&self, inode: u64, chunk_index: u64) -> usize {
         let mut best = 0usize;
         let mut best_score = 0u64;
-        for server in 0..self.members {
+        for server in 0..self.members() {
             let score = score(inode, chunk_index, server as u64);
             if score > best_score {
                 best_score = score;
@@ -85,18 +159,29 @@ impl StripeMap {
         best
     }
 
-    /// Primary and secondary for a chunk, ranked by rendezvous score.
-    /// Requires at least two members because P9 always keeps two copies.
+    /// Primary and secondary for a chunk, ranked by rendezvous score and
+    /// separated across racks.
+    ///
+    /// Requires at least two racks because P9 always keeps two copies.
     pub fn place_replicas(&self, inode: u64, chunk_index: u64) -> (usize, usize) {
         assert!(
-            self.members >= 2,
+            self.members() >= 2,
             "replicated placement needs at least two members"
         );
-        let mut ranked: Vec<(u64, usize)> = (0..self.members)
+        let mut ranked: Vec<(u64, usize)> = (0..self.members())
             .map(|server| (score(inode, chunk_index, server as u64), server))
             .collect();
         ranked.sort_unstable_by(|a, b| b.cmp(a));
-        (ranked[0].1, ranked[1].1)
+        let primary = ranked[0].1;
+        let secondary = ranked
+            .iter()
+            .skip(1)
+            .find_map(|&(_, server)| {
+                (self.failure_domains[server].rack != self.failure_domains[primary].rack)
+                    .then_some(server)
+            })
+            .expect("replicated placement requires at least two racks");
+        (primary, secondary)
     }
 
     /// Number of chunks covering `len` bytes.
