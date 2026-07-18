@@ -20,6 +20,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "signal", "net", "sync",
 anyhow.workspace = true
 clap.workspace = true
 uuid.workspace = true
+metrics-exporter-prometheus.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

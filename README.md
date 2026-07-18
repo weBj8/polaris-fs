@@ -25,7 +25,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P9 | Parallel write + 2-way chain replication | ✅ primary-to-secondary durability acknowledgement and survivor reads |
 | P10 | Failure groups + placement policy | ✅ rack-separated replicas; simulated full-rack loss stays readable |
 | P11 | Close-to-open consistency | In progress: close flushes data; regular-file opens revalidate and bypass stale page-cache data |
-| P12–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P12 | Observability | ✅ Prometheus chunkserver metrics, structured tracing init, `porfsadm status` over Stats RPC |
+| P13–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
@@ -37,7 +38,7 @@ cargo build --release
 ./target/release/porfs bench --device demo.img --size 1GiB --extent-size 1MiB --queue-depth 32
 ```
 
-## Production usage (current state, P10; P11 in progress)
+## Production usage (current state, P12; P11 still in progress)
 
 **Format a filesystem and mount it** (one command; both files live on the
 machine you mount on):
@@ -66,11 +67,19 @@ service since P7):
 # on server01 (any machine on the LAN, no porfs metadata needed):
 ./target/release/porfs chunkserver \
     --device /var/lib/porfs/chunk0.img --size 16TiB \
-    --listen 0.0.0.0:9100
+    --listen 0.0.0.0:9100 \
+    --metrics-listen 127.0.0.1:9900
 # extents are then readable/writable over TCP from any client using the
 # porfs-rpc / porfs-cluster client libraries (wire protocol v2,
 # docs/protocol.md — length-prefixed frames, CRC-verified reads,
 # two-way chain replication, write-id idempotency, exponential-backoff reconnect).
+```
+
+**Inspect a chunkserver without changing the wire protocol**:
+
+```bash
+./target/release/porfsadm status --addr 127.0.0.1:9100
+curl -s http://127.0.0.1:9900/metrics | grep '^porfs_'
 ```
 
 **Mounting from another machine on the LAN: not yet.** The FUSE client
@@ -121,7 +130,7 @@ ROADMAP.md            40-phase master plan, every phase has a measurable gate
 docs/format.md        on-disk format contract — change it FIRST, bump FORMAT_VERSION
 crates/porfs-format   on-disk structs and constants
 crates/porfs-store    io_uring extent store (P1–P2)
-crates/porfs-cli      the porfs command line (mkfs / info / bench)
+crates/porfs-cli      the porfs + porfsadm command lines
 scripts/              gate scripts (kill9 soak, ...)
 docs/design-v2-dase-archive.md  archived design exploration (reference only)
 ```
@@ -130,3 +139,4 @@ docs/design-v2-dase-archive.md  archived design exploration (reference only)
 
 - [ROADMAP.md](ROADMAP.md) — 40-phase plan to GPFS feature parity
 - [docs/format.md](docs/format.md) — on-disk format v2 contract
+- [docs/observability.md](docs/observability.md) — tracing, Prometheus metrics, `porfsadm`

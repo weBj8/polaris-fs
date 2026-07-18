@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use porfs_cli::{human_bytes, init_tracing, install_prometheus_exporter};
 use porfs_format::DATA_START;
 use porfs_store::{DEFAULT_QUEUE_DEPTH, ExtentStore};
 
@@ -109,10 +110,14 @@ enum Commands {
         /// Listen address.
         #[arg(long, default_value = "127.0.0.1:9100")]
         listen: std::net::SocketAddr,
+        /// Optional Prometheus HTTP listener (for example 127.0.0.1:9900).
+        #[arg(long)]
+        metrics_listen: Option<std::net::SocketAddr>,
     },
 }
 
 fn main() -> Result<()> {
+    init_tracing()?;
     match Cli::parse().command {
         Commands::Mkfs { device, size, meta } => cmd_mkfs(&device, &size, meta.as_deref()),
         Commands::Info { device } => cmd_info(&device),
@@ -127,7 +132,8 @@ fn main() -> Result<()> {
             device,
             size,
             listen,
-        } => cmd_chunkserver(&device, size.as_deref(), listen),
+            metrics_listen,
+        } => cmd_chunkserver(&device, size.as_deref(), listen, metrics_listen),
         Commands::Mount {
             meta,
             data,
@@ -209,6 +215,13 @@ fn cmd_mount(opts: MountOpts<'_>) -> Result<()> {
     };
     let fs = porfs_fuse::PorfsFs::open(meta, data, config)
         .with_context(|| format!("open MDS ({}, {})", meta.display(), data.display()))?;
+    tracing::info!(
+        command = "mount",
+        meta = %meta.display(),
+        data = %data.display(),
+        mountpoint = %mountpoint.display(),
+        "starting FUSE mount"
+    );
     // Owner-only access (no allow_other); kernel permission enforcement
     // (default_permissions) is on unless explicitly disabled.
     let mut fuse_config = Config::default();
@@ -231,10 +244,16 @@ fn cmd_mount(opts: MountOpts<'_>) -> Result<()> {
     );
     fuser::mount2(fs, mountpoint, &fuse_config).context("fuse session error")?;
     println!("porfs: unmounted {}", mountpoint.display());
+    tracing::info!(command = "mount", mountpoint = %mountpoint.display(), "FUSE mount exited");
     Ok(())
 }
 
-fn cmd_chunkserver(device: &Path, size: Option<&str>, listen: std::net::SocketAddr) -> Result<()> {
+fn cmd_chunkserver(
+    device: &Path,
+    size: Option<&str>,
+    listen: std::net::SocketAddr,
+    metrics_listen: Option<std::net::SocketAddr>,
+) -> Result<()> {
     let device = device.to_path_buf();
     let size = size.map(parse_size).transpose()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -242,6 +261,17 @@ fn cmd_chunkserver(device: &Path, size: Option<&str>, listen: std::net::SocketAd
         .build()
         .context("build tokio runtime")?;
     runtime.block_on(async move {
+        tracing::info!(
+            command = "chunkserver",
+            device = %device.display(),
+            %listen,
+            metrics_listen = ?metrics_listen,
+            "starting chunkserver"
+        );
+        if let Some(metrics_listen) = metrics_listen {
+            install_prometheus_exporter(metrics_listen)?;
+            tracing::info!(%metrics_listen, "Prometheus exporter listening");
+        }
         let listener = tokio::net::TcpListener::bind(listen)
             .await
             .with_context(|| format!("bind {listen}"))?;
@@ -260,8 +290,10 @@ fn cmd_chunkserver(device: &Path, size: Option<&str>, listen: std::net::SocketAd
             device.display(),
             server.addr()
         );
+        tracing::info!(device = %device.display(), addr = %server.addr(), "chunkserver ready");
         tokio::signal::ctrl_c().await?;
         println!("porfs-chunkserver: shutting down");
+        tracing::info!("chunkserver shutting down");
         let _ = shutdown_tx.send(true);
         drop(server);
         Ok::<(), anyhow::Error>(())
@@ -270,6 +302,12 @@ fn cmd_chunkserver(device: &Path, size: Option<&str>, listen: std::net::SocketAd
 }
 
 fn cmd_mds_check(meta: &Path, data: &Path) -> Result<()> {
+    tracing::info!(
+        command = "mds-check",
+        meta = %meta.display(),
+        data = %data.display(),
+        "opening metadata service"
+    );
     let mut mds = porfs_mds::Mds::open(meta, data)
         .with_context(|| format!("open MDS ({}, {})", meta.display(), data.display()))?;
     let report = mds.self_check().context("mds self-check failed")?;
@@ -285,6 +323,13 @@ fn cmd_mds_check(meta: &Path, data: &Path) -> Result<()> {
 
 fn cmd_mkfs(device: &Path, size: &str, meta: Option<&Path>) -> Result<()> {
     let size = parse_size(size)?;
+    tracing::info!(
+        command = "mkfs",
+        device = %device.display(),
+        meta = meta.map(|path| path.display().to_string()),
+        size_bytes = size,
+        "formatting device"
+    );
     match meta {
         None => {
             let store = ExtentStore::create(device, size)
@@ -297,7 +342,7 @@ fn cmd_mkfs(device: &Path, size: &str, meta: Option<&Path>) -> Result<()> {
             println!(
                 "  device_size:  {} ({})",
                 store.device_size(),
-                human(store.device_size())
+                human_bytes(store.device_size())
             );
             println!("  uuid:         {}", uuid::Uuid::from_bytes(store.uuid()));
             println!("  data_start:   {DATA_START}");
@@ -317,7 +362,7 @@ fn cmd_mkfs(device: &Path, size: &str, meta: Option<&Path>) -> Result<()> {
             println!(
                 "  device_size:  {} ({})",
                 stats.total_bytes,
-                human(stats.total_bytes)
+                human_bytes(stats.total_bytes)
             );
         }
     }
@@ -325,6 +370,7 @@ fn cmd_mkfs(device: &Path, size: &str, meta: Option<&Path>) -> Result<()> {
 }
 
 fn cmd_info(device: &Path) -> Result<()> {
+    tracing::info!(command = "info", device = %device.display(), "reading device info");
     let store = ExtentStore::open(device).with_context(|| format!("open {}", device.display()))?;
     println!("device:         {}", device.display());
     println!("format_version: {}", porfs_format::FORMAT_VERSION);
@@ -332,7 +378,7 @@ fn cmd_info(device: &Path) -> Result<()> {
     println!(
         "device_size:    {} ({})",
         store.device_size(),
-        human(store.device_size())
+        human_bytes(store.device_size())
     );
     println!("data_start:     {DATA_START}");
     println!("tail:           {}", store.tail());
@@ -340,7 +386,7 @@ fn cmd_info(device: &Path) -> Result<()> {
     println!(
         "live_bytes:     {} ({})",
         store.live_bytes(),
-        human(store.live_bytes())
+        human_bytes(store.live_bytes())
     );
     println!("sync_seq:       {}", store.sync_seq());
     println!("confirmed_id:   {}", store.confirmed_id());
@@ -367,23 +413,6 @@ fn io_mode(direct: bool) -> &'static str {
         "O_DIRECT"
     } else {
         "buffered (O_DIRECT unsupported)"
-    }
-}
-
-/// Human-readable byte size (base 1024).
-fn human(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-    let b = bytes as f64;
-    if b >= GIB {
-        format!("{:.1} GiB", b / GIB)
-    } else if b >= MIB {
-        format!("{:.1} MiB", b / MIB)
-    } else if b >= KIB {
-        format!("{:.1} KiB", b / KIB)
-    } else {
-        format!("{bytes} B")
     }
 }
 

@@ -6,6 +6,7 @@ pub mod proto;
 pub mod server;
 
 pub use client::ChunkClient;
+pub use client::StoreStats;
 pub use proto::{ErrorCode, MAX_FRAME, PROTOCOL_VERSION, Request, Response};
 
 /// Errors surfaced by the client (the server never fails a connection

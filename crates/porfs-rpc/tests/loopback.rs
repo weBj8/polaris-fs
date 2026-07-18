@@ -122,8 +122,8 @@ async fn write_read_roundtrip_all_sizes() {
         let back = fx.client.read_extent(id).await.unwrap();
         assert_eq!(back, data, "size {size}");
     }
-    let (_, _, _, extent_count, _) = fx.client.stats().await.unwrap();
-    assert_eq!(extent_count, 4);
+    let stats = fx.client.stats().await.unwrap();
+    assert_eq!(stats.extent_count, 4);
     stop(fx).await;
 }
 
@@ -142,8 +142,8 @@ async fn write_id_is_idempotent() {
         .await
         .unwrap();
     assert_eq!(first, second);
-    let (_, _, _, extent_count, _) = fx.client.stats().await.unwrap();
-    assert_eq!(extent_count, 1, "retry must not append a duplicate");
+    let stats = fx.client.stats().await.unwrap();
+    assert_eq!(stats.extent_count, 1, "retry must not append a duplicate");
     stop(fx).await;
 }
 
@@ -296,8 +296,8 @@ async fn concurrent_clients_isolated_writes() {
     for task in tasks {
         task.await.unwrap();
     }
-    let (_, _, _, extent_count, _) = fx.client.stats().await.unwrap();
-    assert_eq!(extent_count, 8 * 32);
+    let stats = fx.client.stats().await.unwrap();
+    assert_eq!(stats.extent_count, 8 * 32);
     stop(fx).await;
 }
 
