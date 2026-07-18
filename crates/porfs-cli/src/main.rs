@@ -96,6 +96,20 @@ enum Commands {
         #[arg(long)]
         format: Option<String>,
     },
+    /// Run a chunkserver: serve an extent-store device over wire
+    /// protocol v1 (docs/protocol.md) until interrupted.
+    Chunkserver {
+        /// Extent-store device file.
+        #[arg(long)]
+        device: std::path::PathBuf,
+        /// Create the device with this size first when it does not exist
+        /// (e.g. 16GiB).
+        #[arg(long)]
+        size: Option<String>,
+        /// Listen address.
+        #[arg(long, default_value = "127.0.0.1:9100")]
+        listen: std::net::SocketAddr,
+    },
 }
 
 fn main() -> Result<()> {
@@ -109,6 +123,11 @@ fn main() -> Result<()> {
             queue_depth,
         } => bench::cmd_bench(&device, &size, &extent_size, queue_depth),
         Commands::MdsCheck { meta, data } => cmd_mds_check(&meta, &data),
+        Commands::Chunkserver {
+            device,
+            size,
+            listen,
+        } => cmd_chunkserver(&device, size.as_deref(), listen),
         Commands::Mount {
             meta,
             data,
@@ -212,6 +231,41 @@ fn cmd_mount(opts: MountOpts<'_>) -> Result<()> {
     );
     fuser::mount2(fs, mountpoint, &fuse_config).context("fuse session error")?;
     println!("porfs: unmounted {}", mountpoint.display());
+    Ok(())
+}
+
+fn cmd_chunkserver(device: &Path, size: Option<&str>, listen: std::net::SocketAddr) -> Result<()> {
+    let device = device.to_path_buf();
+    let size = size.map(parse_size).transpose()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
+    runtime.block_on(async move {
+        let listener = tokio::net::TcpListener::bind(listen)
+            .await
+            .with_context(|| format!("bind {listen}"))?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let open_device = device.clone();
+        let open = move || match size {
+            Some(size) => porfs_store::ExtentStore::create(&open_device, size),
+            None => porfs_store::ExtentStore::open(&open_device),
+        };
+        let server = porfs_rpc::server::serve(listener, open, shutdown_rx)
+            .await
+            .map_err(|err| anyhow::anyhow!(err))
+            .context("serve chunkserver")?;
+        println!(
+            "porfs-chunkserver: serving {} on {}",
+            device.display(),
+            server.addr()
+        );
+        tokio::signal::ctrl_c().await?;
+        println!("porfs-chunkserver: shutting down");
+        let _ = shutdown_tx.send(true);
+        drop(server);
+        Ok::<(), anyhow::Error>(())
+    })?;
     Ok(())
 }
 

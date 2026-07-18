@@ -20,7 +20,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P4 | FUSE client v0: real mount, basic POSIX ops | ✅ 11 real-mount integration tests, 103 workspace tests green |
 | P5 | POSIX completion I: xattr, symlink, mknod, sparse, fsync/fdatasync, rename matrix; hash-ordered big-directory index | ✅ 114 tests green; 1M-entry dir lists correctly (`ls -f` 2.0s release vs xfs 0.2s); known-issue: non-mounter-uid EACCES |
 | P6 | MVP freeze: one-command format+mount; real-workload smoke | ✅ git clone/fsck + busybox build + sqlite WAL stress, all zero data errors on a real mount |
-| P7–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P7 | RPC + chunkserver: wire protocol v1, extent I/O as a service | ✅ kill -9 keeps confirmed extents over TCP; reconnect semantics documented; 128 tests green |
+| P8–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 

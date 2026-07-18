@@ -1,0 +1,27 @@
+[package]
+name = "porfs-rpc"
+description = "PolarisFS wire protocol v1: chunkserver RPC (length-prefixed frames over TCP, bincode 2 payloads) — see docs/protocol.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+porfs-format = { path = "../porfs-format" }
+porfs-store = { path = "../porfs-store" }
+thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
+bincode = { version = "2", features = ["serde"] }
+bytes = "1"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio = { version = "1", features = [
+    "net",
+    "io-util",
+    "sync",
+    "time",
+    "rt-multi-thread",
+    "macros",
+] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -208,10 +208,22 @@ unmount. **First "usable" milestone reached.**
 
 ### Act 2: multi-node parallelism (P7–P13) — become "distributed"
 
-**P7 · RPC + chunkserver service** (2 wks)
-Length-prefixed binary frames over TCP (tokio-util codec + bincode; evaluate glommio
-for the data plane), static membership, extent read/write as a service.
-Gate: cross-machine extent I/O correct; reconnect semantics documented.
+**P7 · RPC + chunkserver service** (2 wks) ✅ DONE
+Delivered: wire protocol v1 contract (`docs/protocol.md` — LE length-prefixed
+frames, bincode-2 payloads; Hello/WriteExtent(write_id-idempotent)/ReadExtent
+(CRC-verified)/Tombstone/Sync/Stats + machine error codes; normative reconnect
+semantics in §4); `crates/porfs-rpc` (tokio-util codec server on a
+store-owner thread — the `!Send` ExtentStore never crosses threads — plus a
+lazy-reconnect client with capped exponential backoff and one transparent
+idempotent retry); `porfs chunkserver` subcommand. Data plane stays tokio
+(glommio not needed: the store already runs io_uring on its own thread).
+Gate: cross-machine extent I/O correct — ✅ two processes over real TCP:
+byte-exact writes of 1B–4MiB, write_id dedup, tombstone semantics, oversize
+rejection, 8 concurrent clients × 32 writes; durability over the wire:
+kill -9 the chunkserver after Sync loses zero confirmed extents
+(restart reads back byte-exact); reconnect semantics documented
+(protocol.md §4) and behaviorally tested (ops wait out an outage, complete
+on same-address restart). 128 workspace tests green.
 
 **P8 · Striped parallel read** (2 wks)
 File→chunk→chunkserver mapping as a pure function (CRUSH-style, no central lookup);
@@ -427,5 +439,7 @@ past 50 nodes and is not part of GPFS-parity basics.
    known-issue: non-mounter-uid EACCES)
 6. ✅ P6 (MVP freeze: mount --format one command; git-clone/fsck + busybox
    build + sqlite-WAL stress all clean on a real mount)
-7. Next: **P7 · RPC + chunkserver service** (length-prefixed frames over TCP;
-   static membership; extent I/O as a service)
+7. ✅ P7 (porfs-rpc wire v1 + chunkserver + reconnect/backoff client; kill -9
+   keeps confirmed extents over TCP; 128 tests green)
+8. Next: **P8 · Striped parallel read** (file→chunk→chunkserver as a pure
+   function (CRUSH-style); parallel client reads)
