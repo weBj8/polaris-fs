@@ -24,7 +24,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P8 | Striped parallel read: CRUSH-style rendezvous placement, per-server pipelined reads | ✅ 4-client striped aggregate = 77–84% of measured pool capacity (scripts/stripe-bench.sh) |
 | P9 | Parallel write + 2-way chain replication | ✅ primary-to-secondary durability acknowledgement and survivor reads |
 | P10 | Failure groups + placement policy | ✅ rack-separated replicas; simulated full-rack loss stays readable |
-| P11–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P11 | Close-to-open consistency | In progress: close flushes data; regular-file opens revalidate and bypass stale page-cache data |
+| P12–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
@@ -36,7 +37,7 @@ cargo build --release
 ./target/release/porfs bench --device demo.img --size 1GiB --extent-size 1MiB --queue-depth 32
 ```
 
-## Production usage (current state, P10)
+## Production usage (current state, P10; P11 in progress)
 
 **Format a filesystem and mount it** (one command; both files live on the
 machine you mount on):
@@ -84,6 +85,17 @@ LAN machines serving extent I/O to client-library users (e.g. the striped
 reader, replicated writer, `scripts/stripe-bench.sh`). For replicated
 layouts, construct cluster membership with real rack/chassis tags; P10 forces
 the two copies onto different racks.
+
+### Cache and close-to-open semantics
+
+Regular-file `open` always revalidates the inode at the MDS and uses direct
+I/O, so a new open observes data written and closed by another client rather
+than a stale kernel page-cache copy. `close` flushes the file through `fsync`,
+making its completed writes durable before a subsequent open. Attribute and
+directory-entry replies still use `--attr-ttl` and `--entry-ttl` (one second by
+default), so metadata-only observations can remain stale for at most the
+configured TTL. This is close-to-open consistency, not the concurrent-writer,
+`mmap`, or `O_APPEND` coherence planned for P17.
 
 ## Tests and gates
 

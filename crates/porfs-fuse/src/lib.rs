@@ -9,10 +9,8 @@
 //! Op wiring is deliberately boring: every FUSE op maps to the MDS call of
 //! the same name, errors map to errnos (`map` module), and times/kinds map
 //! mechanically. Semantics gaps of v0 (documented in the phase report):
-//! no symlink/mknod (P5), no xattr (P5), no fsync-on-close (close-to-open
-//! lands in P11), no permission checks (`access` allows all; ACLs land in
-//! P24), and O_APPEND correctness under a stale attribute cache is
-//! single-client-only until P17.
+//! no permission checks (`access` allows all; ACLs land in P24), and
+//! O_APPEND correctness under concurrent writers is deferred to P17.
 
 mod config;
 mod fs;

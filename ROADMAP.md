@@ -259,9 +259,12 @@ Delivered: topology-tagged membership (rack/chassis), rack-separated rendezvous
 replica placement, and a simulated full-rack-loss readability gate.
 Gate: simulated full-rack power loss loses nothing and stays readable. ✅
 
-**P11 · Close-to-open consistency** (1–2 wks)
-Client attribute/page-cache timeout model documented + implemented; open forces revalidation.
-Gate: multi-machine open/close cross-read/write verification shows zero errors.
+**P11 · Close-to-open consistency** (1–2 wks) — in progress
+Implemented: configured attribute/entry TTL model; regular-file opens revalidate
+at the MDS and use direct I/O to avoid stale page-cache data; close flushes with
+`fsync`; same-mount close/open cross-read/write verification is green. The
+multi-machine gate remains blocked on the P16 metadata RPC service because the
+current MDS is embedded in each mount.
 
 **P12 · Observability** (1 wk)
 prometheus metrics (latency histograms/bandwidth/replica watermarks), `porfsadm` CLI,
@@ -466,5 +469,5 @@ past 50 nodes and is not part of GPFS-parity basics.
    layouts and survivor read failover)
 10. ✅ P10 (rack/chassis-tagged membership; replicas forced across racks;
     full-rack-loss readability gate)
-11. Next: **P11 · Close-to-open consistency** (client cache timeout model and
-    cross-machine open/close revalidation)
+11. P11 in progress (close flush + open revalidation; direct-I/O data-cache
+    bypass; multi-machine gate blocked on P16 metadata RPC)

@@ -514,7 +514,14 @@ impl Filesystem for PorfsFs {
                 NodeKind::Dir => reply.error(Errno::EISDIR),
                 // Fifos must open successfully: the kernel pipes I/O through
                 // its own fifo implementation, but it still calls our open.
-                NodeKind::File | NodeKind::Fifo => reply.opened(FileHandle(0), FopenFlags::empty()),
+                NodeKind::File => {
+                    // Revalidating above and bypassing the kernel page cache
+                    // gives every open a fresh view of data closed by another
+                    // client. P17 replaces this conservative policy with
+                    // lease-backed coherent caching.
+                    reply.opened(FileHandle(0), FopenFlags::FOPEN_DIRECT_IO);
+                }
+                NodeKind::Fifo => reply.opened(FileHandle(0), FopenFlags::empty()),
                 NodeKind::Symlink | NodeKind::Socket | NodeKind::Chr | NodeKind::Blk => {
                     reply.error(Errno::ENXIO)
                 }
@@ -565,13 +572,16 @@ impl Filesystem for PorfsFs {
     fn flush(
         &self,
         _req: &Request,
-        _ino: INodeNo,
+        ino: INodeNo,
         _fh: FileHandle,
         _lock_owner: LockOwner,
         reply: ReplyEmpty,
     ) {
-        // No fsync-on-close in v0: close-to-open consistency is P11.
-        reply.ok();
+        match self.call(move |mds| mds.fsync(ino.0)) {
+            Ok(Ok(())) => reply.ok(),
+            Ok(Err(err)) => reply.error(errno(&err)),
+            Err(err) => reply.error(err),
+        }
     }
 
     fn fsync(

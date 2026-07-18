@@ -491,6 +491,28 @@ fn remount_preserves_tree_and_data() {
     assert_eq!(report.inodes, 5); // root, dir, sub, a.bin, b.bin
 }
 
+#[test]
+fn close_to_open_observes_closed_data() {
+    if !require_mount("close_to_open_observes_closed_data") {
+        return;
+    }
+    let Some(fx) = Fixture::new() else { return };
+    let path = fx.mp.join("close-to-open");
+
+    {
+        let mut writer = fs::File::create(&path).unwrap();
+        writer.write_all(b"first").unwrap();
+    }
+    assert_eq!(fs::read(&path).unwrap(), b"first");
+
+    {
+        let mut writer = fs::File::options().write(true).open(&path).unwrap();
+        writer.write_all(b"second").unwrap();
+    }
+    assert_eq!(fs::read(&path).unwrap(), b"second");
+    fx.guard.unmount();
+}
+
 // ---- P5: xattr / symlink / mknod / seek / punch-hole / durability ----
 
 use std::ffi::CString;
