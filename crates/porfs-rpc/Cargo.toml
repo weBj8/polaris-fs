@@ -10,6 +10,7 @@ porfs-format = { path = "../porfs-format" }
 porfs-store = { path = "../porfs-store" }
 thiserror.workspace = true
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 futures-util = { version = "0.3", features = ["sink"] }

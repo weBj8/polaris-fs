@@ -21,7 +21,8 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P5 | POSIX completion I: xattr, symlink, mknod, sparse, fsync/fdatasync, rename matrix; hash-ordered big-directory index | ✅ 114 tests green; 1M-entry dir lists correctly (`ls -f` 2.0s release vs xfs 0.2s); known-issue: non-mounter-uid EACCES |
 | P6 | MVP freeze: one-command format+mount; real-workload smoke | ✅ git clone/fsck + busybox build + sqlite WAL stress, all zero data errors on a real mount |
 | P7 | RPC + chunkserver: wire protocol v1, extent I/O as a service | ✅ kill -9 keeps confirmed extents over TCP; reconnect semantics documented; 128 tests green |
-| P8–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P8 | Striped parallel read: CRUSH-style rendezvous placement, per-server pipelined reads | ✅ 4-client striped aggregate = 77–84% of measured pool capacity (scripts/stripe-bench.sh) |
+| P9–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
@@ -33,12 +34,62 @@ cargo build --release
 ./target/release/porfs bench --device demo.img --size 1GiB --extent-size 1MiB --queue-depth 32
 ```
 
+## Production usage (current state, P8)
+
+**Format a filesystem and mount it** (one command; both files live on the
+machine you mount on):
+
+```bash
+cargo build --release
+mkdir -p /mnt/porfs
+./target/release/porfs mount \
+    --meta /var/lib/porfs/meta.redb \
+    --data /var/lib/porfs/data.img \
+    --mountpoint /mnt/porfs \
+    --format 4TiB                 # formats the pair only on first run
+# runs in the foreground; unmount with: fusermount3 -u /mnt/porfs
+# useful flags: --allow-other (multi-user), --attr-ttl/--entry-ttl (cache),
+#               --no-default-permissions (turn kernel perm checks off)
+```
+
+The pair is a sparse extent device (`data.img`, grows as data lands) plus a
+redb metadata file (`meta.redb`). Put the device on your fastest NVMe; both
+must be on the **same machine as the mount** today.
+
+**Run a chunkserver on another LAN machine** (the data plane IS a network
+service since P7):
+
+```bash
+# on server01 (any machine on the LAN, no porfs metadata needed):
+./target/release/porfs chunkserver \
+    --device /var/lib/porfs/chunk0.img --size 16TiB \
+    --listen 0.0.0.0:9100
+# extents are then readable/writable over TCP from any client using the
+# porfs-rpc / porfs-cluster client libraries (wire protocol v1,
+# docs/protocol.md — length-prefixed frames, CRC-verified reads,
+# write-id-idempotent writes, exponential-backoff reconnect).
+```
+
+**Mounting from another machine on the LAN: not yet.** The FUSE client
+embeds the metadata server (MDS) in-process today, so a mount must be
+local to the MDS files; chunkservers are the only piece that is already a
+network service. The metadata RPC service lands in Act 2 (P16 wraps the
+MDS protocol over the same seam the chunkserver uses), and the write path
+starts striping to remote chunkservers at P9. Until then the supported
+topologies are: (a) format + mount on one machine, (b) chunkservers on
+LAN machines serving extent I/O to client-library users (e.g. the striped
+reader, `scripts/stripe-bench.sh`).
+
 ## Tests and gates
 
 ```bash
 cargo test --workspace            # all unit + integration tests
 cargo clippy --workspace --all-targets
 ./scripts/kill9-soak.sh           # P2 durability gate: 1000 kill -9 soak (~65s)
+./scripts/stripe-bench.sh         # P8 gate: 4-client striped aggregate read
+./scripts/mvp-smoke.sh            # P6 gate: git clone + busybox build + sqlite stress
+./scripts/bigdir-bench.sh         # P5: 1M-entry directory create/ls/find vs baselines
+./scripts/pjdfstest.sh            # pjdfstest suite (root mode: sudo; rootless via userns)
 ```
 
 ## Requirements

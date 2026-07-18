@@ -8,11 +8,12 @@ use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures_util::stream::FuturesOrdered;
 use futures_util::{SinkExt, StreamExt};
 use porfs_store::{ExtentStore, StoreError};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio_util::codec::LengthDelimitedCodec;
 
 use crate::proto::{self, ErrorCode, MAX_FRAME, PROTOCOL_VERSION, Request, Response};
 
@@ -99,6 +100,9 @@ async fn accept_loop(
             accept = listener.accept() => {
                 match accept {
                     Ok((socket, _)) => {
+                        // RPC is request/response ping-pong; Nagle +
+                        // delayed-ACK would stall every exchange.
+                        let _ = socket.set_nodelay(true);
                         let jobs = jobs.clone();
                         tokio::spawn(handle_conn(socket, jobs, started_unix));
                     }
@@ -117,64 +121,79 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-type Conn = Framed<TcpStream, LengthDelimitedCodec>;
-
 /// Encode `response` and send it as one frame; `false` when the
 /// connection is broken.
-async fn send(conn: &mut Conn, response: &Response) -> bool {
+async fn send(
+    sink: &mut (impl SinkExt<bytes::Bytes, Error = std::io::Error> + Unpin),
+    response: &Response,
+) -> bool {
     let payload = match proto::encode(response) {
         Ok(payload) => payload,
         Err(_) => return false,
     };
-    conn.send(bytes::Bytes::from(payload)).await.is_ok()
+    sink.send(bytes::Bytes::from(payload)).await.is_ok()
 }
 
-/// One client connection: Hello first, then ops dispatched to the worker.
+/// In-flight dispatches per connection (bounds buffered payloads).
+const MAX_INFLIGHT: usize = 32;
+
+/// One client connection: Hello first, then frames are read continuously
+/// while their responses stream back IN ORDER (FuturesOrdered) — the
+/// store-thread dispatch latency of one op overlaps the framing of the
+/// next, so a connection streams instead of round-tripping per op.
 async fn handle_conn(socket: TcpStream, jobs: mpsc::Sender<Job>, started_unix: u64) {
-    let mut framed = LengthDelimitedCodec::builder()
+    let framed = LengthDelimitedCodec::builder()
         .little_endian()
         .max_frame_length(MAX_FRAME as usize)
         .new_framed(socket);
-    if !handshake(&mut framed, started_unix).await {
+    let (mut sink, mut stream) = framed.split();
+    if !handshake(&mut sink, &mut stream, started_unix).await {
         return;
     }
+    let mut responses = FuturesOrdered::new();
     loop {
-        let Some(frame) = framed.next().await else {
-            return;
-        };
-        let bytes = match frame {
-            Ok(bytes) => bytes,
-            Err(_) => return, // oversize frame or transport error: drop conn
-        };
-        let request: Request = match proto::decode(&bytes) {
-            Ok(request) => request,
-            Err(_) => {
-                send(
-                    &mut framed,
-                    &Response::error(ErrorCode::BadRequest, "undecodable frame"),
-                )
-                .await;
-                return;
+        tokio::select! {
+            frame = stream.next(), if responses.len() < MAX_INFLIGHT => {
+                let Some(frame) = frame else { return };
+                let Ok(bytes) = frame else { return };
+                let request: Request = match proto::decode(&bytes) {
+                    Ok(request) => request,
+                    Err(_) => {
+                        send(
+                            &mut sink,
+                            &Response::error(ErrorCode::BadRequest, "undecodable frame"),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                if matches!(request, Request::Hello { .. }) {
+                    send(
+                        &mut sink,
+                        &Response::error(ErrorCode::BadRequest, "duplicate hello"),
+                    )
+                    .await;
+                    return;
+                }
+                let jobs = jobs.clone();
+                responses.push_back(async move { dispatch(&jobs, request).await });
             }
-        };
-        if matches!(request, Request::Hello { .. }) {
-            send(
-                &mut framed,
-                &Response::error(ErrorCode::BadRequest, "duplicate hello"),
-            )
-            .await;
-            return;
-        }
-        let response = dispatch(&jobs, request).await;
-        if !send(&mut framed, &response).await {
-            return;
+            Some(response) = responses.next(), if !responses.is_empty() => {
+                if !send(&mut sink, &response).await {
+                    return;
+                }
+            }
         }
     }
 }
 
 /// Enforce Hello-first and the protocol version.
-async fn handshake(conn: &mut Conn, started_unix: u64) -> bool {
-    let Some(frame) = conn.next().await else {
+async fn handshake(
+    sink: &mut (impl SinkExt<bytes::Bytes, Error = std::io::Error> + Unpin),
+    stream: &mut (impl StreamExt<Item = Result<bytes::BytesMut, std::io::Error>> + Unpin),
+    started_unix: u64,
+) -> bool {
+    let Some(frame) = stream.next().await else {
         return false;
     };
     let Ok(bytes) = frame else { return false };
@@ -183,7 +202,7 @@ async fn handshake(conn: &mut Conn, started_unix: u64) -> bool {
             protocol_version, ..
         }) if protocol_version == PROTOCOL_VERSION => {
             send(
-                conn,
+                sink,
                 &Response::HelloAck {
                     protocol_version: PROTOCOL_VERSION,
                     server_nonce: rand_nonce(),
@@ -194,7 +213,7 @@ async fn handshake(conn: &mut Conn, started_unix: u64) -> bool {
         }
         Ok(Request::Hello { .. }) => {
             send(
-                conn,
+                sink,
                 &Response::error(
                     ErrorCode::VersionMismatch,
                     format!("server speaks protocol {PROTOCOL_VERSION}"),
@@ -204,7 +223,7 @@ async fn handshake(conn: &mut Conn, started_unix: u64) -> bool {
             false
         }
         _ => {
-            send(conn, &Response::error(ErrorCode::BadRequest, "hello first")).await;
+            send(sink, &Response::error(ErrorCode::BadRequest, "hello first")).await;
             false
         }
     }

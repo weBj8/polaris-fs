@@ -25,6 +25,8 @@ pub enum Request {
         write_id: u128,
         inode: u64,
         logical_offset: u64,
+        /// serde_bytes: one length-prefixed memcpy, not element-wise serde.
+        #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
     /// Read one extent back, CRC32C-verified.
@@ -49,7 +51,11 @@ pub enum Response {
     /// WriteExtent accepted (appended, not yet durable — see Sync).
     WriteAck { extent_id: u64 },
     /// Extent payload, CRC32C-verified by the server.
-    ReadAck { data: Vec<u8> },
+    ReadAck {
+        /// serde_bytes: one length-prefixed memcpy, not element-wise serde.
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
     /// Tombstone applied (or already applied).
     TombstoneAck,
     /// Durability horizon after a successful group commit.

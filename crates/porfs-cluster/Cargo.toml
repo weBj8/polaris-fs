@@ -1,0 +1,17 @@
+[package]
+name = "porfs-cluster"
+description = "PolarisFS cluster layer: static membership, CRUSH-style rendezvous striping (pure placement function, no central lookup), striped parallel read/write over porfs-rpc"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+porfs-format = { path = "../porfs-format" }
+porfs-rpc = { path = "../porfs-rpc" }
+thiserror.workspace = true
+twox-hash = "2"
+tokio = { version = "1", features = ["sync", "time", "rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+porfs-store = { path = "../porfs-store" }
+tempfile.workspace = true

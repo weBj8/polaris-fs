@@ -135,7 +135,7 @@ fn is_tmpfs(file: &File) -> bool {
     // SAFETY: `file` owns a valid open file descriptor; `stat` points to a
     // valid, properly sized `libc::statfs` as required by `fstatfs(2)`.
     let rc = unsafe { libc::fstatfs(file.as_raw_fd(), &mut stat) };
-    rc == 0 && stat.f_type == TMPFS_MAGIC
+    rc == 0 && stat.f_type == TMPFS_MAGIC.try_into().unwrap()
 }
 
 /// Sequential pread/pwrite driver (buffered fallback): prepare, transfer,

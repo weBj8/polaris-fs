@@ -128,12 +128,49 @@ impl ChunkClient {
         }
     }
 
+    /// Several requests pipelined on the wire (protocol §4: the server
+    /// executes in arrival order, so responses arrive in order) with a
+    /// sliding window of up to `window` in flight — the connection never
+    /// drains between batches. This is the throughput path for striped
+    /// reads.
+    pub async fn call_many(
+        &self,
+        requests: &[Request],
+        window: usize,
+    ) -> Result<Vec<Response>, RpcError> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut guard = self.inner.conn.lock().await;
+        let mut retried = false;
+        loop {
+            if guard.is_none() {
+                *guard = Some(self.connect().await?);
+            }
+            let conn = guard.take().expect("just connected");
+            match roundtrip_many(conn, requests, window.max(1)).await {
+                Ok((conn, responses)) => {
+                    *guard = Some(conn);
+                    return Ok(responses);
+                }
+                // A dead connection is dropped; the transparent retry
+                // reconnects once (ops are idempotent, protocol §4).
+                Err(err) if err.is_io() && !retried => {
+                    retried = true;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     /// Connect + Hello, with exponential backoff on failures.
     async fn connect(&self) -> Result<Framed<TcpStream, LengthDelimitedCodec>, RpcError> {
         loop {
             let attempt = TcpStream::connect(self.inner.addr).await;
             match attempt {
                 Ok(socket) => {
+                    // Request/response ping-pong: no Nagle stalls.
+                    let _ = socket.set_nodelay(true);
                     let mut framed = LengthDelimitedCodec::builder()
                         .little_endian()
                         .max_frame_length(MAX_FRAME as usize)
@@ -199,6 +236,55 @@ async fn roundtrip(
     match proto::decode::<Response>(&frame)? {
         Response::Error { code, message } => Err(RpcError::Remote { code, message }),
         response => Ok(response),
+    }
+}
+
+/// Sliding-window pipelining: keep up to `window` requests in flight,
+/// reading responses in arrival order until all are answered. The
+/// connection is consumed and reunited (split lets reads and writes
+/// proceed independently); on error it is dropped and the caller
+/// reconnects.
+async fn roundtrip_many(
+    conn: Framed<TcpStream, LengthDelimitedCodec>,
+    requests: &[Request],
+    window: usize,
+) -> Result<(Framed<TcpStream, LengthDelimitedCodec>, Vec<Response>), RpcError> {
+    let (mut sink, mut stream) = conn.split();
+    let mut next = 0usize;
+    let mut in_flight = 0usize;
+    let mut out = Vec::with_capacity(requests.len());
+    loop {
+        tokio::select! {
+            result = async {
+                let payload = proto::encode(&requests[next])?;
+                sink.feed(bytes::Bytes::from(payload)).await?;
+                if next + 1 == requests.len() || in_flight + 1 == window {
+                    sink.flush().await?;
+                }
+                Ok::<_, RpcError>(())
+            }, if next < requests.len() && in_flight < window => {
+                result?;
+                next += 1;
+                in_flight += 1;
+            }
+            frame = stream.next(), if in_flight > 0 => {
+                let frame = frame
+                    .ok_or_else(|| RpcError::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)))??;
+                match proto::decode::<Response>(&frame)? {
+                    Response::Error { code, message } => {
+                        return Err(RpcError::Remote { code, message });
+                    }
+                    response => out.push(response),
+                }
+                in_flight -= 1;
+                if out.len() == requests.len() {
+                    let conn = sink.reunite(stream).map_err(|_| {
+                        RpcError::Protocol("framed halves drifted apart".to_string())
+                    })?;
+                    return Ok((conn, out));
+                }
+            }
+        }
     }
 }
 
