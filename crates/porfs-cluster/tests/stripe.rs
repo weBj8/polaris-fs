@@ -231,7 +231,7 @@ async fn replicated_read_fails_over_to_secondary() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn gate_full_rack_loss_keeps_replicated_data_readable() {
+async fn gate_replica_readable_after_full_rack_loss() {
     let cluster = start_cluster_with_topology(vec![
         FailureDomain::new(1, 1),
         FailureDomain::new(1, 2),

@@ -55,9 +55,10 @@ pub struct Membership {
 impl Membership {
     /// Membership from server addresses in index order.
     ///
-    /// This compatibility constructor assigns every server a distinct rack and
-    /// chassis. Production callers must use [`Self::with_topology`] so
-    /// replicated placement receives real failure-domain information.
+    /// This compatibility constructor assigns every server a synthetic,
+    /// distinct rack and chassis. It is suitable for unreplicated callers and
+    /// tests only: production replicated placement must use
+    /// [`Self::with_topology`] with real failure-domain information.
     pub fn new(addrs: Vec<SocketAddr>) -> Self {
         Self::with_topology(
             addrs
@@ -180,7 +181,18 @@ impl StripeMap {
                 (self.failure_domains[server].rack != self.failure_domains[primary].rack)
                     .then_some(server)
             })
-            .expect("replicated placement requires at least two racks");
+            .unwrap_or_else(|| {
+                let mut racks: Vec<u64> = self
+                    .failure_domains
+                    .iter()
+                    .map(|domain| domain.rack)
+                    .collect();
+                racks.sort_unstable();
+                racks.dedup();
+                panic!(
+                    "replicated placement requires at least two racks; configured racks: {racks:?}"
+                );
+            });
         (primary, secondary)
     }
 
