@@ -16,6 +16,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 const DEV_SIZE: u64 = 1 << 30; // 1 GiB sparse per chunkserver
+const SHUTDOWN_SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
 
 #[test]
 fn map_is_deterministic_and_covers_members() {
@@ -176,7 +177,7 @@ async fn replicated_read_fails_over_to_secondary() {
         .unwrap();
     let primary = layout.chunks[0].primary.server;
     let _ = cluster.shutdowns[primary].send(true);
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(SHUTDOWN_SETTLE).await;
     let failover_pool = Pool::new(&cluster.membership);
     assert_eq!(
         stripe_read_replicated(&failover_pool, &layout, 2)

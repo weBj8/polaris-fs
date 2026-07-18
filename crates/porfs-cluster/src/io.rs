@@ -8,6 +8,8 @@ use porfs_rpc::{ChunkClient, Request, Response, RpcError};
 
 use crate::{ChunkLoc, Layout, Membership, ReplicaLoc, ReplicatedLayout, STRIPE_UNIT, StripeMap};
 
+const PRIMARY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Errors of the striped I/O layer.
 #[derive(Debug, thiserror::Error)]
 pub enum ClusterError {
@@ -85,7 +87,7 @@ fn write_id(inode: u64, chunk_index: u64, generation: u64) -> u128 {
     hasher.write_u64(chunk_index);
     hasher.write_u64(generation);
     let high = hasher.finish() as u128;
-    (high << 64) | generation as u128
+    (high << 64) | chunk_index as u128
 }
 
 /// Write `data` as 1 MiB stripe chunks, each on its rendezvous server,
@@ -166,12 +168,8 @@ pub async fn stripe_write_replicated(
             let secondary_id = secondary_id.ok_or_else(|| {
                 RpcError::Protocol("missing secondary write acknowledgement".to_string())
             })?;
-            if client
-                .sync_replicated(Some(secondary_addr))
-                .await?
-                .1
-                .is_none()
-            {
+            let (_, replica_confirmed) = client.sync_replicated(Some(secondary_addr)).await?;
+            if replica_confirmed.is_none() {
                 return Err(RpcError::Protocol(
                     "missing secondary durability acknowledgement".to_string(),
                 ));
@@ -220,7 +218,7 @@ pub async fn stripe_read_replicated(
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
             let data = match tokio::time::timeout(
-                std::time::Duration::from_secs(2),
+                PRIMARY_READ_TIMEOUT,
                 primary.read_extent(loc.primary.extent_id),
             )
             .await
