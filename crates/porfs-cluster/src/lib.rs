@@ -190,7 +190,8 @@ impl StripeMap {
                 racks.sort_unstable();
                 racks.dedup();
                 panic!(
-                    "replicated placement requires at least two racks; configured racks: {racks:?}"
+                    "replicated placement requires at least two racks; found {} unique rack(s): {racks:?}",
+                    racks.len()
                 );
             });
         (primary, secondary)
