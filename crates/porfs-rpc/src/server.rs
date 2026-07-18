@@ -16,6 +16,7 @@ use tokio::sync::{oneshot, watch};
 use tokio_util::codec::LengthDelimitedCodec;
 
 use crate::proto::{self, ErrorCode, MAX_FRAME, PROTOCOL_VERSION, Request, Response};
+use crate::ChunkClient;
 
 /// One unit of work for the store thread: op + reply slot.
 type Job = (Request, oneshot::Sender<Response>);
@@ -176,7 +177,7 @@ async fn handle_conn(socket: TcpStream, jobs: mpsc::Sender<Job>, started_unix: u
                     return;
                 }
                 let jobs = jobs.clone();
-                responses.push_back(async move { dispatch(&jobs, request).await });
+                responses.push_back(async move { dispatch_chain(&jobs, request).await });
             }
             Some(response) = responses.next(), if !responses.is_empty() => {
                 if !send(&mut sink, &response).await {
@@ -240,6 +241,63 @@ async fn dispatch(jobs: &mpsc::Sender<Job>, request: Request) -> Response {
     if jobs.send((request, tx)).is_err() {
         return Response::error(ErrorCode::Internal, "store worker gone");
     }
+
+    /// Execute the local half of a chain operation, then forward its immutable
+    /// payload or durability barrier to the secondary. The forwarded request uses
+    /// the ordinary client API with no secondary of its own, keeping P9 strictly
+    /// two-way and avoiding forwarding loops.
+    async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response {
+        match request {
+            Request::WriteExtent {
+                write_id,
+                inode,
+                logical_offset,
+                data,
+                next: Some(secondary),
+            } => {
+                let local = dispatch(
+                    jobs,
+                    Request::WriteExtent {
+                        write_id,
+                        inode,
+                        logical_offset,
+                        data: data.clone(),
+                        next: None,
+                    },
+                )
+                .await;
+                let Response::WriteAck { extent_id, .. } = local else {
+                    return local;
+                };
+                match ChunkClient::new(secondary)
+                    .write_extent(write_id, inode, logical_offset, data)
+                    .await
+                {
+                    Ok(replica_extent_id) => Response::WriteAck {
+                        extent_id,
+                        replica_extent_id: Some(replica_extent_id),
+                    },
+                    Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                }
+            }
+            Request::Sync {
+                next: Some(secondary),
+            } => {
+                let local = dispatch(jobs, Request::Sync { next: None }).await;
+                let Response::SyncAck { confirmed_id, .. } = local else {
+                    return local;
+                };
+                match ChunkClient::new(secondary).sync().await {
+                    Ok(replica_confirmed_id) => Response::SyncAck {
+                        confirmed_id,
+                        replica_confirmed_id: Some(replica_confirmed_id),
+                    },
+                    Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                }
+            }
+            request => dispatch(jobs, request).await,
+        }
+    }
     rx.await
         .unwrap_or_else(|_| Response::error(ErrorCode::Internal, "store worker died"))
 }
@@ -264,6 +322,7 @@ fn execute(store: &mut ExtentStore, dedup: &mut HashMap<u128, u64>, request: Req
             inode,
             logical_offset,
             data,
+            next: _,
         } => {
             if data.is_empty() {
                 return Response::error(ErrorCode::BadRequest, "empty extent payload");
@@ -281,12 +340,16 @@ fn execute(store: &mut ExtentStore, dedup: &mut HashMap<u128, u64>, request: Req
             if let Some(extent_id) = dedup.get(&write_id) {
                 return Response::WriteAck {
                     extent_id: *extent_id,
+                    replica_extent_id: None,
                 };
             }
             match store.append(inode, logical_offset, &data) {
                 Ok(extent_id) => {
                     dedup.insert(write_id, extent_id);
-                    Response::WriteAck { extent_id }
+                    Response::WriteAck {
+                        extent_id,
+                        replica_extent_id: None,
+                    }
                 }
                 Err(err) => store_error(err),
             }
@@ -300,9 +363,10 @@ fn execute(store: &mut ExtentStore, dedup: &mut HashMap<u128, u64>, request: Req
             Err(StoreError::Tombstoned(_)) => Response::TombstoneAck, // idempotent
             Err(err) => store_error(err),
         },
-        Request::Sync => match store.sync() {
+        Request::Sync { next: _ } => match store.sync() {
             Ok(()) => Response::SyncAck {
                 confirmed_id: store.confirmed_id(),
+                replica_confirmed_id: None,
             },
             Err(err) => store_error(err),
         },
