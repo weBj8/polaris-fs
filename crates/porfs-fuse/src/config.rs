@@ -1,8 +1,10 @@
 //! Mount-time configuration for [`crate::PorfsFs`]: attribute-cache TTLs.
 //!
 //! The kernel caches attributes and lookup results for these durations.
-//! Shorter TTLs trade performance for cross-client freshness; v1 targets
-//! close-to-open consistency (P11), where open() revalidates regardless.
+//! Shorter TTLs trade metadata freshness for performance. Regular-file opens
+//! always revalidate at the MDS and use direct I/O, so cached data never
+//! survives across an open; namespace and attribute observations may still
+//! remain stale until their configured TTL expires.
 
 use std::time::Duration;
 
