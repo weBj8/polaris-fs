@@ -1,0 +1,401 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    # tags: ["v*"]
+  workflow_dispatch:
+    # inputs:
+    #   release_tag:
+    #     description: Existing version tag to build and publish, for example v1.2.3
+    #     required: true
+    #     type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Resolve source and cache dependencies
+    runs-on: ubuntu-24.04
+    outputs:
+      is_release: ${{ steps.resolve.outputs.is_release }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      release_sha: ${{ steps.source.outputs.release_sha }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Resolve source ref
+        id: resolve
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PUSH_REF_NAME: ${{ github.ref_name }}
+          PUSH_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+
+          tag=''
+          if [[ "$EVENT_NAME" == 'workflow_dispatch' ]]; then
+            test "$GITHUB_REF" = "refs/heads/main"
+            tag="$DISPATCH_TAG"
+          elif [[ "$EVENT_NAME" == 'push' && "$PUSH_REF_TYPE" == 'tag' ]]; then
+            tag="$PUSH_REF_NAME"
+          fi
+
+          if [[ -n "$tag" ]]; then
+            if [[ ! "$tag" =~ ^v[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+              printf '%s\n' 'release_tag must be a path-safe v-prefixed version tag' >&2
+              exit 1
+            fi
+            git check-ref-format "refs/tags/$tag" >/dev/null
+            gh api --silent "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null
+            source_ref="refs/tags/$tag"
+            is_release='true'
+          else
+            source_ref="$GITHUB_SHA"
+            is_release='false'
+          fi
+
+          {
+            printf 'is_release=%s\n' "$is_release"
+            printf 'release_tag=%s\n' "$tag"
+            printf 'source_ref=%s\n' "$source_ref"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.resolve.outputs.source_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Pin source commit
+        id: source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_RELEASE: ${{ steps.resolve.outputs.is_release }}
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          head_sha="$(git rev-parse --verify HEAD)"
+          release_sha=''
+          if [[ "$IS_RELEASE" == 'true' ]]; then
+            tag_sha="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
+            test "$head_sha" = "$tag_sha"
+            release_sha="$head_sha"
+
+            if [[ "$EVENT_NAME" == 'push' ]]; then
+              test "$head_sha" = "$GITHUB_SHA"
+            fi
+          else
+            test "$head_sha" = "$GITHUB_SHA"
+          fi
+
+          printf 'release_sha=%s\n' "$release_sha" >>"$GITHUB_OUTPUT"
+          printf 'source_sha=%s\n' "$head_sha" >>"$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: 1.96.0
+          targets: x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl
+
+      - name: Restore Cargo downloads
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fetch locked dependencies
+        run: >-
+          cargo fetch --locked
+          --target x86_64-unknown-linux-gnu
+          --target x86_64-unknown-linux-musl
+
+      - name: Save Cargo downloads from main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  test:
+    name: Test workspace
+    needs: prepare
+    runs-on: ubuntu-24.04
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+    steps:
+      - name: Check out immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse --verify HEAD)"
+          test "$head_sha" = "$EXPECTED_SHA"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: 1.96.0
+
+      - name: Restore Cargo downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        with:
+          version: v0.16.0
+
+      - name: Run unit and integration tests
+        run: cargo test --workspace --locked
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [prepare, test]
+    if: needs.prepare.outputs.is_release == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            musl: false
+          - target: x86_64-unknown-linux-musl
+            musl: true
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: READ_ONLY
+    steps:
+      - name: Check out immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse --verify HEAD)"
+          test "$head_sha" = "$EXPECTED_SHA"
+
+      - name: Install musl linker
+        if: matrix.musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          command -v musl-gcc
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: 1.96.0
+          targets: ${{ matrix.target }}
+
+      - name: Restore Cargo downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        with:
+          version: v0.16.0
+
+      - name: Build release executable
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          RUSTFLAGS: ${{ matrix.musl && '-C target-feature=+crt-static' || '' }}
+        run: >-
+          cargo build --locked --release -p porfs-cli --bin porfs
+          --target "${{ matrix.target }}"
+
+      - name: Package and smoke-test executable
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+
+          stage="$RUNNER_TEMP/stage"
+          dist="$RUNNER_TEMP/dist"
+          smoke="$(mktemp -d "$RUNNER_TEMP/porfs-smoke.XXXXXX")"
+          trap 'rm -rf "$smoke"' EXIT
+          mkdir -p "$stage" "$dist"
+
+          archive="porfs-${RELEASE_TAG}-${TARGET}.tar.gz"
+          install -Dm755 "target/$TARGET/release/porfs" "$stage/porfs"
+          tar -C "$stage" -czf "$dist/$archive" porfs
+          (
+            cd "$dist"
+            sha256sum "$archive" >"$archive.sha256"
+            sha256sum -c "$archive.sha256"
+          )
+
+          tar -C "$smoke" -xzf "$dist/$archive"
+          bin="$smoke/porfs"
+          test -x "$bin"
+          "$bin" --version
+          "$bin" --help >/dev/null
+          "$bin" mkfs --device "$smoke/porfs.img" --size 80MiB
+          "$bin" info --device "$smoke/porfs.img"
+
+          file "$bin"
+          readelf -hW "$bin" >"$RUNNER_TEMP/elf-header"
+          grep -Eq 'Class:[[:space:]]+ELF64' "$RUNNER_TEMP/elf-header"
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' "$RUNNER_TEMP/elf-header"
+
+          if [[ "$TARGET" == 'x86_64-unknown-linux-musl' ]]; then
+            readelf -lW "$bin" >"$RUNNER_TEMP/elf-program"
+            readelf -dW "$bin" >"$RUNNER_TEMP/elf-dynamic"
+            if grep -Fq 'INTERP' "$RUNNER_TEMP/elf-program"; then
+              printf '%s\n' 'musl binary unexpectedly requests an interpreter' >&2
+              exit 1
+            fi
+            if grep -Fq '(NEEDED)' "$RUNNER_TEMP/elf-dynamic"; then
+              printf '%s\n' 'musl binary unexpectedly has a dynamic dependency' >&2
+              exit 1
+            fi
+          else
+            readelf --version-info "$bin" >"$RUNNER_TEMP/glibc-versions"
+            if grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' "$RUNNER_TEMP/glibc-versions" >"$RUNNER_TEMP/glibc-imports"; then
+              sort -Vu "$RUNNER_TEMP/glibc-imports"
+            else
+              printf '%s\n' 'GNU binary imports no versioned GLIBC symbols'
+            fi
+          fi
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/dist/porfs-${{ needs.prepare.outputs.release_tag }}-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/dist/porfs-${{ needs.prepare.outputs.release_tag }}-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+  # publish:
+  #   name: Publish GitHub Release
+  #   needs: [prepare, build]
+  #   if: needs.prepare.outputs.is_release == 'true'
+  #   runs-on: ubuntu-24.04
+  #   permissions:
+  #     contents: write
+  #   concurrency:
+  #     group: release-${{ github.repository_id }}-${{ needs.prepare.outputs.release_tag }}
+  #     cancel-in-progress: false
+  #   steps:
+  #     - name: Check out release tag
+  #       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+  #       with:
+  #         ref: refs/tags/${{ needs.prepare.outputs.release_tag }}
+  #         persist-credentials: false
+
+  #     - name: Verify release tag identity
+  #       shell: bash
+  #       env:
+  #         EXPECTED_SHA: ${{ needs.prepare.outputs.release_sha }}
+  #         TAG: ${{ needs.prepare.outputs.release_tag }}
+  #       run: |
+  #         set -euo pipefail
+  #         head_sha="$(git rev-parse --verify HEAD)"
+  #         tag_sha="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+  #         test "$head_sha" = "$tag_sha"
+  #         test "$head_sha" = "$EXPECTED_SHA"
+
+  #     - name: Download release archives
+  #       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+  #       with:
+  #         pattern: release-*
+  #         path: ${{ runner.temp }}/release-assets
+  #         merge-multiple: true
+  #         digest-mismatch: error
+
+  #     - name: Verify release archives
+  #       shell: bash
+  #       env:
+  #         DIST: ${{ runner.temp }}/release-assets
+  #         TAG: ${{ needs.prepare.outputs.release_tag }}
+  #       run: |
+  #         set -euo pipefail
+
+  #         expected=(
+  #           "$DIST/porfs-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+  #           "$DIST/porfs-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+  #         )
+  #         for asset in "${expected[@]}"; do
+  #           test -f "$asset"
+  #           test -f "$asset.sha256"
+  #           (
+  #             cd "$DIST"
+  #             sha256sum -c "$(basename "$asset.sha256")"
+  #           )
+  #         done
+
+  #         shopt -s nullglob
+  #         archives=("$DIST"/*.tar.gz)
+  #         test "${#archives[@]}" -eq 2
+
+  #     - name: Create GitHub Release
+  #       shell: bash
+  #       env:
+  #         DIST: ${{ runner.temp }}/release-assets
+  #         GH_PROMPT_DISABLED: '1'
+  #         GH_TOKEN: ${{ github.token }}
+  #         TAG: ${{ needs.prepare.outputs.release_tag }}
+  #       run: |
+  #         set -euo pipefail
+  #         assets=(
+  #           "$DIST/porfs-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+  #           "$DIST/porfs-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+  #         )
+  #         gh release create "$TAG" "${assets[@]}" \
+  #           --verify-tag \
+  #           --title "$TAG" \
+  #           --generate-notes
