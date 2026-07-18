@@ -1,4 +1,4 @@
-# PolarisFS wire protocol v1 (PROTOCOL_VERSION = 1)
+# PolarisFS wire protocol v2 (PROTOCOL_VERSION = 2)
 
 > Contract file: change this document and bump the version BEFORE changing
 > code. Covers the network protocol only; the on-disk extent-device format
@@ -24,10 +24,10 @@
 | # | Variant | Fields | Meaning |
 |---|---|---|---|
 | 0 | `Hello` | `protocol_version u16`, `client_nonce u64` | First frame on a new connection. |
-| 1 | `WriteExtent` | `write_id u128`, `inode u64`, `logical_offset u64`, `data Vec<u8>` | Append one extent record. |
+| 1 | `WriteExtent` | `write_id u128`, `inode u64`, `logical_offset u64`, `data Vec<u8>`, `next Option<SocketAddr>` | Append one extent record; when `next` is present, chain-replicate it to that secondary. |
 | 2 | `ReadExtent` | `extent_id u64` | Read one extent back, CRC32C-verified. |
 | 3 | `Tombstone` | `extent_id u64` | Logically delete one extent (idempotent). |
-| 4 | `Sync` | — | Durability barrier (group commit). |
+| 4 | `Sync` | `next Option<SocketAddr>` | Durability barrier (group commit); when `next` is present, confirm the secondary too. |
 | 5 | `Stats` | — | Store counters. |
 
 `Response`:
@@ -35,15 +35,16 @@
 | # | Variant | Fields | Answers |
 |---|---|---|---|
 | 0 | `HelloAck` | `protocol_version u16`, `server_nonce u64`, `started_unix u64` | Hello; `VersionMismatch` error + close if unsupported. |
-| 1 | `WriteAck` | `extent_id u64` | WriteExtent. |
+| 1 | `WriteAck` | `extent_id u64`, `replica_extent_id Option<u64>` | WriteExtent. |
 | 2 | `ReadAck` | `data Vec<u8>` | ReadExtent. |
 | 3 | `TombstoneAck` | — | Tombstone. |
-| 4 | `SyncAck` | `confirmed_id u64` | Sync. |
+| 4 | `SyncAck` | `confirmed_id u64`, `replica_confirmed_id Option<u64>` | Sync. |
 | 5 | `StatsAck` | `device_size u64`, `tail u64`, `live_bytes u64`, `extent_count u64`, `confirmed_id u64` | Stats. |
 | 6 | `Error` | `code ErrorCode`, `message String` | Any request. |
 
 `ErrorCode`: 0 `BadRequest` · 1 `NotFound` · 2 `Corrupt` (CRC mismatch or
-salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal`.
+salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal` · 6
+`ReplicaUnavailable`.
 
 ## 3. Op semantics
 
@@ -56,7 +57,10 @@ salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal`.
   and **lost on server restart** (documented limitation; see §4). Rules:
   `data` non-empty and ≤ 4 MiB, else `BadRequest`; device full → `StoreFull`.
   A `WriteAck` means the extent is appended to the log device but is **not
-  yet durable** — durability requires Sync.
+  yet durable** — durability requires Sync. With `next`, the primary forwards
+  the identical write to the secondary and returns `WriteAck` only after both
+  servers append it. The forwarded request always has `next = None`, so a
+  two-node chain cannot loop.
 - **ReadExtent** verifies the extent's CRC32C before returning data;
   mismatch → `Corrupt`. Unknown or tombstoned id → `NotFound`.
 - **Tombstone** is idempotent: tombstoning an already-tombstoned extent is
@@ -64,7 +68,10 @@ salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal`.
 - **Sync** performs the store's group commit (data fdatasync + dual
   superblock). After `SyncAck { confirmed_id }`, every extent with
   `extent_id ≤ confirmed_id` MUST be readable after a crash (same
-  durability horizon as `format.md` §6).
+  durability horizon as `format.md` §6). With `next`, the primary returns
+  `SyncAck` only after both nodes confirm their durability horizons. A
+  secondary failure returns `ReplicaUnavailable`; callers must not treat the
+  local append as confirmed.
 
 ## 4. Reconnect semantics (normative)
 

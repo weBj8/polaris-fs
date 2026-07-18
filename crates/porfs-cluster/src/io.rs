@@ -6,7 +6,9 @@ use tokio::sync::Semaphore;
 
 use porfs_rpc::{ChunkClient, Request, Response, RpcError};
 
-use crate::{ChunkLoc, Layout, Membership, STRIPE_UNIT, StripeMap};
+use crate::{ChunkLoc, Layout, Membership, ReplicaLoc, ReplicatedLayout, STRIPE_UNIT, StripeMap};
+
+const PRIMARY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Errors of the striped I/O layer.
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +41,7 @@ pub enum ClusterError {
 #[derive(Clone)]
 pub struct Pool {
     clients: Vec<ChunkClient>,
+    addrs: Vec<std::net::SocketAddr>,
 }
 
 impl Pool {
@@ -50,12 +53,18 @@ impl Pool {
                 .iter()
                 .map(|addr| ChunkClient::new(*addr))
                 .collect(),
+            addrs: members.addrs().to_vec(),
         }
     }
 
     /// Client for server `index`.
     pub fn client(&self, index: usize) -> &ChunkClient {
         &self.clients[index]
+    }
+
+    /// Address of server `index`, used to pass the secondary to a primary.
+    pub fn client_addr(&self, index: usize) -> std::net::SocketAddr {
+        self.addrs[index]
     }
 
     /// Number of servers in the pool.
@@ -71,11 +80,12 @@ impl Pool {
 
 /// Deterministic write id of one chunk (retry-safe replay of the SAME
 /// content; overwrites must vary it — a generation lands with P9).
-fn write_id(inode: u64, chunk_index: u64) -> u128 {
+fn write_id(inode: u64, chunk_index: u64, generation: u64) -> u128 {
     use std::hash::Hasher;
     let mut hasher = twox_hash::XxHash64::with_seed(0x7091_5A1D_5EED_0002);
     hasher.write_u64(inode);
     hasher.write_u64(chunk_index);
+    hasher.write_u64(generation);
     let high = hasher.finish() as u128;
     (high << 64) | chunk_index as u128
 }
@@ -105,18 +115,134 @@ pub async fn stripe_write(
         let chunk = data[start as usize..end].to_vec();
         let server = map.place(inode, idx);
         let client = pool.client(server).clone();
-        let write_id = write_id(inode, idx);
+        let write_id = write_id(inode, idx, 0);
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
             let extent_id = client.write_extent(write_id, inode, start, chunk).await?;
             Ok::<_, RpcError>(ChunkLoc { server, extent_id })
         }));
     }
+
     let mut chunks = Vec::with_capacity(tasks.len());
     for task in tasks {
         chunks.push(task.await??);
     }
     Ok(Layout { inode, len, chunks })
+}
+
+/// Write a generation through primary-to-secondary chains and confirm both
+/// copies before returning their layout.
+pub async fn stripe_write_replicated(
+    pool: &Pool,
+    map: &StripeMap,
+    inode: u64,
+    generation: u64,
+    data: Vec<u8>,
+    concurrency: usize,
+) -> Result<ReplicatedLayout, ClusterError> {
+    let len = data.len() as u64;
+    let semaphore = Arc::new(Semaphore::new(concurrency.max(1)));
+    let mut tasks = Vec::new();
+    for idx in 0..StripeMap::chunk_count(len) {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| ClusterError::Acquire)?;
+        let start = idx * STRIPE_UNIT;
+        let chunk = data[start as usize..((start + STRIPE_UNIT).min(len)) as usize].to_vec();
+        let (primary, secondary) = map.place_replicas(inode, idx);
+        let client = pool.client(primary).clone();
+        let secondary_addr = pool.client_addr(secondary);
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
+            let (primary_id, secondary_id) = client
+                .write_extent_replicated(
+                    write_id(inode, idx, generation),
+                    inode,
+                    start,
+                    chunk,
+                    Some(secondary_addr),
+                )
+                .await?;
+            let secondary_id = secondary_id.ok_or_else(|| {
+                RpcError::Protocol("missing secondary write acknowledgement".to_string())
+            })?;
+            let (_, replica_confirmed) = client.sync_replicated(Some(secondary_addr)).await?;
+            if replica_confirmed.is_none() {
+                return Err(RpcError::Protocol(
+                    "missing secondary durability acknowledgement".to_string(),
+                ));
+            }
+            Ok::<_, RpcError>(ReplicaLoc {
+                primary: ChunkLoc {
+                    server: primary,
+                    extent_id: primary_id,
+                },
+                secondary: ChunkLoc {
+                    server: secondary,
+                    extent_id: secondary_id,
+                },
+            })
+        }));
+    }
+    let mut chunks = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        chunks.push(task.await??);
+    }
+    Ok(ReplicatedLayout {
+        inode,
+        generation,
+        len,
+        chunks,
+    })
+}
+
+/// Reassemble a file, falling back to its secondary copy on a primary error.
+pub async fn stripe_read_replicated(
+    pool: &Pool,
+    layout: &ReplicatedLayout,
+    concurrency: usize,
+) -> Result<Vec<u8>, ClusterError> {
+    let semaphore = Arc::new(Semaphore::new(concurrency.max(1)));
+    let mut tasks = Vec::new();
+    for (idx, loc) in layout.chunks.iter().copied().enumerate() {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| ClusterError::Acquire)?;
+        let primary = pool.client(loc.primary.server).clone();
+        let secondary = pool.client(loc.secondary.server).clone();
+        let want = STRIPE_UNIT.min(layout.len - idx as u64 * STRIPE_UNIT) as usize;
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
+            let data = match tokio::time::timeout(
+                PRIMARY_READ_TIMEOUT,
+                primary.read_extent(loc.primary.extent_id),
+            )
+            .await
+            {
+                Ok(Ok(data)) if data.len() == want => data,
+                _ => secondary.read_extent(loc.secondary.extent_id).await?,
+            };
+            if data.len() != want {
+                return Err(ClusterError::LengthMismatch {
+                    chunk: idx as u64,
+                    got: data.len(),
+                    want,
+                });
+            }
+            Ok::<_, ClusterError>((idx, data))
+        }));
+    }
+    let mut out = vec![0; layout.len as usize];
+    for task in tasks {
+        let (idx, data) = task.await??;
+        let start = idx * STRIPE_UNIT as usize;
+        out[start..start + data.len()].copy_from_slice(&data);
+    }
+    Ok(out)
 }
 
 /// Read a whole striped file back, reassembled in order. Parallelism is

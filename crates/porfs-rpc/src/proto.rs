@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Wire protocol version implemented by this crate.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Maximum accepted frame payload (an extent payload plus envelope slack);
 /// larger frames get the connection dropped.
@@ -28,13 +28,18 @@ pub enum Request {
         /// serde_bytes: one length-prefixed memcpy, not element-wise serde.
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
+        /// Optional secondary receiving the same write from this primary.
+        next: Option<std::net::SocketAddr>,
     },
     /// Read one extent back, CRC32C-verified.
     ReadExtent { extent_id: u64 },
     /// Logically delete one extent (idempotent).
     Tombstone { extent_id: u64 },
     /// Durability barrier (group commit).
-    Sync,
+    Sync {
+        /// Optional secondary that must confirm the same durability barrier.
+        next: Option<std::net::SocketAddr>,
+    },
     /// Store counters.
     Stats,
 }
@@ -49,7 +54,10 @@ pub enum Response {
         started_unix: u64,
     },
     /// WriteExtent accepted (appended, not yet durable — see Sync).
-    WriteAck { extent_id: u64 },
+    WriteAck {
+        extent_id: u64,
+        replica_extent_id: Option<u64>,
+    },
     /// Extent payload, CRC32C-verified by the server.
     ReadAck {
         /// serde_bytes: one length-prefixed memcpy, not element-wise serde.
@@ -59,7 +67,10 @@ pub enum Response {
     /// Tombstone applied (or already applied).
     TombstoneAck,
     /// Durability horizon after a successful group commit.
-    SyncAck { confirmed_id: u64 },
+    SyncAck {
+        confirmed_id: u64,
+        replica_confirmed_id: Option<u64>,
+    },
     /// Store counters.
     StatsAck {
         device_size: u64,
@@ -87,6 +98,8 @@ pub enum ErrorCode {
     VersionMismatch,
     /// Anything else.
     Internal,
+    /// A required secondary could not append or confirm the operation.
+    ReplicaUnavailable,
 }
 
 impl Response {
@@ -143,10 +156,11 @@ mod tests {
             inode: 7,
             logical_offset: 1 << 40,
             data: vec![0xAB; 100],
+            next: None,
         });
         roundtrip(Request::ReadExtent { extent_id: 9 });
         roundtrip(Request::Tombstone { extent_id: 9 });
-        roundtrip(Request::Sync);
+        roundtrip(Request::Sync { next: None });
         roundtrip(Request::Stats);
 
         roundtrip(Response::HelloAck {
@@ -154,10 +168,16 @@ mod tests {
             server_nonce: 1,
             started_unix: 1_700_000_000,
         });
-        roundtrip(Response::WriteAck { extent_id: 3 });
+        roundtrip(Response::WriteAck {
+            extent_id: 3,
+            replica_extent_id: Some(4),
+        });
         roundtrip(Response::ReadAck { data: Vec::new() });
         roundtrip(Response::TombstoneAck);
-        roundtrip(Response::SyncAck { confirmed_id: 11 });
+        roundtrip(Response::SyncAck {
+            confirmed_id: 11,
+            replica_confirmed_id: Some(12),
+        });
         roundtrip(Response::StatsAck {
             device_size: 1 << 30,
             tail: 1 << 20,
@@ -170,7 +190,7 @@ mod tests {
 
     #[test]
     fn decode_rejects_trailing_garbage() {
-        let mut buf = encode(&Request::Sync).unwrap();
+        let mut buf = encode(&Request::Sync { next: None }).unwrap();
         buf.push(0);
         assert!(decode::<Request>(&buf).is_err());
     }

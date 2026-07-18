@@ -53,16 +53,35 @@ impl ChunkClient {
         logical_offset: u64,
         data: Vec<u8>,
     ) -> Result<u64, RpcError> {
+        self.write_extent_replicated(write_id, inode, logical_offset, data, None)
+            .await
+            .map(|(extent_id, _)| extent_id)
+    }
+
+    /// Append one extent through this primary and, when `secondary` is set,
+    /// require the primary to append it to that secondary before acknowledging.
+    pub async fn write_extent_replicated(
+        &self,
+        write_id: u128,
+        inode: u64,
+        logical_offset: u64,
+        data: Vec<u8>,
+        secondary: Option<SocketAddr>,
+    ) -> Result<(u64, Option<u64>), RpcError> {
         match self
             .call(&Request::WriteExtent {
                 write_id,
                 inode,
                 logical_offset,
                 data,
+                next: secondary,
             })
             .await?
         {
-            Response::WriteAck { extent_id } => Ok(extent_id),
+            Response::WriteAck {
+                extent_id,
+                replica_extent_id,
+            } => Ok((extent_id, replica_extent_id)),
             other => Err(unexpected("WriteAck", &other)),
         }
     }
@@ -85,8 +104,21 @@ impl ChunkClient {
 
     /// Group-commit barrier; the returned horizon covers durable extents.
     pub async fn sync(&self) -> Result<u64, RpcError> {
-        match self.call(&Request::Sync).await? {
-            Response::SyncAck { confirmed_id } => Ok(confirmed_id),
+        self.sync_replicated(None)
+            .await
+            .map(|(confirmed_id, _)| confirmed_id)
+    }
+
+    /// Confirm this primary and, when `secondary` is set, its replica.
+    pub async fn sync_replicated(
+        &self,
+        secondary: Option<SocketAddr>,
+    ) -> Result<(u64, Option<u64>), RpcError> {
+        match self.call(&Request::Sync { next: secondary }).await? {
+            Response::SyncAck {
+                confirmed_id,
+                replica_confirmed_id,
+            } => Ok((confirmed_id, replica_confirmed_id)),
             other => Err(unexpected("SyncAck", &other)),
         }
     }

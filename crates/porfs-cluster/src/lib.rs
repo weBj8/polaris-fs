@@ -85,6 +85,20 @@ impl StripeMap {
         best
     }
 
+    /// Primary and secondary for a chunk, ranked by rendezvous score.
+    /// Requires at least two members because P9 always keeps two copies.
+    pub fn place_replicas(&self, inode: u64, chunk_index: u64) -> (usize, usize) {
+        assert!(
+            self.members >= 2,
+            "replicated placement needs at least two members"
+        );
+        let mut ranked: Vec<(u64, usize)> = (0..self.members)
+            .map(|server| (score(inode, chunk_index, server as u64), server))
+            .collect();
+        ranked.sort_unstable_by(|a, b| b.cmp(a));
+        (ranked[0].1, ranked[1].1)
+    }
+
     /// Number of chunks covering `len` bytes.
     pub fn chunk_count(len: u64) -> u64 {
         len.div_ceil(STRIPE_UNIT)
@@ -122,6 +136,28 @@ pub struct Layout {
     pub len: u64,
     /// One entry per chunk, in chunk-index order.
     pub chunks: Vec<ChunkLoc>,
+}
+
+/// Two independently-addressable copies of one immutable stripe chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplicaLoc {
+    /// Primary copy, which coordinates the initial chain write.
+    pub primary: ChunkLoc,
+    /// Secondary copy, used for failover reads.
+    pub secondary: ChunkLoc,
+}
+
+/// Placement record for a two-way replicated striped file.
+#[derive(Debug, Clone)]
+pub struct ReplicatedLayout {
+    /// Inode of the striped file.
+    pub inode: u64,
+    /// Monotonically increasing content generation used in write IDs.
+    pub generation: u64,
+    /// Total logical size in bytes.
+    pub len: u64,
+    /// One primary/secondary pair per chunk.
+    pub chunks: Vec<ReplicaLoc>,
 }
 
 impl Layout {
