@@ -249,15 +249,15 @@ Note: the metadata plane (MDS) is still embedded/locale — the FUSE mount
 does not stripe to chunkservers yet; that wiring is the Act-2 write path
 (P9) and the metadata service (P16).
 
-**P9 · Parallel write + 2-way chain replication** (2 wks)
-Primary forwards to secondary; ACK only after both; replica consistency checks;
-metadata dual-replicated.
-Gate: killing any chunkserver loses zero confirmed writes; reads fail over to the survivor.
+**P9 · Parallel write + 2-way chain replication** (2 wks) ✅ DONE
+Delivered: primary-to-secondary chain writes, durability acknowledgement from both
+copies, deterministic replicated layouts, and survivor read failover.
+Gate: killing any chunkserver loses zero confirmed writes; reads fail over to the survivor. ✅
 
-**P10 · Failure groups + placement policy** (1–2 wks)
-Nodes/disks tagged with failure domains (rack/chassis); replicas forced across
-failure groups; CRUSH input carries topology.
-Gate: simulated full-rack power loss loses nothing and stays readable.
+**P10 · Failure groups + placement policy** (1–2 wks) ✅ DONE
+Delivered: topology-tagged membership (rack/chassis), rack-separated rendezvous
+replica placement, and a simulated full-rack-loss readability gate.
+Gate: simulated full-rack power loss loses nothing and stays readable. ✅
 
 **P11 · Close-to-open consistency** (1–2 wks)
 Client attribute/page-cache timeout model documented + implemented; open forces revalidation.
@@ -462,5 +462,9 @@ past 50 nodes and is not part of GPFS-parity basics.
    keeps confirmed extents over TCP; 128 tests green)
 8. ✅ P8 (porfs-cluster rendezvous striping; 4-client striped aggregate 77–84%
    of measured pool capacity, scripts/stripe-bench.sh; 134+ tests green)
-9. Next: **P9 · Parallel write + 2-way chain replication** (primary forwards;
-   ACK after both; zero confirmed-write loss on one chunkserver kill)
+9. ✅ P9 (parallel primary-to-secondary writes; ACK after both; replicated
+   layouts and survivor read failover)
+10. ✅ P10 (rack/chassis-tagged membership; replicas forced across racks;
+    full-rack-loss readability gate)
+11. Next: **P11 · Close-to-open consistency** (client cache timeout model and
+    cross-machine open/close revalidation)

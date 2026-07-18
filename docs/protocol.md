@@ -97,7 +97,16 @@ salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal` · 6
   order. (Request ids were deliberately left out of v1; add them with a
   version bump if the store ever executes concurrently.)
 
-## 5. Evolution
+## 5. Placement topology
+
+Topology is static client-side membership input, not a wire message: each
+chunkserver endpoint is tagged with its rack and chassis. The P10 replicated
+placement policy ranks members with rendezvous hashing, then selects the
+highest-ranked secondary in a different rack from the primary. A replicated
+layout therefore requires at least two racks; deployment configuration must
+provide truthful physical topology.
+
+## 6. Evolution
 
 Unknown variant indices → `BadRequest` + close. New ops are added by
 bumping PROTOCOL_VERSION and documenting them here first; `Hello` version
