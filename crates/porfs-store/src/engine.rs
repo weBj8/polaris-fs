@@ -128,14 +128,14 @@ pub(crate) fn open_device(path: &Path, create: bool) -> Result<(File, bool), Sto
 
 /// True if `file` lives on a tmpfs instance (f_type == TMPFS_MAGIC).
 fn is_tmpfs(file: &File) -> bool {
-    const TMPFS_MAGIC: i64 = 0x0102_1994;
+    const TMPFS_MAGIC: libc::__fsword_t = 0x0102_1994;
     // SAFETY: `statfs` is a plain-old-data C struct; zero-initializing it is
     // valid, and `fstatfs` writes at most `size_of::<statfs>()` bytes into it.
     let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
     // SAFETY: `file` owns a valid open file descriptor; `stat` points to a
     // valid, properly sized `libc::statfs` as required by `fstatfs(2)`.
     let rc = unsafe { libc::fstatfs(file.as_raw_fd(), &mut stat) };
-    rc == 0 && stat.f_type == TMPFS_MAGIC.try_into().unwrap()
+    rc == 0 && stat.f_type == TMPFS_MAGIC
 }
 
 /// Sequential pread/pwrite driver (buffered fallback): prepare, transfer,

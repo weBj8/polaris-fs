@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::stream::FuturesOrdered;
 use futures_util::{SinkExt, StreamExt};
+use metrics::{counter, gauge, histogram};
 use porfs_store::{ExtentStore, StoreError};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
@@ -177,7 +179,14 @@ async fn handle_conn(socket: TcpStream, jobs: mpsc::Sender<Job>, started_unix: u
                     return;
                 }
                 let jobs = jobs.clone();
-                responses.push_back(async move { dispatch_chain(&jobs, request).await });
+                let op = request_name(&request);
+                let write_bytes = request_write_bytes(&request);
+                responses.push_back(async move {
+                    let started = Instant::now();
+                    let response = dispatch_chain(&jobs, request).await;
+                    observe_request(op, write_bytes, &response, started.elapsed());
+                    response
+                });
             }
             Some(response) = responses.next(), if !responses.is_empty() => {
                 if !send(&mut sink, &response).await {
@@ -198,33 +207,39 @@ async fn handshake(
         return false;
     };
     let Ok(bytes) = frame else { return false };
+    let started = Instant::now();
     match proto::decode::<Request>(&bytes) {
         Ok(Request::Hello {
             protocol_version, ..
         }) if protocol_version == PROTOCOL_VERSION => {
-            send(
-                sink,
-                &Response::HelloAck {
-                    protocol_version: PROTOCOL_VERSION,
-                    server_nonce: rand_nonce(),
-                    started_unix,
-                },
-            )
-            .await
+            let response = Response::HelloAck {
+                protocol_version: PROTOCOL_VERSION,
+                server_nonce: rand_nonce(),
+                started_unix,
+            };
+            let sent = send(sink, &response).await;
+            if sent {
+                observe_request("hello", 0, &response, started.elapsed());
+            }
+            sent
         }
         Ok(Request::Hello { .. }) => {
-            send(
-                sink,
-                &Response::error(
-                    ErrorCode::VersionMismatch,
-                    format!("server speaks protocol {PROTOCOL_VERSION}"),
-                ),
-            )
-            .await;
+            let response = Response::error(
+                ErrorCode::VersionMismatch,
+                format!("server speaks protocol {PROTOCOL_VERSION}"),
+            );
+            let sent = send(sink, &response).await;
+            if sent {
+                observe_request("hello", 0, &response, started.elapsed());
+            }
             false
         }
         _ => {
-            send(sink, &Response::error(ErrorCode::BadRequest, "hello first")).await;
+            let response = Response::error(ErrorCode::BadRequest, "hello first");
+            let sent = send(sink, &response).await;
+            if sent {
+                observe_request("hello", 0, &response, started.elapsed());
+            }
             false
         }
     }
@@ -303,9 +318,11 @@ async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response 
 
 /// The store thread: serializes every op against the extent store.
 fn store_worker(mut store: ExtentStore, rx: mpsc::Receiver<Job>) {
+    update_store_gauges(&store);
     let mut dedup: HashMap<u128, u64> = HashMap::new();
     for (request, reply) in rx {
         let response = execute(&mut store, &mut dedup, request);
+        update_store_gauges(&store);
         if reply.send(response).is_err() {
             // Client went away; keep serving others.
         }
@@ -392,4 +409,65 @@ fn store_error(err: StoreError) -> Response {
         StoreError::DeviceFull { .. } => Response::error(ErrorCode::StoreFull, err.to_string()),
         other => Response::error(ErrorCode::Internal, other.to_string()),
     }
+}
+
+fn request_name(request: &Request) -> &'static str {
+    match request {
+        Request::Hello { .. } => "hello",
+        Request::WriteExtent { .. } => "write_extent",
+        Request::ReadExtent { .. } => "read_extent",
+        Request::Tombstone { .. } => "tombstone",
+        Request::Sync { .. } => "sync",
+        Request::Stats => "stats",
+    }
+}
+
+fn error_code_name(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::BadRequest => "bad_request",
+        ErrorCode::NotFound => "not_found",
+        ErrorCode::Corrupt => "corrupt",
+        ErrorCode::StoreFull => "store_full",
+        ErrorCode::VersionMismatch => "version_mismatch",
+        ErrorCode::Internal => "internal",
+        ErrorCode::ReplicaUnavailable => "replica_unavailable",
+    }
+}
+
+fn request_write_bytes(request: &Request) -> u64 {
+    match request {
+        Request::WriteExtent { data, .. } => data.len() as u64,
+        _ => 0,
+    }
+}
+
+fn observe_request(op: &'static str, write_bytes: u64, response: &Response, elapsed: Duration) {
+    counter!("porfs_rpc_requests_total", "op" => op).increment(1);
+    histogram!("porfs_rpc_request_duration_seconds", "op" => op).record(elapsed.as_secs_f64());
+    match response {
+        Response::ReadAck { data } => {
+            counter!("porfs_rpc_read_bytes_total").increment(data.len() as u64);
+        }
+        Response::WriteAck { .. } => {
+            counter!("porfs_rpc_write_bytes_total").increment(write_bytes);
+        }
+        Response::Error { code, .. } => {
+            counter!(
+                "porfs_rpc_request_errors_total",
+                "op" => op,
+                "code" => error_code_name(*code)
+            )
+            .increment(1);
+            tracing::warn!(op, code = ?code, "rpc request failed");
+        }
+        _ => {}
+    }
+}
+
+fn update_store_gauges(store: &ExtentStore) {
+    gauge!("porfs_chunkserver_store_capacity_bytes").set(store.device_size() as f64);
+    gauge!("porfs_chunkserver_store_tail_bytes").set(store.tail() as f64);
+    gauge!("porfs_chunkserver_store_live_bytes").set(store.live_bytes() as f64);
+    gauge!("porfs_chunkserver_store_extent_count").set(store.extent_count() as f64);
+    gauge!("porfs_chunkserver_store_confirmed_watermark").set(store.confirmed_id() as f64);
 }

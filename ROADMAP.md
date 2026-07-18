@@ -266,10 +266,13 @@ at the MDS and use direct I/O to avoid stale page-cache data; close flushes with
 multi-machine gate remains blocked on the P16 metadata RPC service because the
 current MDS is embedded in each mount.
 
-**P12 · Observability** (1 wk)
-prometheus metrics (latency histograms/bandwidth/replica watermarks), `porfsadm` CLI,
-`tracing` structured-log conventions.
-Gate: dashboards answer "which layer is slow".
+**P12 · Observability** (1 wk) ✅ DONE
+Delivered: bounded-label Prometheus metrics for chunkserver RPC latency, request
+counts/errors, read/write bytes, and store gauges; optional `porfs chunkserver
+--metrics-listen`; structured `tracing` initialization in executable commands;
+`porfsadm status` over the existing Stats RPC; `docs/observability.md`.
+Gate: Prometheus scrapes plus `porfsadm status` answer "which layer is slow" for a
+live chunkserver. ✅
 
 **P13 · Production v0.1 rollout (gate phase)**
 Run "rebuildable data" (dataset replicas/distribution files) on our own cluster,
@@ -471,3 +474,5 @@ past 50 nodes and is not part of GPFS-parity basics.
     full-rack-loss readability gate)
 11. P11 in progress (close flush + open revalidation; direct-I/O data-cache
     bypass; multi-machine gate blocked on P16 metadata RPC)
+12. ✅ P12 (Prometheus chunkserver endpoint; bounded RPC/store metrics;
+    structured tracing init; porfsadm status CLI)

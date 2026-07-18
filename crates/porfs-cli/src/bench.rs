@@ -5,10 +5,11 @@ use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context, Result, ensure};
+use porfs_cli::human_bytes;
 use porfs_format::{BLOCK_SIZE, DATA_START, EXTENT_DATA_MAX, extent_disk_len};
 use porfs_store::ExtentStore;
 
-use crate::{human, parse_size};
+use crate::parse_size;
 
 pub(crate) fn cmd_bench(
     device: &Path,
@@ -36,8 +37,8 @@ pub(crate) fn cmd_bench(
     let bytes = count * extent_size;
     println!(
         "bench: {count} extents x {} = {} on {} ({}, qd {queue_depth})",
-        human(extent_size),
-        human(bytes),
+        human_bytes(extent_size),
+        human_bytes(bytes),
         device.display(),
         crate::io_mode(store.is_direct())
     );

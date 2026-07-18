@@ -31,6 +31,23 @@ struct Inner {
     nonce: u64,
 }
 
+/// Snapshot of a chunkserver's extent-store state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreStats {
+    pub device_size: u64,
+    pub tail: u64,
+    pub live_bytes: u64,
+    pub extent_count: u64,
+    pub confirmed_id: u64,
+}
+
+impl StoreStats {
+    /// Bytes not yet allocated in the append-only log.
+    pub fn free_bytes(self) -> u64 {
+        self.device_size.saturating_sub(self.tail)
+    }
+}
+
 impl ChunkClient {
     /// A client for `addr` (connects lazily on the first op).
     pub fn new(addr: SocketAddr) -> Self {
@@ -123,9 +140,8 @@ impl ChunkClient {
         }
     }
 
-    /// Store counters `(device_size, tail, live_bytes, extent_count,
-    /// confirmed_id)`.
-    pub async fn stats(&self) -> Result<(u64, u64, u64, u64, u64), RpcError> {
+    /// Store counters.
+    pub async fn stats(&self) -> Result<StoreStats, RpcError> {
         match self.call(&Request::Stats).await? {
             Response::StatsAck {
                 device_size,
@@ -133,7 +149,13 @@ impl ChunkClient {
                 live_bytes,
                 extent_count,
                 confirmed_id,
-            } => Ok((device_size, tail, live_bytes, extent_count, confirmed_id)),
+            } => Ok(StoreStats {
+                device_size,
+                tail,
+                live_bytes,
+                extent_count,
+                confirmed_id,
+            }),
             other => Err(unexpected("StatsAck", &other)),
         }
     }

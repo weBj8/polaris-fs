@@ -23,6 +23,8 @@ tokio = { version = "1", features = [
     "macros",
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
+metrics.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
