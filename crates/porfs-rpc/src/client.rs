@@ -104,7 +104,9 @@ impl ChunkClient {
 
     /// Group-commit barrier; the returned horizon covers durable extents.
     pub async fn sync(&self) -> Result<u64, RpcError> {
-        self.sync_replicated(None).await.map(|(confirmed_id, _)| confirmed_id)
+        self.sync_replicated(None)
+            .await
+            .map(|(confirmed_id, _)| confirmed_id)
     }
 
     /// Confirm this primary and, when `secondary` is set, its replica.

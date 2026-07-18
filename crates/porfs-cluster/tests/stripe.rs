@@ -4,7 +4,10 @@ use std::collections::HashSet;
 
 use std::time::Instant;
 
-use porfs_cluster::io::{Pool, stripe_read, stripe_read_range, stripe_write};
+use porfs_cluster::io::{
+    Pool, stripe_read, stripe_read_range, stripe_read_replicated, stripe_write,
+    stripe_write_replicated,
+};
 use porfs_cluster::{Membership, STRIPE_UNIT, StripeMap};
 use porfs_rpc::server::{Server, serve};
 use porfs_store::ExtentStore;
@@ -46,6 +49,15 @@ fn map_moves_only_one_slice_when_growing() {
         (0.15..=0.35).contains(&frac),
         "moved fraction {frac} outside rendezvous expectation"
     );
+}
+
+#[test]
+fn replicated_map_selects_distinct_servers() {
+    let map = StripeMap::new(4);
+    for chunk in 0..400 {
+        let (primary, secondary) = map.place_replicas(7, chunk);
+        assert_ne!(primary, secondary);
+    }
 }
 
 // ---- gate bench helpers ----
@@ -123,6 +135,54 @@ async fn striped_roundtrip_byte_exact_with_tail() {
     assert_eq!(
         range,
         data[(STRIPE_UNIT - 100) as usize..(STRIPE_UNIT + 400) as usize]
+    );
+    cluster.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replicated_roundtrip_is_durable_on_both_servers() {
+    let cluster = start_cluster(3).await;
+    let map = StripeMap::new(3);
+    let pool = Pool::new(&cluster.membership);
+    let data = pattern(33, (STRIPE_UNIT + 777) as usize);
+    let layout = stripe_write_replicated(&pool, &map, 500, 1, data.clone(), 4)
+        .await
+        .unwrap();
+    let back = stripe_read_replicated(&pool, &layout, 4).await.unwrap();
+    assert_eq!(back, data);
+    for loc in layout.chunks {
+        assert_eq!(
+            pool.client(loc.primary.server)
+                .read_extent(loc.primary.extent_id)
+                .await
+                .unwrap(),
+            pool.client(loc.secondary.server)
+                .read_extent(loc.secondary.extent_id)
+                .await
+                .unwrap()
+        );
+    }
+    cluster.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replicated_read_fails_over_to_secondary() {
+    let cluster = start_cluster(2).await;
+    let map = StripeMap::new(2);
+    let pool = Pool::new(&cluster.membership);
+    let data = pattern(34, 777);
+    let layout = stripe_write_replicated(&pool, &map, 501, 1, data.clone(), 2)
+        .await
+        .unwrap();
+    let primary = layout.chunks[0].primary.server;
+    let _ = cluster.shutdowns[primary].send(true);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let failover_pool = Pool::new(&cluster.membership);
+    assert_eq!(
+        stripe_read_replicated(&failover_pool, &layout, 2)
+            .await
+            .unwrap(),
+        data
     );
     cluster.stop();
 }

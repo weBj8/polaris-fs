@@ -15,8 +15,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
 use tokio_util::codec::LengthDelimitedCodec;
 
-use crate::proto::{self, ErrorCode, MAX_FRAME, PROTOCOL_VERSION, Request, Response};
 use crate::ChunkClient;
+use crate::proto::{self, ErrorCode, MAX_FRAME, PROTOCOL_VERSION, Request, Response};
 
 /// One unit of work for the store thread: op + reply slot.
 type Job = (Request, oneshot::Sender<Response>);
@@ -242,64 +242,63 @@ async fn dispatch(jobs: &mpsc::Sender<Job>, request: Request) -> Response {
         return Response::error(ErrorCode::Internal, "store worker gone");
     }
 
-    /// Execute the local half of a chain operation, then forward its immutable
-    /// payload or durability barrier to the secondary. The forwarded request uses
-    /// the ordinary client API with no secondary of its own, keeping P9 strictly
-    /// two-way and avoiding forwarding loops.
-    async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response {
-        match request {
-            Request::WriteExtent {
-                write_id,
-                inode,
-                logical_offset,
-                data,
-                next: Some(secondary),
-            } => {
-                let local = dispatch(
-                    jobs,
-                    Request::WriteExtent {
-                        write_id,
-                        inode,
-                        logical_offset,
-                        data: data.clone(),
-                        next: None,
-                    },
-                )
-                .await;
-                let Response::WriteAck { extent_id, .. } = local else {
-                    return local;
-                };
-                match ChunkClient::new(secondary)
-                    .write_extent(write_id, inode, logical_offset, data)
-                    .await
-                {
-                    Ok(replica_extent_id) => Response::WriteAck {
-                        extent_id,
-                        replica_extent_id: Some(replica_extent_id),
-                    },
-                    Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
-                }
-            }
-            Request::Sync {
-                next: Some(secondary),
-            } => {
-                let local = dispatch(jobs, Request::Sync { next: None }).await;
-                let Response::SyncAck { confirmed_id, .. } = local else {
-                    return local;
-                };
-                match ChunkClient::new(secondary).sync().await {
-                    Ok(replica_confirmed_id) => Response::SyncAck {
-                        confirmed_id,
-                        replica_confirmed_id: Some(replica_confirmed_id),
-                    },
-                    Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
-                }
-            }
-            request => dispatch(jobs, request).await,
-        }
-    }
     rx.await
         .unwrap_or_else(|_| Response::error(ErrorCode::Internal, "store worker died"))
+}
+
+/// Execute the local half of a chain operation, then forward it to the
+/// secondary. Forwarded requests never carry a further secondary.
+async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response {
+    match request {
+        Request::WriteExtent {
+            write_id,
+            inode,
+            logical_offset,
+            data,
+            next: Some(secondary),
+        } => {
+            let local = dispatch(
+                jobs,
+                Request::WriteExtent {
+                    write_id,
+                    inode,
+                    logical_offset,
+                    data: data.clone(),
+                    next: None,
+                },
+            )
+            .await;
+            let Response::WriteAck { extent_id, .. } = local else {
+                return local;
+            };
+            match ChunkClient::new(secondary)
+                .write_extent(write_id, inode, logical_offset, data)
+                .await
+            {
+                Ok(replica_extent_id) => Response::WriteAck {
+                    extent_id,
+                    replica_extent_id: Some(replica_extent_id),
+                },
+                Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+            }
+        }
+        Request::Sync {
+            next: Some(secondary),
+        } => {
+            let local = dispatch(jobs, Request::Sync { next: None }).await;
+            let Response::SyncAck { confirmed_id, .. } = local else {
+                return local;
+            };
+            match ChunkClient::new(secondary).sync().await {
+                Ok(replica_confirmed_id) => Response::SyncAck {
+                    confirmed_id,
+                    replica_confirmed_id: Some(replica_confirmed_id),
+                },
+                Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+            }
+        }
+        request => dispatch(jobs, request).await,
+    }
 }
 
 /// The store thread: serializes every op against the extent store.
