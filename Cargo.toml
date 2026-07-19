@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/plfs",
+    "crates/plfs-arena",
+    "crates/plfs-client",
+    "crates/plfs-common",
+    "crates/plfs-data",
+    "crates/plfs-meta",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.96"
+version = "0.1.0"
+license = "LicenseRef-TBD"
+
+[workspace.dependencies]
+# async runtime / CLI / observability / errors
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+
+# data-plane gRPC (wire contract v1)
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
+tonic-prost-build = "0.14"
+bytes = "1"
+
+# ChunkArena storage engine (S2)
+io-uring = "0.7"
+libc = "0.2"
+nix = { version = "0.31", default-features = false, features = ["fs", "ioctl"] }
+uuid = { version = "1", features = ["v7"] }
+crc32fast = "1"
+thiserror = "2"
+
+# test-only
+proptest = "1"
+rand = "0.9"
+criterion = "0.8"

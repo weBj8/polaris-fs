@@ -1,0 +1,31 @@
+syntax = "proto3";
+package plfs.data.v1;
+
+// ChunkStore: the data-plane contract (design doc §5, wire format v1).
+// Data nodes host ChunkArena instances and know nothing about files,
+// replicas, consistency, or snapshots.
+service ChunkStore {
+  rpc Put(PutRequest)       returns (PutResponse);      // idempotent on (chunk_id, version, crc)
+  rpc Get(GetRequest)       returns (stream GetReply);  // 64KiB frames; version + crc in first frame
+  rpc Stat(StatRequest)     returns (StatReply);        // version/len/crc only; cache validation
+  rpc Delete(DeleteRequest) returns (DeleteReply);      // exact-version, idempotent; triggers hole punch
+  rpc List(ListRequest)     returns (stream ListReply); // arena inventory for scrub/repair
+}
+
+message PutRequest  { bytes chunk_id = 1; uint64 version = 2; uint32 crc32c = 3;
+                      bytes payload = 4; bool seal = 5; }
+message PutResponse {}
+
+message GetRequest  { bytes chunk_id = 1; uint64 if_version = 2; }  // 0 = any
+// First frame carries version/total_len/crc32c (+not_modified); later frames carry data only.
+message GetReply    { uint64 version = 1; uint64 total_len = 2; uint32 crc32c = 3;
+                      bool not_modified = 4; bytes data = 5; }
+
+message StatRequest { bytes chunk_id = 1; }
+message StatReply   { uint64 version = 1; uint64 len = 2; uint32 crc32c = 3; bool sealed = 4; }
+
+message DeleteRequest { bytes chunk_id = 1; uint64 version = 2; }
+message DeleteReply   {}
+
+message ListRequest {}
+message ListReply   { bytes chunk_id = 1; uint64 version = 2; uint64 len = 3; uint32 crc32c = 4; }
