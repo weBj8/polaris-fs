@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-PolarisFS is a clean-room implementation targetting IBM Storage Scale (GPFS)
+PolarisFS is a clean-room implementation targeting IBM Storage Scale (GPFS)
 compatibility. It must not copy IBM source code, binaries, or documentation
 text. It must, however, reproduce the documented administrative model,
 observable filesystem semantics, failure and recovery behavior, and command
