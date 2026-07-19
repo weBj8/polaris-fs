@@ -14,23 +14,23 @@ the IBM command reference remains the authoritative complete command list and
 syntax source. Every implemented compatibility command must record the exact
 IBM Storage Scale release and reference page it was compared against.
 
-## IBM reference baseline
+## IBM reference baseline: Storage Scale 6.0.1
 
-The baseline is the IBM Storage Scale documentation current at the start of
-each implementation phase. Release-pinned behavior must be selected before
-writing a command or on-disk compatibility feature; do not silently mix
-releases.
+The command-line baseline is IBM Storage Scale **6.0.1**, using the command
+reference supplied for this project. An implementation phase must use this
+release unless the roadmap explicitly approves a version change. Do not
+silently mix releases.
 
 - [Documentation home](https://www.ibm.com/docs/en/storage-scale)
-- [Quick reference](https://www.ibm.com/docs/en/storage-scale/latest?topic=overview-quick-reference)
-- [Command reference](https://www.ibm.com/docs/en/storage-scale/latest?topic=reference-command)
-- [Architecture overview](https://www.ibm.com/docs/en/storage-scale/latest?topic=architecture-storage-scale-overview)
-- [Cluster nodes and roles](https://www.ibm.com/docs/en/storage-scale/latest?topic=clusters-cluster-nodes-node-roles)
-- [Network Shared Disks (NSDs)](https://www.ibm.com/docs/en/storage-scale/latest?topic=concepts-network-shared-disks-nsds)
-- [Storage pools](https://www.ibm.com/docs/en/storage-scale/latest?topic=pools-storage-pool-concepts)
-- [Metadata and data pools](https://www.ibm.com/docs/en/storage-scale/latest?topic=management-metadata-data-pools)
-- [Filesets](https://www.ibm.com/docs/en/storage-scale/latest?topic=systems-managing-filesets)
-- [Cluster Export Services (CES)](https://www.ibm.com/docs/en/storage-scale/latest?topic=clusters-cluster-export-services)
+- [6.0.1 command reference](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=command-reference)
+- [6.0.1 quick reference](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=overview-quick-reference)
+- [6.0.1 architecture overview](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=architecture-storage-scale-overview)
+- [6.0.1 cluster nodes and roles](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=clusters-cluster-nodes-node-roles)
+- [6.0.1 Network Shared Disks (NSDs)](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=concepts-network-shared-disks-nsds)
+- [6.0.1 storage pools](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=pools-storage-pool-concepts)
+- [6.0.1 metadata and data pools](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=management-metadata-data-pools)
+- [6.0.1 filesets](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=systems-managing-filesets)
+- [6.0.1 Cluster Export Services (CES)](https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=clusters-cluster-export-services)
 
 ## Architecture alignment
 
@@ -82,8 +82,8 @@ feature may be described as “GPFS parity” while such a deviation remains.
 
 This is the planning inventory, grouped from IBM's quick and command
 references. It intentionally does not replace the authoritative reference:
-before a family starts, its phase must import the full release-pinned command
-and option inventory into the compatibility matrix.
+before a family starts, its phase must import the full 6.0.1 command and
+option inventory into the compatibility matrix.
 
 | Family | IBM command surface to align | PolarisFS phase |
 |---|---|---|
