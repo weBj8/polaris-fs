@@ -54,7 +54,7 @@ enum KindMirror {
 
 const INODES_T: TableDefinition<&[u8; 8], &[u8]> = TableDefinition::new("inodes");
 const DIR_ENTRIES_T: TableDefinition<&[u8], &[u8; 8]> = TableDefinition::new("dir_entries");
-const FILE_EXTENTS_T: TableDefinition<&[u8], &[u8; 16]> = TableDefinition::new("file_extents");
+const FILE_EXTENTS_T: TableDefinition<&[u8], &[u8]> = TableDefinition::new("file_extents_v2");
 const META_T: TableDefinition<&str, u64> = TableDefinition::new("meta");
 
 #[test]
@@ -310,7 +310,8 @@ fn reconcile_repairs_planted_dangling_extent_row() {
     mds.fsync(f).unwrap();
     drop(mds);
 
-    // Plant a map row pointing at an extent id that never existed.
+    // Plant a map row pointing at an extent id that never existed (the
+    // 16-byte local form: id BE ++ len BE).
     let (meta, _data) = pair(dir.path());
     let db = Database::open(&meta).unwrap();
     let txn = db.begin_write().unwrap();
@@ -321,7 +322,7 @@ fn reconcile_repairs_planted_dangling_extent_row() {
         let mut value = [0u8; 16];
         value[..8].copy_from_slice(&999_999u64.to_be_bytes());
         value[8..].copy_from_slice(&100u64.to_be_bytes());
-        fext.insert(key.as_slice(), &value).unwrap();
+        fext.insert(key.as_slice(), value.as_slice()).unwrap();
     }
     txn.commit().unwrap();
     drop(db);

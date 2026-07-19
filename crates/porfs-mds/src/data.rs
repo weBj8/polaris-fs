@@ -1,18 +1,20 @@
-//! The file data path: log-structured copy-on-write on top of the extent
-//! store. An overwrite never mutates an extent in place — the new bytes are
+//! The file data path: log-structured copy-on-write on top of the data
+//! plane. An overwrite never mutates an extent in place — the new bytes are
 //! appended as new extents, the metadata commit repoints the map, and only
 //! then are the replaced extents tombstoned.
 //!
-//! Durability order (phase contract): `store.append` first, then the redb
+//! Durability order (phase contract): `append_batch` first, then the redb
 //! commit, with no per-write fdatasync. [`Mds::fsync`] is the barrier that
 //! makes appended data durable (redb commits already are, per transaction).
 
 use porfs_format::EXTENT_DATA_MAX;
-use porfs_store::ExtentId;
 
 use crate::error::{MdsError, Result, dberr};
-use crate::keys::{FILE_EXTENTS, INODES, encode_extent_value, encode_rec, extent_key, ino_key};
+use crate::keys::{
+    ExtentRef, FILE_EXTENTS_V2, INODES, encode_extent_value, encode_rec, extent_key, ino_key,
+};
 use crate::mds::{ExtentRow, Mds, now_ts};
+use crate::plane::ReadReq;
 use crate::types::{Ino, InodeAttr, InodeRec, NodeKind, SetAttr};
 
 impl Mds {
@@ -58,15 +60,31 @@ impl Mds {
         if rows.is_empty() {
             return Ok(out); // pure hole
         }
-        let ids: Vec<ExtentId> = rows.iter().map(|row| row.id).collect();
-        let bufs = self.store.read_batch(&ids)?;
-        for (row, buf) in rows.iter().zip(bufs.iter()) {
+        let reqs: Vec<ReadReq> = rows
+            .iter()
+            .map(|row| {
+                let clip_start = row.off.max(offset);
+                let clip_end = row.end().min(end);
+                ReadReq {
+                    eref: row.id,
+                    off: (clip_start - row.off) as u32,
+                    len: (clip_end - clip_start) as u32,
+                }
+            })
+            .collect();
+        let bufs = self.store.read_ranges(&reqs)?;
+        for (row, (req, buf)) in rows.iter().zip(reqs.iter().zip(bufs.iter())) {
+            if buf.len() != req.len as usize {
+                return Err(MdsError::Corrupt(format!(
+                    "extent {:?} returned {} bytes for a {}-byte range",
+                    row.id,
+                    buf.len(),
+                    req.len
+                )));
+            }
             let clip_start = row.off.max(offset);
-            let clip_end = row.end().min(end);
             let dst = (clip_start - offset) as usize;
-            let src = (clip_start - row.off) as usize;
-            let n = (clip_end - clip_start) as usize;
-            out[dst..dst + n].copy_from_slice(&buf[src..src + n]);
+            out[dst..dst + buf.len()].copy_from_slice(buf);
         }
         Ok(out)
     }
@@ -215,11 +233,19 @@ impl Mds {
         }
         // Rewrite straddlers with zeroed punch bytes BEFORE the metadata
         // commit; fully covered rows just die.
+        let full_reqs: Vec<ReadReq> = rows
+            .iter()
+            .map(|row| ReadReq {
+                eref: row.id,
+                off: 0,
+                len: row.len as u32,
+            })
+            .collect();
+        let full_bufs = self.store.read_ranges(&full_reqs)?;
         let mut replacements: Vec<(u64, Vec<u8>)> = Vec::new();
-        let mut dead: Vec<ExtentId> = Vec::new();
-        for row in &rows {
+        let mut dead: Vec<ExtentRef> = Vec::new();
+        for (row, old) in rows.iter().zip(full_bufs) {
             let covered = row.off >= offset && row.end() <= end;
-            let old = self.store.read(row.id)?;
             dead.push(row.id);
             if covered {
                 continue;
@@ -237,15 +263,15 @@ impl Mds {
         let new_ids = self.store.append_batch(&items)?;
         let txn = self.db.begin_write().map_err(dberr)?;
         {
-            let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let mut fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
             let mut inodes = txn.open_table(INODES).map_err(dberr)?;
             for row in &rows {
                 fext.remove(extent_key(ino, row.off).as_slice())
                     .map_err(dberr)?;
             }
             for ((off, bytes), id) in replacements.iter().zip(new_ids.iter()) {
-                let value = encode_extent_value(*id, bytes.len() as u64);
-                fext.insert(extent_key(ino, *off).as_slice(), &value)
+                let value = encode_extent_value(id, bytes.len() as u64);
+                fext.insert(extent_key(ino, *off).as_slice(), value.as_slice())
                     .map_err(dberr)?;
             }
             let now = now_ts();
@@ -276,22 +302,44 @@ impl Mds {
         let rows = self.extent_rows(ino, cstart, cend)?;
         // RMW the partial head/tail overlaps: the kept bytes of the boundary
         // extents are rewritten as new extents. Fully covered extents are
-        // simply replaced (discarded below, no piece rewritten).
-        let mut pieces: Vec<(u64, Vec<u8>)> = Vec::with_capacity(3);
-        let mut replaced: Vec<ExtentId> = Vec::with_capacity(rows.len());
+        // simply replaced (discarded below, no piece rewritten). The kept
+        // ranges are read as subrange reads (remote mode: only the needed
+        // bytes cross the wire).
+        let mut rmw_reqs: Vec<ReadReq> = Vec::new();
+        let mut replaced: Vec<ExtentRef> = Vec::with_capacity(rows.len());
         for row in &rows {
-            let head = row.off < cstart;
-            let tail = row.end() > cend;
-            if head || tail {
-                let old = self.store.read(row.id)?;
-                if head {
-                    pieces.push((row.off, old[..(cstart - row.off) as usize].to_vec()));
-                }
-                if tail {
-                    pieces.push((cend, old[(cend - row.off) as usize..].to_vec()));
-                }
+            if row.off < cstart {
+                rmw_reqs.push(ReadReq {
+                    eref: row.id,
+                    off: 0,
+                    len: (cstart - row.off) as u32,
+                });
+            }
+            if row.end() > cend {
+                rmw_reqs.push(ReadReq {
+                    eref: row.id,
+                    off: (cend - row.off) as u32,
+                    len: (row.end() - cend) as u32,
+                });
             }
             replaced.push(row.id);
+        }
+        let rmw_bufs = self.store.read_ranges(&rmw_reqs)?;
+        let mut rmw_bufs = rmw_bufs.into_iter();
+        let mut pieces: Vec<(u64, Vec<u8>)> = Vec::with_capacity(3);
+        for row in &rows {
+            if row.off < cstart {
+                let head = rmw_bufs.next().ok_or_else(|| {
+                    MdsError::Corrupt("RMW read returned fewer pieces than requested".to_string())
+                })?;
+                pieces.push((row.off, head));
+            }
+            if row.end() > cend {
+                let tail = rmw_bufs.next().ok_or_else(|| {
+                    MdsError::Corrupt("RMW read returned fewer pieces than requested".to_string())
+                })?;
+                pieces.push((cend, tail));
+            }
         }
         pieces.push((cstart, chunk.to_vec()));
         pieces.sort_by_key(|piece| piece.0);
@@ -304,15 +352,15 @@ impl Mds {
         let ids = self.store.append_batch(&items)?;
         let txn = self.db.begin_write().map_err(dberr)?;
         {
-            let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let mut fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
             let mut inodes = txn.open_table(INODES).map_err(dberr)?;
             for row in &rows {
                 fext.remove(extent_key(ino, row.off).as_slice())
                     .map_err(dberr)?;
             }
             for ((off, bytes), id) in pieces.iter().zip(ids.iter()) {
-                let value = encode_extent_value(*id, bytes.len() as u64);
-                fext.insert(extent_key(ino, *off).as_slice(), &value)
+                let value = encode_extent_value(id, bytes.len() as u64);
+                fext.insert(extent_key(ino, *off).as_slice(), value.as_slice())
                     .map_err(dberr)?;
             }
             rec.size = rec.size.max(cend);
@@ -363,25 +411,38 @@ impl Mds {
             }
         }
         // Rewrite the straddler's kept prefix BEFORE the metadata commit.
-        let mut replacement: Option<(u64, ExtentId, u64)> = None;
+        let mut replacement: Option<(u64, ExtentRef, u64)> = None;
         if let Some(row) = straddler {
             let keep = (new_size - row.off) as usize;
-            let old = self.store.read(row.id)?;
-            let new_id = self.store.append(ino, row.off, &old[..keep])?;
+            let old = self.store.read_ranges(&[ReadReq {
+                eref: row.id,
+                off: 0,
+                len: keep as u32,
+            }])?;
+            let kept = old
+                .into_iter()
+                .next()
+                .ok_or_else(|| MdsError::Corrupt("straddler read returned no data".to_string()))?;
+            let new_ids = self
+                .store
+                .append_batch(&[(ino, row.off, kept.as_slice())])?;
+            let new_id = new_ids.into_iter().next().ok_or_else(|| {
+                MdsError::Corrupt("append of the straddler prefix returned no ref".to_string())
+            })?;
             replacement = Some((row.off, new_id, keep as u64));
             dead.push(row); // the old straddler extent is discarded as well
         }
         let txn = self.db.begin_write().map_err(dberr)?;
         {
-            let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let mut fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
             let mut inodes = txn.open_table(INODES).map_err(dberr)?;
             for row in &dead {
                 fext.remove(extent_key(ino, row.off).as_slice())
                     .map_err(dberr)?;
             }
             if let Some((off, id, len)) = replacement {
-                let value = encode_extent_value(id, len);
-                fext.insert(extent_key(ino, off).as_slice(), &value)
+                let value = encode_extent_value(&id, len);
+                fext.insert(extent_key(ino, off).as_slice(), value.as_slice())
                     .map_err(dberr)?;
             }
             rec.size = new_size;
@@ -393,7 +454,7 @@ impl Mds {
                 .map_err(dberr)?;
         }
         txn.commit().map_err(dberr)?;
-        let dead_ids: Vec<ExtentId> = dead.iter().map(|row| row.id).collect();
+        let dead_ids: Vec<ExtentRef> = dead.iter().map(|row| row.id).collect();
         self.discard_tolerant(&dead_ids)?;
         Ok(())
     }

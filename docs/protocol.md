@@ -1,8 +1,9 @@
-# PolarisFS wire protocol v2 (PROTOCOL_VERSION = 2)
+# PolarisFS wire protocol v3 (PROTOCOL_VERSION = 3)
 
 > Contract file: change this document and bump the version BEFORE changing
 > code. Covers the network protocol only; the on-disk extent-device format
-> is a separate contract (`format.md`). Introduced by P7.
+> is a separate contract (`format.md`). Introduced by P7; v3 (HelloAck
+> `store_uuid`, `ReadExtentRange`) introduced by P12.5.
 
 ## 1. Transport and framing
 
@@ -29,14 +30,15 @@
 | 3 | `Tombstone` | `extent_id u64` | Logically delete one extent (idempotent). |
 | 4 | `Sync` | `next Option<SocketAddr>` | Durability barrier (group commit); when `next` is present, confirm the secondary too. |
 | 5 | `Stats` | — | Store counters. |
+| 6 | `ReadExtentRange` | `extent_id u64`, `offset u64`, `len u32` | Read the `[offset, offset+len)` subrange of one extent, full-record CRC32C-verified server-side (v3). |
 
 `Response`:
 
 | # | Variant | Fields | Answers |
 |---|---|---|---|
-| 0 | `HelloAck` | `protocol_version u16`, `server_nonce u64`, `started_unix u64` | Hello; `VersionMismatch` error + close if unsupported. |
+| 0 | `HelloAck` | `protocol_version u16`, `server_nonce u64`, `started_unix u64`, `store_uuid [u8; 16]` | Hello; `VersionMismatch` error + close if unsupported. `store_uuid` is the chunkserver extent-store superblock UUID (`format.md`), stable across restarts; clients use it to verify server identity before trusting any answer (P12.5). |
 | 1 | `WriteAck` | `extent_id u64`, `replica_extent_id Option<u64>` | WriteExtent. |
-| 2 | `ReadAck` | `data Vec<u8>` | ReadExtent. |
+| 2 | `ReadAck` | `data Vec<u8>` | ReadExtent / ReadExtentRange. |
 | 3 | `TombstoneAck` | — | Tombstone. |
 | 4 | `SyncAck` | `confirmed_id u64`, `replica_confirmed_id Option<u64>` | Sync. |
 | 5 | `StatsAck` | `device_size u64`, `tail u64`, `live_bytes u64`, `extent_count u64`, `confirmed_id u64` | Stats. |
@@ -50,7 +52,12 @@ salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal` · 6
 
 - **Hello** must precede all other ops; anything else first → `BadRequest`
   and close. Nonces are for debugging only (no auth in v1 — static
-  membership on a trusted network).
+  membership on a trusted network). From v3, `HelloAck.store_uuid`
+  identifies the extent store actually being served; a client that pinned
+  membership by UUID (P12.5 `CLUSTER_CONFIG`) MUST verify it on every
+  (re)connect and refuse the connection on mismatch — probing the wrong
+  server would return `NotFound` for every extent and a metadata layer
+  reconciling against such answers would destroy the namespace.
 - **WriteExtent** is *idempotent per server lifetime*: the server remembers
   `write_id → extent_id`; a retry with the same `write_id` returns the
   original `extent_id` without appending again. The dedup map is in memory
@@ -63,6 +70,14 @@ salvage failure) · 3 `StoreFull` · 4 `VersionMismatch` · 5 `Internal` · 6
   two-node chain cannot loop.
 - **ReadExtent** verifies the extent's CRC32C before returning data;
   mismatch → `Corrupt`. Unknown or tombstoned id → `NotFound`.
+- **ReadExtentRange** (v3) reads the FULL record from the device and
+  verifies the whole-payload CRC32C (mismatch → `Corrupt`), then returns
+  only the requested subrange: `offset > data_len` → `BadRequest`;
+  `offset == data_len` → empty `ReadAck`; otherwise `min(len, data_len −
+  offset)` bytes. Unknown or tombstoned id → `NotFound`. The returned bytes
+  are covered by the server-verified whole-record CRC — the same
+  server-side verification model as `ReadExtent`, with less network
+  amplification for small subrange reads.
 - **Tombstone** is idempotent: tombstoning an already-tombstoned extent is
   a no-op (`TombstoneAck`); unknown id → `NotFound`.
 - **Sync** performs the store's group commit (data fdatasync + dual
@@ -111,3 +126,7 @@ provide truthful physical topology.
 Unknown variant indices → `BadRequest` + close. New ops are added by
 bumping PROTOCOL_VERSION and documenting them here first; `Hello` version
 negotiation lets mixed-version peers fail fast.
+
+- **v3 (P12.5)**: `HelloAck` gains `store_uuid [u8; 16]` (server-identity
+  pinning); new op `ReadExtentRange` (subrange reads with server-side
+  whole-record CRC verification). v3 peers refuse pre-v3 ones at Hello.

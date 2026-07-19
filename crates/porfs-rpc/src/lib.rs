@@ -1,4 +1,4 @@
-//! Chunkserver RPC (protocol v1, `docs/protocol.md`): the transport,
+//! Chunkserver RPC (protocol v3, `docs/protocol.md`): the transport,
 //! client, and server halves of "extent read/write as a service".
 
 pub mod client;

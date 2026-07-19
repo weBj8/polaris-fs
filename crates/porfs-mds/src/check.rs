@@ -10,10 +10,11 @@ use redb::{ReadableDatabase, ReadableTable};
 
 use crate::error::{MdsError, Result, dberr};
 use crate::keys::{
-    DIR_ENTRIES, FILE_EXTENTS, INODES, XATTRS, decode_extent_key, decode_extent_value, decode_rec,
-    ino_key,
+    DIR_ENTRIES, ExtentRef, FILE_EXTENTS_V2, INODES, XATTRS, decode_extent_key,
+    decode_extent_value, decode_rec, ino_key,
 };
 use crate::mds::Mds;
+use crate::plane::Probe;
 use crate::types::{CheckReport, Ino, MAX_SYMLINK_LEN, NodeKind, ROOT_INO};
 
 impl Mds {
@@ -23,9 +24,9 @@ impl Mds {
     /// 2. every non-root directory has exactly one parent entry and
     ///    `nlink == 1`; every non-directory inode's `nlink` equals its
     ///    directory-entry count;
-    /// 3. every `file_extents` row belongs to a live **file** inode;
-    /// 4. every mapped extent exists in the store index and is not
-    ///    tombstoned;
+    /// 3. every `file_extents_v2` row belongs to a live **file** inode;
+    /// 4. every mapped extent is live on at least one copy (local device or
+    ///    a chunkserver);
     /// 5. symlink records carry a target within the length cap, non-
     ///    symlinks carry none; `rdev` is nonzero-capable only on device
     ///    nodes;
@@ -33,21 +34,20 @@ impl Mds {
     ///
     /// The first failure returns [`MdsError::Corrupt`]; success returns the
     /// counts. Takes `&mut self` (rather than `&self`) because pass 4 probes
-    /// extent liveness through the store's read path — the store exposes no
-    /// metadata-only index query in v0.
+    /// extent liveness through the data plane.
     pub fn self_check(&mut self) -> Result<CheckReport> {
         let mut report = CheckReport {
             orphans_repaired: self.last_reconcile_repairs,
             ..CheckReport::default()
         };
-        // Passes 1-3 and 5-6 run in one read snapshot; pass 4 needs
-        // `&mut self.store` (read path), so the snapshot is dropped first.
-        let mut mapped: Vec<(Ino, u64)> = Vec::new();
+        // Passes 1-3 and 5-6 run in one read snapshot; pass 4 probes the
+        // data plane, so the snapshot is dropped first.
+        let mut mapped: Vec<(Ino, ExtentRef)> = Vec::new();
         {
             let txn = self.db.begin_read().map_err(dberr)?;
             let inodes = txn.open_table(INODES).map_err(dberr)?;
             let entries = txn.open_table(DIR_ENTRIES).map_err(dberr)?;
-            let fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+            let fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
             let xattrs = txn.open_table(XATTRS).map_err(dberr)?;
 
             let mut refs: HashMap<Ino, u32> = HashMap::new();
@@ -102,7 +102,7 @@ impl Mds {
                 let (key, value) = item.map_err(dberr)?;
                 report.extents += 1;
                 let (ino, _offset) = decode_extent_key(key.value())?;
-                let (extent_id, _len) = decode_extent_value(value.value())?;
+                let (eref, _len) = decode_extent_value(value.value())?;
                 match inodes.get(&ino_key(ino)).map_err(dberr)? {
                     None => {
                         return Err(MdsError::Corrupt(format!(
@@ -117,7 +117,7 @@ impl Mds {
                         }
                     }
                 }
-                mapped.push((ino, extent_id));
+                mapped.push((ino, eref));
             }
 
             for item in xattrs.iter().map_err(dberr)? {
@@ -141,10 +141,20 @@ impl Mds {
             }
         }
 
-        for (ino, extent_id) in mapped {
-            if !self.extent_live(extent_id)? {
+        let refs: Vec<ExtentRef> = mapped.iter().map(|(_, eref)| *eref).collect();
+        let probes = self.store.probe(&refs)?;
+        let mut cursor = 0;
+        for (ino, eref) in &mapped {
+            let copies = &probes[cursor..cursor + eref.copies()];
+            cursor += eref.copies();
+            if copies.iter().all(|probe| *probe == Probe::NotFound) {
                 return Err(MdsError::Corrupt(format!(
-                    "extent {extent_id} of ino {ino} missing or tombstoned in the store"
+                    "extent {eref:?} of ino {ino} missing or tombstoned on every copy"
+                )));
+            }
+            if copies.contains(&Probe::Unreachable) {
+                return Err(MdsError::Cluster(format!(
+                    "extent {eref:?} of ino {ino} has an unreachable copy; cannot verify"
                 )));
             }
         }

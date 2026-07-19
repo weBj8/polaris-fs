@@ -49,7 +49,9 @@ impl Drop for Server {
 
 /// Serve the store opened by `open` on `listener` until `shutdown` fires.
 /// `open` runs entirely on the store thread, so the `!Send`
-/// [`ExtentStore`] never moves between threads.
+/// [`ExtentStore`] never moves between threads. The store's UUID is read
+/// back once at open and stamped into every `HelloAck` (protocol v3
+/// server-identity pinning).
 pub async fn serve(
     listener: TcpListener,
     open: impl FnOnce() -> Result<ExtentStore, StoreError> + Send + 'static,
@@ -58,10 +60,10 @@ pub async fn serve(
     let addr = listener.local_addr()?;
     let (shutdown_tx, _) = watch::channel(false);
     let (job_tx, job_rx) = mpsc::channel::<Job>();
-    let (init_tx, init_rx) = mpsc::channel::<Result<(), StoreError>>();
+    let (init_tx, init_rx) = mpsc::channel::<Result<[u8; 16], StoreError>>();
     let worker = std::thread::spawn(move || match open() {
         Ok(store) => {
-            if init_tx.send(Ok(())).is_ok() {
+            if init_tx.send(Ok(store.uuid())).is_ok() {
                 store_worker(store, job_rx);
             }
         }
@@ -71,12 +73,12 @@ pub async fn serve(
     });
     // A dead channel here means the worker thread panicked before
     // reporting the open outcome.
-    init_rx
+    let store_uuid = init_rx
         .recv()
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "store worker died during open"))?
         .map_err(io::Error::other)?;
     let accept_shutdown = shutdown_tx.subscribe();
-    let accept_task = tokio::spawn(accept_loop(listener, job_tx, accept_shutdown));
+    let accept_task = tokio::spawn(accept_loop(listener, job_tx, accept_shutdown, store_uuid));
     // Forward external shutdown into our own channel.
     let forward_tx = shutdown_tx.clone();
     tokio::spawn(async move {
@@ -96,6 +98,7 @@ async fn accept_loop(
     listener: TcpListener,
     jobs: mpsc::Sender<Job>,
     mut shutdown: watch::Receiver<bool>,
+    store_uuid: [u8; 16],
 ) {
     let started_unix = now_unix();
     loop {
@@ -107,7 +110,7 @@ async fn accept_loop(
                         // delayed-ACK would stall every exchange.
                         let _ = socket.set_nodelay(true);
                         let jobs = jobs.clone();
-                        tokio::spawn(handle_conn(socket, jobs, started_unix));
+                        tokio::spawn(handle_conn(socket, jobs, started_unix, store_uuid));
                     }
                     Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
                 }
@@ -139,18 +142,28 @@ async fn send(
 
 /// In-flight dispatches per connection (bounds buffered payloads).
 const MAX_INFLIGHT: usize = 32;
+/// Bound on one chain forward to a secondary: comfortably above any
+/// healthy LAN hop, far below a caller's write/sync timeout (so a dead
+/// secondary answers `ReplicaUnavailable` instead of hanging the reply
+/// stream), and small enough to bound leaked forward tasks.
+const CHAIN_FORWARD_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// One client connection: Hello first, then frames are read continuously
 /// while their responses stream back IN ORDER (FuturesOrdered) — the
 /// store-thread dispatch latency of one op overlaps the framing of the
 /// next, so a connection streams instead of round-tripping per op.
-async fn handle_conn(socket: TcpStream, jobs: mpsc::Sender<Job>, started_unix: u64) {
+async fn handle_conn(
+    socket: TcpStream,
+    jobs: mpsc::Sender<Job>,
+    started_unix: u64,
+    store_uuid: [u8; 16],
+) {
     let framed = LengthDelimitedCodec::builder()
         .little_endian()
         .max_frame_length(MAX_FRAME as usize)
         .new_framed(socket);
     let (mut sink, mut stream) = framed.split();
-    if !handshake(&mut sink, &mut stream, started_unix).await {
+    if !handshake(&mut sink, &mut stream, started_unix, store_uuid).await {
         return;
     }
     let mut responses = FuturesOrdered::new();
@@ -202,6 +215,7 @@ async fn handshake(
     sink: &mut (impl SinkExt<bytes::Bytes, Error = std::io::Error> + Unpin),
     stream: &mut (impl StreamExt<Item = Result<bytes::BytesMut, std::io::Error>> + Unpin),
     started_unix: u64,
+    store_uuid: [u8; 16],
 ) -> bool {
     let Some(frame) = stream.next().await else {
         return false;
@@ -216,6 +230,7 @@ async fn handshake(
                 protocol_version: PROTOCOL_VERSION,
                 server_nonce: rand_nonce(),
                 started_unix,
+                store_uuid,
             };
             let sent = send(sink, &response).await;
             if sent {
@@ -286,15 +301,25 @@ async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response 
             let Response::WriteAck { extent_id, .. } = local else {
                 return local;
             };
-            match ChunkClient::new(secondary)
-                .write_extent(write_id, inode, logical_offset, data)
-                .await
+            // The forward is bounded: an unbounded one parks the response
+            // behind it forever (replies stream in order), wedging this
+            // connection, and leaks one task per dead-secondary write.
+            let forward = ChunkClient::new(secondary);
+            match tokio::time::timeout(
+                CHAIN_FORWARD_TIMEOUT,
+                forward.write_extent(write_id, inode, logical_offset, data),
+            )
+            .await
             {
-                Ok(replica_extent_id) => Response::WriteAck {
+                Ok(Ok(replica_extent_id)) => Response::WriteAck {
                     extent_id,
                     replica_extent_id: Some(replica_extent_id),
                 },
-                Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                Ok(Err(err)) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                Err(_) => Response::error(
+                    ErrorCode::ReplicaUnavailable,
+                    format!("forward to secondary {secondary} timed out"),
+                ),
             }
         }
         Request::Sync {
@@ -304,18 +329,22 @@ async fn dispatch_chain(jobs: &mpsc::Sender<Job>, request: Request) -> Response 
             let Response::SyncAck { confirmed_id, .. } = local else {
                 return local;
             };
-            match ChunkClient::new(secondary).sync().await {
-                Ok(replica_confirmed_id) => Response::SyncAck {
+            let forward = ChunkClient::new(secondary);
+            match tokio::time::timeout(CHAIN_FORWARD_TIMEOUT, forward.sync()).await {
+                Ok(Ok(replica_confirmed_id)) => Response::SyncAck {
                     confirmed_id,
                     replica_confirmed_id: Some(replica_confirmed_id),
                 },
-                Err(err) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                Ok(Err(err)) => Response::error(ErrorCode::ReplicaUnavailable, err.to_string()),
+                Err(_) => Response::error(
+                    ErrorCode::ReplicaUnavailable,
+                    format!("forward to secondary {secondary} timed out"),
+                ),
             }
         }
         request => dispatch(jobs, request).await,
     }
 }
-
 /// The store thread: serializes every op against the extent store.
 fn store_worker(mut store: ExtentStore, rx: mpsc::Receiver<Job>) {
     update_store_gauges(&store);
@@ -374,6 +403,30 @@ fn execute(store: &mut ExtentStore, dedup: &mut HashMap<u128, u64>, request: Req
             Ok(data) => Response::ReadAck { data },
             Err(err) => store_error(err),
         },
+        Request::ReadExtentRange {
+            extent_id,
+            offset,
+            len,
+        } => match store.read(extent_id) {
+            // The full record is read and CRC32C-verified by the store; only
+            // the requested subrange goes on the wire (protocol §3).
+            Ok(data) => {
+                let data_len = data.len() as u64;
+                if offset > data_len {
+                    Response::error(
+                        ErrorCode::BadRequest,
+                        format!("range offset {offset} beyond extent length {data_len}"),
+                    )
+                } else {
+                    let start = offset as usize;
+                    let end = (offset + u64::from(len)).min(data_len) as usize;
+                    Response::ReadAck {
+                        data: data[start..end].to_vec(),
+                    }
+                }
+            }
+            Err(err) => store_error(err),
+        },
         Request::Tombstone { extent_id } => match store.discard(extent_id) {
             Ok(()) => Response::TombstoneAck,
             Err(StoreError::Tombstoned(_)) => Response::TombstoneAck, // idempotent
@@ -416,6 +469,7 @@ fn request_name(request: &Request) -> &'static str {
         Request::Hello { .. } => "hello",
         Request::WriteExtent { .. } => "write_extent",
         Request::ReadExtent { .. } => "read_extent",
+        Request::ReadExtentRange { .. } => "read_extent_range",
         Request::Tombstone { .. } => "tombstone",
         Request::Sync { .. } => "sync",
         Request::Stats => "stats",

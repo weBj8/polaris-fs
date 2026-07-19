@@ -48,6 +48,11 @@ pub enum MdsError {
     /// Extent-store failure.
     #[error("store error: {0}")]
     Store(#[from] StoreError),
+    /// Cluster data-plane failure (chunkserver unreachable, timed out, or
+    /// answered with an error; identity mismatch; bad placement input).
+    /// Surfaces as `EIO` upward.
+    #[error("cluster error: {0}")]
+    Cluster(String),
     /// Metadata-database (redb) failure.
     #[error("metadata db error: {0}")]
     Db(#[from] redb::Error),

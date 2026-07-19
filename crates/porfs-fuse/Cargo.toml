@@ -12,3 +12,6 @@ fuser = "0.17"
 [dev-dependencies]
 tempfile.workspace = true
 libc.workspace = true
+porfs-rpc = { path = "../porfs-rpc" }
+porfs-store = { path = "../porfs-store" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }

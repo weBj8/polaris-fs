@@ -274,9 +274,93 @@ counts/errors, read/write bytes, and store gauges; optional `porfs chunkserver
 Gate: Prometheus scrapes plus `porfsadm status` answer "which layer is slow" for a
 live chunkserver. ✅
 
-**P13 · Production v0.1 rollout (gate phase)**
+**P12.5 · FUSE data plane over chunkservers** (2–3 wks, inserted phase) ✅ DONE
+Inserted between P12 and P13: the FUSE mount's file-data path runs against
+remote chunkservers (P7 wire, P9 chain replication, P10 placement) instead of a
+local extent device, so one machine mounts while others serve the data. The MDS
+stays embedded in the mount (metadata RPC service is still P16). Design reviewed
+by an oracle pass against the code; two planned flaws caught and designed out
+(marked † below).
+Delivered: `DataPlane` enum in porfs-mds (`Local(ExtentStore)` |
+`Remote(RemoteStore)`) behind the existing store method surface; `ExtentRef`
+extent locators with length-discriminated redb values (16 B legacy local /
+32 B cluster: server u32, extent u64, replica server+extent, len u64) in a NEW
+`file_extents_v2` table (`&[u8] → &[u8]`) with a schema 1→2 row-copy migration
+at open — †redb 4.1 persists value type+fixed-width per table and rejects an
+in-place type change on open; `RemoteStore`: multi-thread tokio runtime + Pool
+on the MDS worker thread (`block_on`; single-writer preserved), rendezvous
+placement per extent (key = `ino, off / EXTENT_DATA_MAX`; ChunkLoc persisted,
+never recomputed), replicas=2 chain writes, read failover (transport error /
+timeout / NotFound on primary → replica), fsync = parallel `sync` broadcast to
+ALL servers (strict: any failure → EIO), tombstone discard, statfs aggregation;
+†every RPC wrapped in `tokio::time::timeout` (read → fail over, write/fsync →
+EIO) so a partitioned-not-killed chunkserver cannot hang the single worker
+thread; mount-time reconcile with a remote error taxonomy — a row is dead ONLY
+when every copy answers `NotFound` from a REACHABLE server (transport/corrupt
+aborts the mount), pipelined probes; †server-identity guard: `CLUSTER_CONFIG`
+persists per-server store UUIDs pinned at format time, wire v3 `HelloAck`
+carries `store_uuid`, and all servers must connect + uuid-match before
+reconcile may delete a single row (a reordered/reused address would otherwise
+probe-wipe the namespace); wire v3 `ReadExtentRange` (server reads the full
+record, verifies the whole-record CRC, ships only the requested subrange) so a
+4 KiB FUSE read no longer pulls a 4 MiB extent over the LAN; `porfs mount
+--chunks ip1:9100,ip2:9100,... [--replicas 2]` (member syntax
+`addr[@rack][/chassis]`; membership persisted in meta; remount needs no flags)
++ `mkfs --meta --chunks`; cluster-mount integration tests +
+`scripts/cluster-smoke.sh`.
+Scope cuts: membership changes (static; uuid guard detects address drift and
+refuses), re-replication/heal (dangling replica pointers leak until GC P27),
+degraded single-copy writes (a dead server fails its placements' writes LOUDLY
+with EIO — never silently acks one copy as two), runtime dangling rows after a
+data-plane-only crash EIO loudly and heal at the next MDS remount (the same
+window local mode heals at remount).
+Gate: 4 loopback chunkserver processes + a real FUSE mount, replicas=2 — ✅ all
+(scripts/cluster-smoke.sh, ~3 min total):
+(a) the P6 workloads on the cluster mount (git clone + `fsck --strict` clean,
+busybox build, sqlite WAL stress) with zero data errors;
+(b) kill -9 one chunkserver: all 7479 manifest files re-verified 100%
+byte-exact via failover reads in 9 s (circuit breaker + nproc-parallel check),
+a bounded sqlite op failed loudly (`disk I/O error`, no hang), live-placement
+writes kept succeeding;
+(c) after the chunkserver restart: rejoin sweep 24/24, manifest byte-exact in
+5 s — zero confirmed-data loss; cluster mds-check clean (8243 inodes, 25837
+extent rows);
+(d) identity guard: a reformatted (wrong-uuid) server fails the mount before
+reconcile deletes a single row (porfs-mds/tests/cluster.rs);
+(e) 164 workspace tests + clippy zero.
+Bugs found & fixed en route: (1) every dead-server read paid a full 2 s
+timeout — added a circuit breaker (skip window with exponential backoff;
+reads fail straight over, writes/sync/statfs probe with the read-timeout
+bound; desperation pass retries all copies when every one is marked);
+(2) cancelling an in-flight op by outer timeout left a stale response on the
+shared connection, desynchronizing the id-less wire protocol — clients now
+`disconnect()` on any outer timeout; (3) the server's chain forward to a
+secondary was unbounded — a dead secondary parked the in-order reply stream
+and wedged the connection (plus one leaked task per write) — bounded at 15 s;
+(4) breaker-vs-rejoin race: strict sync/statfs could not skip a marked
+server, so they probe it with the read-timeout bound (a restarted server
+rejoins on the first fsync); (5) smoke script `set -e` aborted on `kill -9`
+of an already-exited mount pid.
+Known limitations (documented, not gate blockers): post-kill an app cannot
+fsync (strict broadcast) and sees EIO — by design; reconcile requires all
+servers reachable + identified, so one dead chunkserver blocks (re)mount;
+subrange reads trust the server-verified whole-record CRC (same model as v2
+full reads). kill9-soak not re-run: the extent-store engine/on-disk format is
+untouched by this phase (changes are RPC + MDS + FUSE/CLI layers).
+
+**P13 · Production v0.1 rollout (gate phase)** — in progress (soak started 2026-07-19)
 Run "rebuildable data" (dataset replicas/distribution files) on our own cluster,
 4 weeks, zero incidents. **If we won't run it ourselves → downgrade to a learning project.**
+Soak contract: `docs/p13-soak.md` (topology, dataset, incident taxonomy,
+verdict rules); supervisor: `scripts/p13-soak.sh` (start/stop/status/verify).
+Running config: 4 loopback chunkservers (ports 9201-9204, racks r1/r1/r2/r2,
+64 GiB sparse devices) + one replicas=2 cluster mount + a 300 s workload loop
+(churn write/read-back verify, sqlite WAL probe, 100-file sampled manifest
+verify per cycle, full parallel sweep every 12th cycle, porfsadm snapshots).
+Dataset: 2056-file rebuildable set (deterministic generated tree 2.2 GB +
+distribution tarball) pinned by a sha256 manifest. Verdict due 2026-08-16:
+pass = zero SEV1 (data integrity) and zero SEV2 (availability) incidents;
+SEV3 (absorbed single-chunkserver loss) is recorded, not failing.
 
 ### Act 3: distributed consistency (P14–P18) — GPFS's soul
 
@@ -476,3 +560,13 @@ past 50 nodes and is not part of GPFS-parity basics.
     bypass; multi-machine gate blocked on P16 metadata RPC)
 12. ✅ P12 (Prometheus chunkserver endpoint; bounded RPC/store metrics;
     structured tracing init; porfsadm status CLI)
+13. ✅ P12.5 (inserted: FUSE data plane over chunkservers — DataPlane enum,
+    RemoteStore with circuit breaker + read failover + strict sync broadcast,
+    wire v3 uuid pinning + ReadExtentRange, schema v2 extent locators;
+    cluster-smoke gate: P6 workloads clean, kill-one-chunkserver failover
+    9 s/7479 files byte-exact, honest EIO, rejoin, zero confirmed-data loss;
+    164 tests green)
+14. P13 in progress (production v0.1 soak: 4 loopback chunkservers +
+    replicas=2 mount + 300 s workload loop on a 2056-file rebuildable
+    dataset; started 2026-07-19, verdict due 2026-08-16 — zero SEV1/SEV2;
+    docs/p13-soak.md, scripts/p13-soak.sh)

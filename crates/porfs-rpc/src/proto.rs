@@ -1,11 +1,11 @@
-//! Message types of wire protocol v1 (`docs/protocol.md`): a
+//! Message types of wire protocol v3 (`docs/protocol.md`): a
 //! length-prefixed frame carries one bincode-2 (standard config, serde)
 //! `Request` or `Response`.
 
 use serde::{Deserialize, Serialize};
 
 /// Wire protocol version implemented by this crate.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Maximum accepted frame payload (an extent payload plus envelope slack);
 /// larger frames get the connection dropped.
@@ -42,16 +42,27 @@ pub enum Request {
     },
     /// Store counters.
     Stats,
+    /// Read the `[offset, offset+len)` subrange of one extent; the server
+    /// reads and CRC32C-verifies the full record, then ships only the
+    /// subrange (v3).
+    ReadExtentRange {
+        extent_id: u64,
+        offset: u64,
+        len: u32,
+    },
 }
 
 /// Server -> client responses (variant indices are the contract).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Response {
     /// Hello accepted; `Error(VersionMismatch)` + close otherwise.
+    /// `store_uuid` identifies the extent store being served; clients that
+    /// pinned membership by UUID verify it on every (re)connect (v3).
     HelloAck {
         protocol_version: u16,
         server_nonce: u64,
         started_unix: u64,
+        store_uuid: [u8; 16],
     },
     /// WriteExtent accepted (appended, not yet durable — see Sync).
     WriteAck {
@@ -162,11 +173,17 @@ mod tests {
         roundtrip(Request::Tombstone { extent_id: 9 });
         roundtrip(Request::Sync { next: None });
         roundtrip(Request::Stats);
+        roundtrip(Request::ReadExtentRange {
+            extent_id: 9,
+            offset: 100,
+            len: 4096,
+        });
 
         roundtrip(Response::HelloAck {
             protocol_version: PROTOCOL_VERSION,
             server_nonce: 1,
             started_unix: 1_700_000_000,
+            store_uuid: [0xAB; 16],
         });
         roundtrip(Response::WriteAck {
             extent_id: 3,

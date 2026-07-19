@@ -6,14 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+porfs-cluster = { path = "../porfs-cluster" }
 porfs-format = { path = "../porfs-format" }
+porfs-rpc = { path = "../porfs-rpc" }
 porfs-store = { path = "../porfs-store" }
 thiserror.workspace = true
 redb = "4"
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
+bincode2 = { package = "bincode", version = "2", features = ["serde"] }
 twox-hash = "2"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 
 [dev-dependencies]
 tempfile.workspace = true
 assert_cmd.workspace = true
+twox-hash = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "net", "sync", "macros"] }

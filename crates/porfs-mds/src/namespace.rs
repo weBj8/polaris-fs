@@ -14,7 +14,7 @@ use redb::{ReadableDatabase, ReadableTable};
 
 use crate::error::{MdsError, Result, dberr};
 use crate::keys::{
-    DIR_ENTRIES, FILE_EXTENTS, INODES, META, NEXT_INO_KEY, XATTRS, decode_dirent_name,
+    DIR_ENTRIES, FILE_EXTENTS_V2, INODES, META, NEXT_INO_KEY, XATTRS, decode_dirent_name,
     dirent_bounds, dirent_key, encode_rec, ino_key,
 };
 use crate::mds::{
@@ -308,7 +308,7 @@ impl Mds {
             } else {
                 inodes.remove(&ino_key(child)).map_err(dberr)?;
                 remove_xattr_rows(&txn, child)?;
-                let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+                let mut fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
                 dead_extents = remove_extent_rows(&mut fext, child)?;
             }
             touch_parent(&mut inodes, parent, now)?;
@@ -435,7 +435,7 @@ impl Mds {
                     inodes.remove(&ino_key(dst)).map_err(dberr)?;
                     remove_xattr_rows(&txn, dst)?;
                     if dst_rec.kind == NodeKind::File {
-                        let mut fext = txn.open_table(FILE_EXTENTS).map_err(dberr)?;
+                        let mut fext = txn.open_table(FILE_EXTENTS_V2).map_err(dberr)?;
                         dead_extents = remove_extent_rows(&mut fext, dst)?;
                     }
                 }

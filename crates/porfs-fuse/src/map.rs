@@ -27,7 +27,9 @@ pub(crate) fn errno(err: &MdsError) -> Errno {
         MdsError::TooBig(_) => Errno::E2BIG,
         MdsError::InvalidOp(_) => Errno::EINVAL,
         MdsError::UnsupportedSchema(_) => Errno::EIO,
-        MdsError::Store(_) | MdsError::Db(_) | MdsError::Corrupt(_) => Errno::EIO,
+        MdsError::Store(_) | MdsError::Cluster(_) | MdsError::Db(_) | MdsError::Corrupt(_) => {
+            Errno::EIO
+        }
     }
 }
 

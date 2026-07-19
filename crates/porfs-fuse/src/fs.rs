@@ -19,11 +19,13 @@ use std::time::SystemTime;
 
 use fuser::{
     AccessFlags, BsdFileFlags, Errno, FileHandle, FileType, Filesystem, FopenFlags, Generation,
-    INodeNo, LockOwner, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyEmpty, ReplyEntry, ReplyLseek, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request,
-    TimeOrNow, WriteFlags,
+    INodeNo, LockOwner, OpenAccMode, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData,
+    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLseek, ReplyOpen, ReplyStatfs, ReplyWrite,
+    ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
-use porfs_mds::{Ino, InodeAttr, MAX_SYMLINK_LEN, Mds, MdsError, NodeKind, ROOT_INO, SetAttr};
+use porfs_mds::{
+    ClusterTimeouts, Ino, InodeAttr, MAX_SYMLINK_LEN, Mds, MdsError, NodeKind, ROOT_INO, SetAttr,
+};
 
 use crate::config::MountConfig;
 use crate::map::{errno, file_attr, file_type, from_system_time, perm_bits};
@@ -93,6 +95,38 @@ impl PorfsFs {
         let meta = meta.as_ref().to_path_buf();
         let data = data.as_ref().to_path_buf();
         Self::with_opener(move || Mds::open(&meta, &data), config)
+    }
+
+    /// Open the cluster-mode MDS instance at `meta` on the worker thread:
+    /// membership, UUID pins, and the replica count come from the
+    /// persisted `cluster_config` ([`Mds::open_cluster`]), so a remount
+    /// needs no chunkserver flags.
+    ///
+    /// # Errors
+    /// Whatever [`Mds::open_cluster`] returns (a local-mode database,
+    /// unreachable or misidentified chunkservers, metadata corruption).
+    pub fn open_cluster(meta: impl AsRef<Path>, config: MountConfig) -> Result<Self, MdsError> {
+        let meta = meta.as_ref().to_path_buf();
+        Self::with_opener(move || Mds::open_cluster(&meta), config)
+    }
+
+    /// [`PorfsFs::open_cluster`] with explicit cluster network timeouts:
+    /// integration tests shorten the failure paths (the production
+    /// defaults wait out real network partitions).
+    ///
+    /// # Errors
+    /// Whatever [`Mds::open_cluster_with_timeouts`] returns.
+    #[doc(hidden)]
+    pub fn open_cluster_with_timeouts(
+        meta: impl AsRef<Path>,
+        config: MountConfig,
+        timeouts: ClusterTimeouts,
+    ) -> Result<Self, MdsError> {
+        let meta = meta.as_ref().to_path_buf();
+        Self::with_opener(
+            move || Mds::open_cluster_with_timeouts(&meta, timeouts),
+            config,
+        )
     }
 
     /// Wrap a custom MDS opener: the closure runs on the worker thread, so
@@ -508,7 +542,7 @@ impl Filesystem for PorfsFs {
         }
     }
 
-    fn open(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         match self.call(move |mds| mds.getattr(ino.0)) {
             Ok(Ok(attr)) => match attr.kind {
                 NodeKind::Dir => reply.error(Errno::EISDIR),
@@ -519,7 +553,21 @@ impl Filesystem for PorfsFs {
                     // gives every open a fresh view of data closed by another
                     // client. P17 replaces this conservative policy with
                     // lease-backed coherent caching.
-                    reply.opened(FileHandle(0), FopenFlags::FOPEN_DIRECT_IO);
+                    let mut fopen = FopenFlags::FOPEN_DIRECT_IO;
+                    if flags.acc_mode() == OpenAccMode::O_RDONLY {
+                        // A read-only handle carries no dirty data, so its
+                        // close has nothing to flush. Suppressing FUSE_FLUSH
+                        // keeps a reader's close() instant and error-free
+                        // when a chunkserver is down — the strict sync
+                        // broadcast would otherwise stall EVERY close for
+                        // the full sync timeout and then report EIO on a
+                        // handle that never wrote, which contradicts the
+                        // "the mount keeps serving all reads" failover
+                        // contract. Write handles keep the close-flush
+                        // barrier (P11 close-to-open), unchanged.
+                        fopen |= FopenFlags::FOPEN_NOFLUSH;
+                    }
+                    reply.opened(FileHandle(0), fopen);
                 }
                 NodeKind::Fifo => reply.opened(FileHandle(0), FopenFlags::empty()),
                 NodeKind::Symlink | NodeKind::Socket | NodeKind::Chr | NodeKind::Blk => {

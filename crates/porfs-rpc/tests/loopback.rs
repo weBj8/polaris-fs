@@ -372,3 +372,96 @@ async fn many_small_ops_stay_fast() {
     );
     stop(fx).await;
 }
+
+#[tokio::test]
+async fn read_extent_range_slices_server_side() {
+    let fx = start().await;
+    let data = pattern(17, 1 << 20);
+    let id = fx
+        .client
+        .write_extent(77, 3, 0, data.clone())
+        .await
+        .unwrap();
+
+    // A plain subrange comes back sliced; len clamps to the record end.
+    let back = fx.client.read_extent_range(id, 100, 500).await.unwrap();
+    assert_eq!(back, data[100..600]);
+    let back = fx
+        .client
+        .read_extent_range(id, (1 << 20) - 10, 4096)
+        .await
+        .unwrap();
+    assert_eq!(back, data[(1 << 20) - 10..]);
+    let back = fx.client.read_extent_range(id, 0, u32::MAX).await.unwrap();
+    assert_eq!(back, data);
+
+    // offset == data_len reads empty; offset past it is a BadRequest.
+    let back = fx.client.read_extent_range(id, 1 << 20, 10).await.unwrap();
+    assert!(back.is_empty());
+    let err = fx
+        .client
+        .read_extent_range(id, (1 << 20) + 1, 10)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            RpcError::Remote {
+                code: ErrorCode::BadRequest,
+                ..
+            }
+        ),
+        "past-end range: {err}"
+    );
+
+    // Unknown ids are NotFound, same as a full read.
+    let err = fx
+        .client
+        .read_extent_range(u64::MAX, 0, 1)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RpcError::Remote {
+            code: ErrorCode::NotFound,
+            ..
+        }
+    ));
+    stop(fx).await;
+}
+
+#[tokio::test]
+async fn pinned_client_verifies_store_identity() {
+    let fx = start().await;
+
+    // Learn the store's uuid over an unpinned connection.
+    fx.client.stats().await.unwrap();
+    let uuid = fx
+        .client
+        .store_uuid()
+        .expect("connected client knows the store uuid");
+
+    // A correctly pinned client connects and reads the same uuid back.
+    let pinned = ChunkClient::new_pinned(fx.server.addr(), uuid);
+    pinned.stats().await.unwrap();
+    assert_eq!(pinned.store_uuid(), Some(uuid));
+
+    // A wrongly pinned client is refused immediately (a deterministic
+    // mismatch must not enter the reconnect backoff loop).
+    let mut wrong = uuid;
+    wrong[0] ^= 0xFF;
+    let pinned = ChunkClient::new_pinned(fx.server.addr(), wrong);
+    let started = Instant::now();
+    let err = pinned.stats().await.unwrap_err();
+    assert!(
+        matches!(err, RpcError::Protocol(_)),
+        "identity mismatch: {err}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "mismatch took {:?} (backoff loop?)",
+        started.elapsed()
+    );
+    assert_eq!(pinned.store_uuid(), None);
+    stop(fx).await;
+}

@@ -29,6 +29,12 @@ struct Inner {
     conn: Mutex<Option<Framed<TcpStream, LengthDelimitedCodec>>>,
     backoff: StdMutex<Duration>,
     nonce: u64,
+    /// Pinned store identity: when set, every (re)connect must answer
+    /// `HelloAck` with exactly this `store_uuid` (protocol v3 §3).
+    expected_uuid: Option<[u8; 16]>,
+    /// The `store_uuid` of the last successful `HelloAck` (`None` until
+    /// the first connect).
+    store_uuid: StdMutex<Option<[u8; 16]>>,
 }
 
 /// Snapshot of a chunkserver's extent-store state.
@@ -51,14 +57,38 @@ impl StoreStats {
 impl ChunkClient {
     /// A client for `addr` (connects lazily on the first op).
     pub fn new(addr: SocketAddr) -> Self {
+        Self::build(addr, None)
+    }
+
+    /// A client for `addr` that refuses to talk to a store whose
+    /// `HelloAck.store_uuid` differs from `expected` (protocol v3
+    /// server-identity pinning). The check runs at every (re)connect and
+    /// fails immediately — a mismatch is deterministic, so no backoff.
+    pub fn new_pinned(addr: SocketAddr, expected: [u8; 16]) -> Self {
+        Self::build(addr, Some(expected))
+    }
+
+    fn build(addr: SocketAddr, expected_uuid: Option<[u8; 16]>) -> Self {
         Self {
             inner: std::sync::Arc::new(Inner {
                 addr,
                 conn: Mutex::new(None),
                 backoff: StdMutex::new(BACKOFF_MIN),
                 nonce: rand_nonce(),
+                expected_uuid,
+                store_uuid: StdMutex::new(None),
             }),
         }
+    }
+
+    /// The store identity learned at the last successful `HelloAck`
+    /// (`None` until the client has connected).
+    pub fn store_uuid(&self) -> Option<[u8; 16]> {
+        *self
+            .inner
+            .store_uuid
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
     }
 
     /// Append one extent; the returned id references it from now on.
@@ -111,6 +141,29 @@ impl ChunkClient {
         }
     }
 
+    /// Read the `[offset, offset+len)` subrange of one extent (v3): the
+    /// server reads and CRC32C-verifies the full record, then ships only
+    /// `min(len, data_len - offset)` bytes; `offset == data_len` reads
+    /// empty and `offset > data_len` is a `BadRequest`.
+    pub async fn read_extent_range(
+        &self,
+        extent_id: u64,
+        offset: u64,
+        len: u32,
+    ) -> Result<Vec<u8>, RpcError> {
+        match self
+            .call(&Request::ReadExtentRange {
+                extent_id,
+                offset,
+                len,
+            })
+            .await?
+        {
+            Response::ReadAck { data } => Ok(data),
+            other => Err(unexpected("ReadAck", &other)),
+        }
+    }
+
     /// Logically delete one extent (idempotent).
     pub async fn tombstone(&self, extent_id: u64) -> Result<(), RpcError> {
         match self.call(&Request::Tombstone { extent_id }).await? {
@@ -158,6 +211,15 @@ impl ChunkClient {
             }),
             other => Err(unexpected("StatsAck", &other)),
         }
+    }
+
+    /// Drop the current connection, forcing a reconnect on the next op.
+    /// Callers MUST do this after cancelling an in-flight op with an
+    /// outer timeout: the cancelled request may have a response still in
+    /// flight, and reusing the connection would hand that stale response
+    /// to the next request (responses carry no ids, §4).
+    pub async fn disconnect(&self) {
+        *self.inner.conn.lock().await = None;
     }
 
     /// One request round trip, transparently re-established once when the
@@ -235,8 +297,27 @@ impl ChunkClient {
                     };
                     match roundtrip(&mut framed, &hello).await {
                         Ok(Response::HelloAck {
-                            protocol_version, ..
+                            protocol_version,
+                            store_uuid,
+                            ..
                         }) if protocol_version == PROTOCOL_VERSION => {
+                            // A pinned identity mismatch is deterministic:
+                            // fail at once instead of backing off (probing
+                            // the wrong store would answer NotFound for
+                            // every extent, protocol §3).
+                            if let Some(expected) = self.inner.expected_uuid
+                                && store_uuid != expected
+                            {
+                                return Err(RpcError::Protocol(format!(
+                                    "store identity mismatch at {}: got {store_uuid:02x?}, expected {expected:02x?}",
+                                    self.inner.addr
+                                )));
+                            }
+                            *self
+                                .inner
+                                .store_uuid
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner()) = Some(store_uuid);
                             self.reset_backoff();
                             return Ok(framed);
                         }

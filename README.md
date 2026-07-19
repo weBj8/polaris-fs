@@ -26,7 +26,9 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P10 | Failure groups + placement policy | ✅ rack-separated replicas; simulated full-rack loss stays readable |
 | P11 | Close-to-open consistency | In progress: close flushes data; regular-file opens revalidate and bypass stale page-cache data |
 | P12 | Observability | ✅ Prometheus chunkserver metrics, structured tracing init, `porfsadm status` over Stats RPC |
-| P13–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+| P12.5 | FUSE data plane over chunkservers (wire v3) | ✅ mount on machine B, data on chunkservers A/C/… — replicas=2, read failover, honest EIO, kill-one-chunkserver zero confirmed-data loss (scripts/cluster-smoke.sh); 164 tests green |
+| P13 | Production v0.1 rollout (4-week dogfood soak) | 🏃 in progress: soak running since 2026-07-19 (docs/p13-soak.md, scripts/p13-soak.sh); verdict due 2026-08-16 |
+| P14–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
 
 ## Quickstart
 
@@ -38,14 +40,42 @@ cargo build --release
 ./target/release/porfs bench --device demo.img --size 1GiB --extent-size 1MiB --queue-depth 32
 ```
 
-## Production usage (current state, P12; P11 still in progress)
+## Production usage (current state, P12.5; P11 still in progress)
 
-**Format a filesystem and mount it** (one command; both files live on the
-machine you mount on):
+**Cluster mount — mount on one machine, data on others** (the P12.5
+topology): run a chunkserver on each data machine, then format + mount
+against them:
 
 ```bash
-cargo build --release
-mkdir -p /mnt/porfs
+# on every data machine (server01..server04):
+./target/release/porfs chunkserver \
+    --device /var/lib/porfs/chunk0.img --size 16TiB \
+    --listen 0.0.0.0:9100 \
+    --metrics-listen 127.0.0.1:9900
+
+# on the mount machine (first run formats, later runs just mount):
+./target/release/porfs mount \
+    --meta /var/lib/porfs/meta.redb \
+    --mountpoint /mnt/porfs \
+    --format --replicas 2 \
+    --chunks server01:9100@rack1,server02:9100@rack1,server03:9100@rack2,server04:9100@rack2
+# remount needs no flags (membership is pinned in the meta file):
+./target/release/porfs mount --meta /var/lib/porfs/meta.redb --mountpoint /mnt/porfs
+```
+
+Semantics with `replicas=2`: every extent is chain-written to two
+rack-separated chunkservers and acknowledged only by both. Killing one
+chunkserver: all reads keep serving (failover to the surviving copy,
+circuit-breaker accelerated), writes whose replica pair includes the dead
+server fail with EIO, and fsync fails with EIO until the chunkserver
+returns — nothing is ever silently acknowledged once. A remount requires
+all chunkservers reachable and identity-verified (store UUIDs are pinned
+at format; a wrong server at an address fails the mount rather than
+endangering the namespace).
+
+**Single-machine mount** (local data plane, as before):
+
+```bash
 ./target/release/porfs mount \
     --meta /var/lib/porfs/meta.redb \
     --data /var/lib/porfs/data.img \
@@ -58,22 +88,7 @@ mkdir -p /mnt/porfs
 
 The pair is a sparse extent device (`data.img`, grows as data lands) plus a
 redb metadata file (`meta.redb`). Put the device on your fastest NVMe; both
-must be on the **same machine as the mount** today.
-
-**Run a chunkserver on another LAN machine** (the data plane IS a network
-service since P7):
-
-```bash
-# on server01 (any machine on the LAN, no porfs metadata needed):
-./target/release/porfs chunkserver \
-    --device /var/lib/porfs/chunk0.img --size 16TiB \
-    --listen 0.0.0.0:9100 \
-    --metrics-listen 127.0.0.1:9900
-# extents are then readable/writable over TCP from any client using the
-# porfs-rpc / porfs-cluster client libraries (wire protocol v2,
-# docs/protocol.md — length-prefixed frames, CRC-verified reads,
-# two-way chain replication, write-id idempotency, exponential-backoff reconnect).
-```
+must be on the **same machine as the mount** in local mode.
 
 **Inspect a chunkserver without changing the wire protocol**:
 
@@ -82,18 +97,12 @@ service since P7):
 curl -s http://127.0.0.1:9900/metrics | grep '^porfs_'
 ```
 
-**Mounting from another machine on the LAN: not yet.** The FUSE client
-embeds the metadata server (MDS) in-process today, so a mount must be
-local to the MDS files; chunkservers are the only piece that is already a
-network service. The metadata RPC service lands in Act 2 (P16 wraps the
-MDS protocol over the same seam the chunkserver uses). The P9 cluster library
-supports remote striped writes, but the FUSE mount does not use it yet. Until
-metadata RPC lands, the supported
-topologies are: (a) format + mount on one machine, (b) chunkservers on
-LAN machines serving extent I/O to client-library users (e.g. the striped
-reader, replicated writer, `scripts/stripe-bench.sh`). For replicated
-layouts, construct cluster membership with real rack/chassis tags; P10 forces
-the two copies onto different racks.
+**Not yet:** multiple mounts sharing one metadata service (the MDS is still
+embedded in each mount process — the metadata RPC service is P16), and
+membership changes after format (static; P-later). The wire protocol is v3
+(docs/protocol.md — length-prefixed frames, CRC-verified full/subrange
+reads, two-way chain replication, write-id idempotency, server-identity
+pinning, exponential-backoff reconnect).
 
 ### Cache and close-to-open semantics
 
@@ -112,6 +121,7 @@ configured TTL. This is close-to-open consistency, not the concurrent-writer,
 cargo test --workspace            # all unit + integration tests
 cargo clippy --workspace --all-targets
 ./scripts/kill9-soak.sh           # P2 durability gate: 1000 kill -9 soak (~65s)
+./scripts/cluster-smoke.sh        # P12.5 gate: cluster mount P6 workloads + kill-one-chunkserver (~3min)
 ./scripts/stripe-bench.sh         # P8 gate: 4-client striped aggregate read
 ./scripts/mvp-smoke.sh            # P6 gate: git clone + busybox build + sqlite stress
 ./scripts/bigdir-bench.sh         # P5: 1M-entry directory create/ls/find vs baselines
