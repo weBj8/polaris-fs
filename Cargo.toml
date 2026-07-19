@@ -1,8 +1,9 @@
-[workspace]
-resolver = "3"
-members = []
-
-[workspace.package]
+[package]
+name = "polaris-fs"
+version = "0.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
+
+[workspace]
+resolver = "3"
