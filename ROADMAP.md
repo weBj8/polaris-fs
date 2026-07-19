@@ -1,19 +1,23 @@
-# PolarisFS ROADMAP v6 — full GPFS feature parity (40 phases)
+# PolarisFS ROADMAP v7 — IBM Storage Scale/GPFS compatibility (40 phases + P13.5)
 
 > 2026-07-17 · supersedes v5 (old versions live in git history); the v2.0 DASE design
 > draft is archived at `docs/design-v2-dase-archive.md` for reference only.
 > Team: 1 human developer + AI pair.
-> One line: **an open-source, modern GPFS. Copy the principles and the full feature
-> set; modernize the entire technology stack; lean on open-source libraries.**
+> One line: **a clean-room, open-source IBM Storage Scale/GPFS-compatible filesystem:
+> align its architecture, administrative model, observable behavior, and `mm*` command
+> interface—not merely similar outcomes.**
 
 ## 0. Positioning & technology decisions
 
-**Goal**: a shared POSIX parallel filesystem with GPFS feature parity, starting at
-10–50 node clusters. GPFS is old (kmod client, 1990s kernel assumptions, dedicated
-ops teams, closed source, million-line codebase). We rewrite — full feature parity,
-modern architecture, no feature cuts.
+**Goal**: a shared POSIX parallel filesystem with IBM Storage Scale/GPFS-compatible
+architecture, administration, observable semantics, and command-line interface,
+starting at 10–50 node clusters. It is a clean-room rewrite: implementation language
+and runtime may modernize, but they may not change the documented object model,
+recovery/failure behavior, or management contract. No feature or CLI-family cuts.
+The normative alignment rules and IBM reference baseline are in
+[`docs/ibm-storage-scale-alignment.md`](docs/ibm-storage-scale-alignment.md).
 
-### 0.1 GPFS feature-parity checklist (all of it is in the plan; no cuts)
+### 0.1 GPFS feature-and-command parity checklist (all of it is in the plan; no cuts)
 
 | GPFS feature | Our phase | GPFS feature | Our phase |
 |---|---|---|---|
@@ -52,11 +56,12 @@ modern architecture, no feature cuts.
   storage nodes
 - The full data-management concept set: failure groups, storage pools, ILM, filesets
 
-**Not copied**: no quorum/group-services cluster state machine — membership and
-epochs are issued by the single MDS (namespace stays serialized on one MDS; that is
-a **control-plane** simplification only. **The lock plane is distributed**; the two
-are decoupled). No shared-SAN-disk assumption: clients talk directly to chunkservers
-(a modernization of the GPFS-NSD server model).
+**Alignment rule**: control-plane, NSD/disk, and command-surface simplifications are
+not parity. Existing bootstrap designs may remain only as transitional implementation
+steps; P13.5 records every gap and schedules its removal before the affected command
+family is declared compatible. The target uses an explicit GPFS-equivalent management
+model rather than treating chunkservers or a single embedded MDS as undocumented
+substitutes for IBM administrative objects.
 
 | GPFS technology | Our technology | Why |
 |---|---|---|
@@ -361,6 +366,19 @@ Dataset: 2056-file rebuildable set (deterministic generated tree 2.2 GB +
 distribution tarball) pinned by a sha256 manifest. Verdict due 2026-08-16:
 pass = zero SEV1 (data integrity) and zero SEV2 (availability) incidents;
 SEV3 (absorbed single-chunkserver loss) is recorded, not failing.
+
+**P13.5 · IBM CLI and object-model compatibility baseline** (after the P13 gate)
+Import the complete, release-pinned IBM command inventory into the compatibility
+matrix; establish an original golden-test harness for invocation acceptance, exit
+classes, stable output fields, and failure behavior; replace the bootstrap
+filesystem-lifecycle interface with compatible `mmcrfs`, `mmlsfs`, `mmmount`, and
+`mmumount` commands. Define explicit cluster, node, NSD/disk, pool, fileset, and
+service objects so later `mm*` families operate on the same model rather than on
+one-off `porfs` flags. No IBM text or implementation is copied.
+Gate: every filesystem-lifecycle command and option in the selected IBM release is
+either behaviorally compatible and tested, or is explicitly recorded as unsupported
+with a diagnostic and a scheduled implementation phase; no native command is
+marketed as GPFS-compatible before that record exists.
 
 ### Act 3: distributed consistency (P14–P18) — GPFS's soul
 
