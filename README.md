@@ -1,14 +1,17 @@
 # PolarisFS (porfs)
 
-An open-source, modern GPFS. We copy GPFS's principles and full feature set — not its
-technology stack. No kernel module, no 1990s assumptions, no closed source.
+A clean-room, open-source IBM Storage Scale/GPFS compatibility project. The target is
+the IBM administrative model, observable filesystem behavior, recovery semantics, and
+`mm*` command-line interface—not merely similar results. We do not copy IBM source,
+binaries, or documentation text.
 
-- **Client**: FUSE (no kmod) + io_uring + passthrough — modern kernel features, not mmfs
+- **Client**: FUSE (no kmod) + io_uring + passthrough — a clean-room implementation
 - **Data plane**: io_uring end-to-end (extent store / RPC / bench)
 - **Language**: Rust for everything, Zig for hot-path components (P20+)
 - **Differentiator**: CRC32C end-to-end checksums + built-in scrub — the data hygiene
   that GPFS, BeeGFS, and Lustre all lack
-- **Target**: shared POSIX namespace for 10–50 node clusters; NVMe speed, NFS-grade ops
+- **Target**: shared POSIX namespace for 10–50 node clusters with IBM-equivalent
+  management and failure semantics
 
 ## Status
 
@@ -29,6 +32,16 @@ technology stack. No kernel module, no 1990s assumptions, no closed source.
 | P12.5 | FUSE data plane over chunkservers (wire v3) | ✅ mount on machine B, data on chunkservers A/C/… — replicas=2, read failover, honest EIO, kill-one-chunkserver zero confirmed-data loss (scripts/cluster-smoke.sh); 164 tests green |
 | P13 | Production v0.1 rollout (4-week dogfood soak) | 🏃 in progress: soak running since 2026-07-19 (docs/p13-soak.md, scripts/p13-soak.sh); verdict due 2026-08-16 |
 | P14–P40 | See [ROADMAP.md](ROADMAP.md) — 40 phases to full GPFS feature parity | not started |
+
+## Compatibility status
+
+The current `porfs` and `porfsadm` commands are bootstrap/developer interfaces; they
+are **not** IBM Storage Scale CLI compatible. The compatibility contract, IBM official
+reference links, architecture alignment requirements, command-family inventory, and
+per-command acceptance rules are in
+[docs/ibm-storage-scale-alignment.md](docs/ibm-storage-scale-alignment.md). P13.5
+begins after the active P13 production gate and establishes the first compatible
+filesystem-lifecycle `mm*` commands.
 
 ## Quickstart
 
@@ -147,6 +160,8 @@ docs/design-v2-dase-archive.md  archived design exploration (reference only)
 
 ## Documentation
 
-- [ROADMAP.md](ROADMAP.md) — 40-phase plan to GPFS feature parity
+- [ROADMAP.md](ROADMAP.md) — compatibility roadmap and phase gates
+- [docs/ibm-storage-scale-alignment.md](docs/ibm-storage-scale-alignment.md) — IBM
+  architecture and command-line alignment contract
 - [docs/format.md](docs/format.md) — on-disk format v2 contract
 - [docs/observability.md](docs/observability.md) — tracing, Prometheus metrics, `porfsadm`
