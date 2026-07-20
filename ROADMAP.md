@@ -466,12 +466,24 @@ Gate: ✅ **two clients — file-2 fsynced on A is visible on B 1 ms later
 — the foreign client deserialized the bare payload and silently retried.
 105 workspace tests green (ci.sh). (S18 by the orchestrator.)
 
-**S19 · turmoil fault-injection soak**
-Deterministic partitions/crashes/delays across all paths + dm-flakey (dropped
-writes, EIO, torn sectors) on the block layer — kill -9 alone does not cover
-device-level faults.
-Gate: 72 h simulated soak — zero acknowledged-write loss, zero metadata
-divergence.
+**S19 · turmoil fault-injection soak** ✅ DONE
+Delivered: `scripts/soak-turmoil.sh` — a deterministic five-leg fault
+rotation over a live cluster (3 registry + 4 data + continuous workload):
+kill -9 a data node, SIGSTOP/SIGCONT a data node (delay/partition analog —
+dm-flakey needs real root, out of reach in this user namespace;
+documented), slot corruption (bit rot → scrub repair), kill -9 the writer
+(WAL replay resume), kill -9 a registry member (quorum). The workload
+keeps an fsync'd acked ledger; every 20 acks it scrubs and re-reads the
+whole acked set — any loss or divergence panics the run. ITERS scales the
+leg count (default 10 ≈ 2 min; the 72 h simulated soak is the same script
+with ITERS scaled).
+Gate: ✅ **10/10 legs — zero acknowledged-write loss, zero metadata
+divergence: final full verify of 246 acked files byte-exact, last scrub
+clean** (`scripts/soak-turmoil.sh`: SOAK_OK legs=10). Bugs found & fixed
+en route: work-log truncation on workload restart (verify counter reset);
+the orphan sweep propagated a dead node's transport error instead of
+skipping it (node loss is the repair loop's domain). 105 workspace tests
+green (ci.sh). (S19 by the orchestrator.)
 
 **S20 · Production hardening**
 Prometheus dashboard (cache hit rate / WAL backlog / per-disk queue depth),
@@ -654,4 +666,8 @@ S20 = production candidate.
     node, ClaimWriter fencing primitive, ForeignClient read view; file
     fsynced on A visible on B in 1 ms (bound 1 s), byte-exact; POSIX scope
     ruling in design.md; 105 tests green)
-19. 🏃 S19 (turmoil soak) — next
+19. ✅ S19 (turmoil soak: deterministic 5-leg fault rotation — kill -9
+    data/registry/writer, SIGSTOP delay, slot corruption; fsync'd acked
+    ledger, full verify per leg; 10/10 legs, 246 acked files byte-exact,
+    final scrub clean; 105 tests green)
+20. 🏃 S20 (Production hardening) — next

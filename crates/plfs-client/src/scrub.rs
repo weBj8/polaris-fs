@@ -85,7 +85,10 @@ pub async fn scrub_once(
     // Orphan sweep: on-disk chunks no metadata root references and no GC
     // entry is already tracking.
     for addr in sink.live_set() {
-        for (id, version) in list_chunks(&addr).await? {
+        let Ok(inventory) = list_chunks(&addr).await else {
+            continue; // node down — the repair loop owns it
+        };
+        for (id, version) in inventory {
             if !reachable.contains_key(&id) && !queued.contains(&id) {
                 delete_one(&addr, id, version).await?;
                 stats.orphans_deleted += 1;

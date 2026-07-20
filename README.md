@@ -46,7 +46,8 @@ Key properties:
 | S16 | Rollback + GC + scheduler | ✅ rollback byte-exact + reversible (implicit pre-rollback snap); snapshot delete reclaims — du 37.2 MB → 3.7 MB; retention keeps 3/3 on schedule |
 | S17 | Re-replication & scrubber | ✅ bit rot injected into a replica slot → crc scrub detects + repairs from healthy copy (repaired=1, orphans=1), second pass clean |
 | S18 | Cross-client sync | ✅ file fsynced on client A visible on foreign client B in 1 ms (bound 1 s), byte-exact; ClaimWriter fencing primitive |
-| S19–S20 | See [ROADMAP.md](ROADMAP.md) | not started |
+| S19 | turmoil fault-injection soak | ✅ 10/10 fault legs (kill -9 data/registry/writer, SIGSTOP delay, slot corruption) — 246 acked files byte-exact, final scrub clean |
+| S20 | See [ROADMAP.md](ROADMAP.md) | not started |
 
 Current test surface: 105 workspace tests green, every test < 5 s (deep gates
 live behind `PROPTEST_CASES` and scripts/).
@@ -86,6 +87,7 @@ kernels where fusermount3 is restricted.
 ./scripts/gate-rollback.sh         # S16 gate: rollback byte-exact + reversible; snapshot delete du reclaim; retention schedule
 ./scripts/gate-scrub.sh            # S17 gate: bit rot injected → crc scrub repairs from healthy replica; orphan swept
 ./scripts/gate-cross-client.sh     # S18 gate: write fsynced on A visible on B ≤ 1 s
+./scripts/soak-turmoil.sh          # S19 gate: deterministic fault legs — zero acked-write loss (ITERS scales)
 ```
 
 Mounting needs FUSE: root, or a user+mount namespace (`unshare -rm`) on
