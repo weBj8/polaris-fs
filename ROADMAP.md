@@ -410,33 +410,142 @@ held the gate's stdout pipe. 105 workspace tests green (ci.sh). (S15 by the
 orchestrator.)
 
 **S16 · Rollback + GC + scheduler** (design doc §9)
-Reversible rollback (implicit pre-rollback snapshot → pointer swap → orphaned
-chunks to GC); refcount GC with snapshot awareness (version-checked Delete →
-hole punch); retention scheduler (toml).
+Reversible rollback (implicit pre-rollback snapshot → `MetaOp::RestoreSnap`:
+replay the checkpoint namespace into the live tables as one raft-committed op —
+never a DB-file restore, which would roll back raft state, GC and the snap
+catalog — → orphaned chunks to GC); refcount GC with snapshot awareness
+(snapshot delete re-enqueues exclusively-referenced chunks; version-checked
+Delete → hole punch); retention scheduler (toml).
 Gate: rollback restores byte-exact state and is itself reversible; GC reclaims
 space (du evidence); retention policies run on schedule.
 
 **S17 · Re-replication & scrubber** (design doc §7.4, §10.3)
 Background repair workers (rate-limited 30 MB/s/disk); weekly List-driven scrub
-with crc verify.
+with crc verify + orphan sweep (arena inventory vs reachable metadata —
+quorum-Put-then-failed-commit orphans).
 Gate: inject bit rot (flip bytes in a slot) → detected → repaired from healthy
 replica.
 
 **S18 · Cross-client sync** (design doc §4.3, §8.2)
-Pub/sub merge of foreign volumes; metadata lease escape hatch for cross-client
-writes.
+Pub/sub merge of foreign volumes; writer fencing (volume writer_epoch + txid
+dedup + expected-generation CAS committed in the volume's own raft group — the
+Registry lease nominates, the raft group fences); POSIX scope doc
+(single-writer mount = POSIX; cross-client = eventually-consistent read views
+with generation-based cache invalidation).
 Gate: two clients — file written on A visible on B ≤ 1 s.
 
 **S19 · turmoil fault-injection soak**
-Deterministic partitions/crashes/delays across all paths.
+Deterministic partitions/crashes/delays across all paths + dm-flakey (dropped
+writes, EIO, torn sectors) on the block layer — kill -9 alone does not cover
+device-level faults.
 Gate: 72 h simulated soak — zero acknowledged-write loss, zero metadata
 divergence.
 
 **S20 · Production hardening**
 Prometheus dashboard (cache hit rate / WAL backlog / per-disk queue depth),
-panic-safe FUSE loop, upgrade/format-version policy, runbook, chaos drill vs.
-design doc §10.2 table.
+panic-safe FUSE loop, upgrade/format-version policy (exact-version dependency
+pins + storage adapter), runbook, chaos drill vs. design doc §10.2 table,
+Arena format v2 (persistent chunk_id→slot index checkpoint + delta journal —
+bounded boot on multi-TiB HDDs; full scan demoted to offline fsck;
+contract-first), S-slot→L-slot fallback against 90/10 ENOSPC asymmetry, bench
+matrix (4 KiB randwrite amplification, save-file sizes, 1–8 GiB asset load).
 Gate: fio + game-workload benchmark report; chaos drill passes the failure table.
+
+### Review disposition (2026-07-20, external design review)
+
+An external review (of the pre-S5 design text) raised 5 P0 + 7 P1 findings.
+Verdicts against the implementation as it exists today — ALREADY SATISFIED =
+settled in code with gate evidence; ACCEPTED = real gap, work item landed in
+the named step; REJECTED = the claim does not survive contact with the code.
+
+**P0-1 redb savepoints as user snapshots — ALREADY SATISFIED (avoided).**
+S15 snapshots are byte-copied checkpoint FILES (independent read-only DBs),
+never redb savepoints, and nothing is ever restored over the live store. The
+trilemma the review poses (O(1) create vs refcount vs GC) is resolved:
+create bumps no refcounts; the GC drain checks each checkpoint's chunkrefs
+table directly (O(log n) per chunk per snapshot — snapshots are few);
+snapshot delete re-enqueues exclusively-referenced chunks (S16); rollback is
+a state-machine MetaOp replaying the checkpoint namespace into live tables
+in one raft-committed txn — raft log, GC state and snap catalog are never
+rolled back.
+
+**P0-2 writer fencing — ACCEPTED → S18.** Volume writer_epoch + txid dedup +
+expected-inode-generation CAS committed in the volume's own raft group; the
+Registry lease only nominates a new writer, the raft group fences. (The
+WAL-replay half of txid dedup exists since S8: CommitLayout dedups on the
+client commit_seq.)
+
+**P0-3 full boot header scan on 14 TiB — ACCEPTED → S20 (Arena format v2).**
+The math holds (~37 M slots ≈ 140 GiB of scattered header reads); the gates
+prove the scan's correctness, not its scalability. v2 adds a persistent
+chunk_id→slot index checkpoint + delta journal; the full scan is demoted to
+offline fsck. Contract-first: format-arena.md v2 before code.
+
+**P0-4 chunk identity — ALREADY SATISFIED, minus orphan sweep (→ S17).**
+Every CoW chunk already gets a fresh UUIDv7; ids are never reused; chunks
+are sealed immutable; Put is create-if-absent idempotent. version survives
+only as the Delete fence against GC races (S3's resurrected-slot lesson) —
+it is not needed for reads because a never-reused id cannot resurrect.
+Transaction-id dedup: commit_seq since S8. The orphan sweep (quorum-Put
+then failed metadata commit) is the one real gap — folded into S17's
+List-driven scrub.
+
+**P0-5 write-ack semantics — ALREADY SATISFIED for RF=3; RF=2 is a
+documented tradeoff.** fsync fails loudly below quorum (never silently
+W=1); the actual replica set is recorded (ChunkRef.replicas, S14); degraded
+chunks queue for repair; un-fsync'd data is documented volatile (§10.1).
+RF=2's 1/2 + degraded-mark mode is an explicit §7.2 choice for
+capacity-constrained volumes; cluster default is RF=3, matching the
+review's matrix.
+
+**P1-1 metadata raft on mount clients — ALREADY SATISFIED.** Cluster mode
+runs dedicated `plfs meta` voters (S12); mount clients are pure raft
+clients (MetaOps RPC with leader_hint). Only standalone embeds a
+single-node group — one machine by definition. Multi-Raft group
+catalog/placement is out of v0.2 scope (operator-placed volumes, KISS);
+openraft is exact-version pinned; each volume group has its own redb file,
+so there is no cross-volume write serialization.
+
+**P1-2 POSIX scope — ACCEPTED → S18.** Design doc gains the exact scope:
+single-writer mount = POSIX; cross-client = eventually-consistent read
+views with generation-based invalidation. FUSE already runs
+FOPEN_DIRECT_IO (no writeback-cache assumption). Lease revoke → flush →
+invalidate is the S18 transfer protocol.
+
+**P1-3 crc32fast claim — REJECTED with evidence.** crc32fast implements
+CRC-32/ISCSI — the Castagnoli polynomial, i.e. CRC32C — hardware-accelerated
+via PCLMULQDQ; "crc32fast = IEEE CRC32" is factually wrong, and the wire
+field name crc32c is accurate. CRC guards per-chunk integrity; identity is
+the UUIDv7 chunk id, so 32-bit width is not an identity weakness. BLAKE3 as
+a scrub-grade hash is an optional S20 upgrade, not a correctness fix.
+
+**P1-4 redb version policy — ACCEPTED → S20.** Exact versions are pinned via
+the committed Cargo.lock; S20 adds the upgrade/format-version policy,
+storage adapter boundary and backup/restore tests. We use no redb
+savepoints, so the savepoint-restore corruption class the review cites does
+not apply.
+
+**P1-5 90/10 slot ENOSPC asymmetry — ACCEPTED → S20.** S-class writes fall
+back to L slots before ENOSPC; class conversion only for empty segments.
+
+**P1-6 CoW write-amplification benches — ACCEPTED → S20.** Bench matrix:
+4 KiB random overwrite, save-file sizes (4–64 KiB), 1–8 GiB asset load —
+amplification + tail latency. (The merged §7.2 flusher already collapses
+small-write streams to one Put per chunk — the main amplifier for game
+workloads.)
+
+**P1-7 kill -9 ≠ power failure — ACCEPTED → S19; O_EXCL → S20.** dm-flakey
+(dropped writes/EIO/torn sectors) joins the fault matrix in S19; raw-device
+arena open gains O_EXCL in S20.
+
+**Roadmap-insertion proposal (S4.5 contract reset) — SUPERSEDED.** Its six
+contracts are already settled in code or distributed above: immutable
+identity (P0-4), bounded recovery (P0-3), write ack (P0-5), fencing (P0-2),
+logical snapshots (P0-1), POSIX scope (P1-2). Format-touching items go
+contract-first per project rule 5.
+
+**Timeline labels — ACCEPTED.** S10 = standalone alpha, S16 = cluster beta,
+S20 = production candidate.
 
 ## 3. Capacity & discipline
 

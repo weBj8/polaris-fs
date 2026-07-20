@@ -2,3 +2,4 @@
 **/*.img
 *.redb
 .omo/
+*-verify.state
