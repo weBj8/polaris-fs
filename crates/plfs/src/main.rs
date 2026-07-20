@@ -78,6 +78,16 @@ struct MountArgs {
     dir: PathBuf,
     /// Mount point.
     mountpoint: PathBuf,
+    /// Registry address for a cluster volume (data nodes discovered
+    /// through it); omit for the volume's local arena.
+    #[arg(long)]
+    registry: Option<String>,
+    /// Replication factor for a cluster volume (1 = single copy).
+    #[arg(long, default_value_t = 1)]
+    rf: usize,
+    /// Prometheus metrics listen address (cache hit rate, WAL backlog).
+    #[arg(long)]
+    metrics_listen: Option<std::net::SocketAddr>,
 }
 
 #[derive(Debug, Args)]
@@ -205,8 +215,23 @@ async fn main() -> anyhow::Result<()> {
         Command::Mount(args) => {
             let dir = args.dir.clone();
             let mountpoint = args.mountpoint.clone();
-            let guard = tokio::task::spawn_blocking(move || {
-                plfs_client::fuse::MountGuard::mount(&dir, &mountpoint)
+            let sink = args
+                .registry
+                .clone()
+                .map(|registry| plfs_client::core::SinkConfig::Cluster {
+                    registry,
+                    rf: args.rf,
+                });
+            if let Some(addr) = args.metrics_listen {
+                let _ = metrics_exporter_prometheus::PrometheusBuilder::new()
+                    .with_http_listener(addr)
+                    .install()
+                    .ok();
+                tracing::info!(%addr, "metrics exporter listening");
+            }
+            let guard = tokio::task::spawn_blocking(move || match sink {
+                Some(s) => plfs_client::fuse::MountGuard::mount_with_sink(&dir, &mountpoint, s),
+                None => plfs_client::fuse::MountGuard::mount(&dir, &mountpoint),
             })
             .await??;
             tracing::info!(mountpoint = ?args.mountpoint, "mounted; ctrl-c to unmount");
