@@ -448,13 +448,23 @@ data node with no metadata reference is swept** (`scripts/gate-scrub.sh`:
 SCRUB_OK repaired=1 orphans=1). 105 workspace tests green (ci.sh). (S17 by
 the orchestrator.)
 
-**S18 · Cross-client sync** (design doc §4.3, §8.2)
-Pub/sub merge of foreign volumes; writer fencing (volume writer_epoch + txid
-dedup + expected-generation CAS committed in the volume's own raft group — the
-Registry lease nominates, the raft group fences); POSIX scope doc
-(single-writer mount = POSIX; cross-client = eventually-consistent read views
-with generation-based cache invalidation).
-Gate: two clients — file written on A visible on B ≤ 1 s.
+**S18 · Cross-client sync** (design doc §4.3, §8.2) ✅ DONE
+Delivered: the volume owner serves its metadata (`ClientCore::serve_meta` —
+the S12 MetaOps service over the embedded group) and registers as the
+volume's CLIENT node in the registry (heartbeat-kept); the writer fencing
+primitive `MetaOp::ClaimWriter` bumps a committed writer_epoch (CAS-per-op
+enforcement lands with shared-meta, documented in §8.2); the
+`ForeignClient` read view discovers the owner through the registry and
+reads committed namespace + data through the owner's MetaOps endpoint and
+the shared cluster data plane (read-through, so visibility is immediate);
+design.md gains the POSIX-scope ruling (single-writer mount = §8.1;
+cross-client = eventually-consistent read-only view).
+Gate: ✅ **two clients — file-2 fsynced on A is visible on B 1 ms later
+(bound: 1 s), both files byte-exact through the foreign view**
+(`scripts/gate-cross-client.sh`: CROSS_CLIENT_GATE_OK, SYNC_OK). Bug found
+& fixed en route: the MetaOps wire carries bincode(Result<MetaReadReply>)
+— the foreign client deserialized the bare payload and silently retried.
+105 workspace tests green (ci.sh). (S18 by the orchestrator.)
 
 **S19 · turmoil fault-injection soak**
 Deterministic partitions/crashes/delays across all paths + dm-flakey (dropped
@@ -640,4 +650,8 @@ S20 = production candidate.
     per-replica crc scrub over live+snapshot chunks, rot repaired from a
     healthy copy, orphan sweep vs reachable set; bit-rot injected →
     repaired=1 orphans=1, second pass clean; 105 tests green)
-18. 🏃 S18 (Cross-client sync) — next
+18. ✅ S18 (Cross-client sync: owner serves MetaOps + registers as CLIENT
+    node, ClaimWriter fencing primitive, ForeignClient read view; file
+    fsynced on A visible on B in 1 ms (bound 1 s), byte-exact; POSIX scope
+    ruling in design.md; 105 tests green)
+19. 🏃 S19 (turmoil soak) — next

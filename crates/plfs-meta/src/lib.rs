@@ -247,6 +247,15 @@ pub enum MetaOp {
         /// Chunks to collect.
         entries: Vec<GcEntry>,
     },
+    /// Claim the volume writer role (§4.3 fencing primitive): bumps and
+    /// returns the writer epoch. The Registry lease only nominates a writer;
+    /// this op is what fences, committed in the volume's own raft group.
+    /// CAS enforcement on every mutating op lands with the shared-meta
+    /// architecture (post-v0.2).
+    ClaimWriter {
+        /// Writer identity (for the raft log record).
+        client: String,
+    },
 }
 
 /// Result of an applied [`MetaOp`].
@@ -260,6 +269,8 @@ pub enum OpResult {
     SnapId(u64),
     /// GC entries taken (queue sequence number + entry).
     GcBatch(Vec<(u64, GcEntry)>),
+    /// The new writer epoch after a ClaimWriter.
+    WriterEpoch(u64),
 }
 
 /// Metadata errors (mapped to errno at the FUSE layer).

@@ -896,6 +896,13 @@ impl MetaState {
                 }
                 Ok(OpResult::None)
             }
+            MetaOp::ClaimWriter { .. } => {
+                let epoch = {
+                    let mut counters = txn.open_table(COUNTERS).map_err(storage)?;
+                    bump(&mut counters, "writer_epoch")?
+                };
+                Ok(OpResult::WriterEpoch(epoch + 1))
+            }
         }
     }
 

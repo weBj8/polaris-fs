@@ -728,6 +728,44 @@ impl ClientCore {
         self.gc_drain().await
     }
 
+    /// Claim the volume writer epoch (§4.3 fencing primitive).
+    pub async fn claim_writer(&self, client: &str) -> Result<u64, ClientError> {
+        match self
+            .meta_op(MetaOp::ClaimWriter {
+                client: client.to_string(),
+            })
+            .await?
+        {
+            Ok(OpResult::WriterEpoch(epoch)) => Ok(epoch),
+            Ok(other) => Err(ClientError::Codec(format!("ClaimWriter: {other:?}"))),
+            Err(e) => Err(ClientError::Meta(e)),
+        }
+    }
+
+    /// Serve this volume's metadata over gRPC (§8.2): foreign clients read
+    /// the namespace through this endpoint (leader-local reads).
+    pub fn serve_meta(&self, addr: &str) -> Result<(), ClientError> {
+        let svc = plfs_meta::service::MetaOpsSvc::new(
+            self.meta.raft().clone(),
+            self.state.clone(),
+            1,
+            std::collections::BTreeMap::from([(1u64, "loopback".to_string())]),
+        );
+        let addr: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|e| ClientError::Codec(format!("addr: {e}")))?;
+        tokio::spawn(async move {
+            if let Err(e) = tonic::transport::Server::builder()
+                .add_service(svc.into_server())
+                .serve(addr)
+                .await
+            {
+                tracing::warn!("serve_meta {addr}: {e}");
+            }
+        });
+        Ok(())
+    }
+
     /// Roll the volume back to a snapshot (§9, reversible via the implicit
     /// pre-rollback snapshot); returns the pre-rollback snapshot id.
     pub async fn snapshot_rollback(&mut self, snap: u64) -> Result<u64, ClientError> {

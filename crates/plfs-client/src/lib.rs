@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod cluster;
 pub mod core;
+pub mod foreign;
 pub mod fuse;
 pub mod scheduler;
 pub mod scrub;

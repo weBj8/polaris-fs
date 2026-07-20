@@ -316,6 +316,15 @@ open/read/write/close · create/unlink/mkdir/rmdir · rename (same volume, atomi
 | O_DIRECT | accepted → routed through WAL (durability never bypassed); documented |
 | cross-client write to same file | serialized via Registry metadata lease; last-writer-wins otherwise (out of scope) |
 
+POSIX scope (v0.2 ruling): a volume's **single-writer mount** provides the
+§8.1 semantics. Cross-client access is an eventually-consistent **read-only
+view**: foreign readers resolve the owner through the registry and read
+committed state via the owner's MetaOps endpoint (≤ 1 s in practice); no
+multi-mount POSIX coherence is promised. The registry lease nominates a new
+writer, but fencing is committed in the volume's own raft group
+(`MetaOp::ClaimWriter` writer epoch); CAS enforcement on every mutating op
+lands with the shared-meta architecture.
+
 ### 8.3 Mount layout
 
 ```
