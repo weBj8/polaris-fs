@@ -47,7 +47,7 @@ Key properties:
 | S17 | Re-replication & scrubber | ✅ bit rot injected into a replica slot → crc scrub detects + repairs from healthy copy (repaired=1, orphans=1), second pass clean |
 | S18 | Cross-client sync | ✅ file fsynced on client A visible on foreign client B in 1 ms (bound 1 s), byte-exact; ClaimWriter fencing primitive |
 | S19 | turmoil fault-injection soak | ✅ 10/10 fault legs (kill -9 data/registry/writer, SIGSTOP delay, slot corruption) — 246 acked files byte-exact, final scrub clean |
-| S20 | See [ROADMAP.md](ROADMAP.md) | not started |
+| S20 | Production hardening | ✅ Arena format v2 bounded boot 2–4 ms vs 224–642 ms; bench report (release) + chaos drill §10.2 7/7 PASS |
 
 Current test surface: 105 workspace tests green, every test < 5 s (deep gates
 live behind `PROPTEST_CASES` and scripts/).
@@ -88,6 +88,8 @@ kernels where fusermount3 is restricted.
 ./scripts/gate-scrub.sh            # S17 gate: bit rot injected → crc scrub repairs from healthy replica; orphan swept
 ./scripts/gate-cross-client.sh     # S18 gate: write fsynced on A visible on B ≤ 1 s
 ./scripts/soak-turmoil.sh          # S19 gate: deterministic fault legs — zero acked-write loss (ITERS scales)
+./scripts/bench-matrix.sh          # S20: benchmark report → target/bench-report.md (release builds)
+./scripts/chaos-drill.sh           # S20: the §10.2 failure table, end to end
 ```
 
 Mounting needs FUSE: root, or a user+mount namespace (`unshare -rm`) on

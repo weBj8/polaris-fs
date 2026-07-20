@@ -94,9 +94,7 @@ impl Bitmaps {
     }
 
     /// Inverse of [`Bitmaps::encode`]; `None` on wrong length or bad crc.
-    /// Used by tests to verify what was flushed; production opens rebuild
-    /// from headers instead.
-    #[cfg(test)]
+    /// Used by the v2 checkpoint boot path and by tests verifying flushes.
     pub(crate) fn decode(buf: &[u8], l_count: u64, s_count: u64) -> Option<Self> {
         let payload = Self::payload_len(l_count, s_count);
         if buf.len() != payload + 4 {

@@ -1,4 +1,4 @@
-//! ChunkArena core storage engine (on-disk format v1).
+//! ChunkArena core storage engine (on-disk format v2).
 //!
 //! One arena = one sparse image file or block device. Fixed-size slots in two
 //! classes (L large / S small), a duplicated superblock, and a duplicated
@@ -12,18 +12,19 @@
 //! falls back to plain buffered `pread`/`pwrite` where `O_DIRECT` is
 //! unavailable (e.g. tmpfs). Both paths are equally correct.
 //!
-//! The binding contract is `docs/format-arena.md` v1; this crate implements
+//! The binding contract is `docs/format-arena.md` v2; this crate implements
 //! exactly that document.
 
 mod arena;
 mod bitmap;
+mod checkpoint;
 mod geom;
 mod header;
 mod index;
 mod io;
 mod sb;
 
-pub use arena::{Arena, CorruptionEvidence, PutOutcome, SparsifyReport};
+pub use arena::{Arena, BootMode, CorruptionEvidence, PutOutcome, SparsifyReport};
 pub use geom::{Geometry, MkfsConfig, MkfsReport};
 pub use index::{ChunkMeta, SlotClass};
 

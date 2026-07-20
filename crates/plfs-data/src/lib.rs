@@ -41,6 +41,8 @@ pub enum DataNodeError {
     Transport(#[from] tonic::transport::Error),
 }
 
+static QUEUE_DEPTH: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 enum Cmd {
     Put {
         id: ChunkId,
@@ -90,6 +92,8 @@ fn spawn_actor(arena_path: std::path::PathBuf) -> Result<Sender<Cmd>, ArenaError
                 }
             };
             while let Ok(cmd) = rx.recv() {
+                let depth = QUEUE_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
+                metrics::gauge!("plfs_arena_queue_depth").set(depth as f64);
                 match cmd {
                     Cmd::Put {
                         id,
@@ -122,6 +126,7 @@ fn spawn_actor(arena_path: std::path::PathBuf) -> Result<Sender<Cmd>, ArenaError
                     }
                 }
             }
+            let _ = arena.close();
         })
         .expect("spawn arena actor thread");
     init_rx
@@ -158,6 +163,8 @@ impl ChunkStoreSvc {
 
     async fn call<R>(&self, bind: impl FnOnce(oneshot::Sender<R>) -> Cmd) -> Result<R, Status> {
         let (reply, rx) = oneshot::channel();
+        let depth = QUEUE_DEPTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        metrics::gauge!("plfs_arena_queue_depth").set(depth as f64);
         self.tx
             .send(bind(reply))
             .map_err(|_| Status::unavailable("arena actor is gone"))?;
@@ -331,14 +338,20 @@ impl ChunkStore for ChunkStoreSvc {
 
 /// Run a data node on `addr` serving the arena at `arena_path`, until
 /// SIGINT/SIGTERM. On shutdown the service is dropped, the actor channel
-/// closes, and the arena flushes its bitmaps on the way out.
+/// closes, and the arena closes cleanly (v2 checkpoint, format-arena §3.5).
 pub async fn serve(arena_path: &Path, addr: SocketAddr) -> Result<(), DataNodeError> {
     let svc = ChunkStoreSvc::open(arena_path)?;
     tracing::info!(%addr, arena = %arena_path.display(), "data node serving");
     tonic::transport::Server::builder()
         .add_service(svc.into_server())
         .serve_with_shutdown(addr, async {
-            let _ = tokio::signal::ctrl_c().await;
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("install SIGTERM handler");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
         })
         .await?;
     Ok(())

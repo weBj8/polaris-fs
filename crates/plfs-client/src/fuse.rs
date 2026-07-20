@@ -78,7 +78,11 @@ impl Worker {
                     }
                 };
                 for job in job_rx {
-                    job(&mut core, &rt);
+                    // A panicking handler fails its own reply (EIO) but
+                    // must not kill the worker and wedge the whole mount.
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        job(&mut core, &rt);
+                    }));
                 }
                 // Job channel closed: clean shutdown of the raft core so
                 // the redb handle frees before the thread exits.

@@ -6,7 +6,8 @@
 use plfs_meta::MetaState;
 
 use crate::cluster::{
-    ClusterSink, REPAIR_RATE, delete_one, list_chunks, put_one, stat_one, throttle,
+    ClusterSink, REPAIR_RATE, ReplicaError, delete_one, get_replica_verbose, list_chunks, put_one,
+    stat_one, throttle,
 };
 use crate::core::ClientError;
 
@@ -44,7 +45,7 @@ pub async fn scrub_once(
         for addr in replicas {
             match stat_one(addr, *chunk_id).await {
                 Ok(Some((v, len, crc))) if v == *version => {
-                    match sink.get(*chunk_id, std::slice::from_ref(addr)).await {
+                    match get_replica_verbose(addr, *chunk_id).await {
                         Ok((_, data))
                             if data.len() as u64 == len && crc32fast::hash(&data) == crc =>
                         {
@@ -52,8 +53,11 @@ pub async fn scrub_once(
                                 good = Some(data);
                             }
                         }
-                        Ok(_) => rotten.push(addr.clone()), // payload diverges from its header
-                        Err(_) => {} // unreachable — the repair loop owns node loss
+                        // Payload diverges from its header, or the data node
+                        // proved the rot itself (DataLoss) — the replica is
+                        // rewritten from a healthy copy either way.
+                        Ok(_) | Err(ReplicaError::Corrupt) => rotten.push(addr.clone()),
+                        Err(ReplicaError::Other) => {} // unreachable — the repair loop owns it
                     }
                     throttle(len, rate).await;
                 }

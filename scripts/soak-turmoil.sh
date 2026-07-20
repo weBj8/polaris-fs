@@ -83,7 +83,7 @@ with open(sys.argv[1], "rb") as f:
         j = chunk.find(pat)
         if j >= 0:
             print(off + j); break
-        off += len(chunk) - 4096
+        off += max(1, len(chunk) - 4096)
         f.seek(off)
 PY
 )

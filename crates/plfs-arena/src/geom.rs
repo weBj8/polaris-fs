@@ -217,6 +217,16 @@ impl Geometry {
     pub(crate) fn class_region_offset(&self, class: SlotClass) -> u64 {
         self.slot_offset(class, 0)
     }
+
+    /// Checkpoint region offset (contract §3.5: right after bitmap copy B).
+    pub(crate) fn checkpoint_offset(&self) -> u64 {
+        self.bitmap_region_offset + 2 * self.bitmap_copy_bytes
+    }
+
+    /// Checkpoint region size (contract §3.5).
+    pub(crate) fn checkpoint_bytes(&self) -> u64 {
+        checkpoint_len(self.total_bytes)
+    }
 }
 
 const SB_END: u64 = 8192;
@@ -225,7 +235,10 @@ const SB_END: u64 = 8192;
 fn counts_for(cfg: &MkfsConfig, copy_bytes: u64) -> Result<(u64, u64, u64)> {
     let l_size = u64::from(cfg.l_slot_size);
     let s_size = u64::from(cfg.s_slot_size);
-    let slot_region_offset = align_up(BITMAP_REGION_OFFSET + 2 * copy_bytes, SLOT_REGION_ALIGN);
+    let slot_region_offset = align_up(
+        BITMAP_REGION_OFFSET + 2 * copy_bytes + checkpoint_len(cfg.total_bytes),
+        SLOT_REGION_ALIGN,
+    );
     if slot_region_offset >= cfg.total_bytes {
         return Err(invalid_input("total_bytes too small for any slot"));
     }
@@ -234,6 +247,11 @@ fn counts_for(cfg: &MkfsConfig, copy_bytes: u64) -> Result<(u64, u64, u64)> {
     let l_count = l_bytes / l_size;
     let s_count = (region - l_count * l_size) / s_size;
     Ok((slot_region_offset, l_count, s_count))
+}
+
+/// Checkpoint region size (contract §3.5): max(1 MiB, total/1024).
+pub(crate) fn checkpoint_len(total_bytes: u64) -> u64 {
+    align_up((total_bytes / 1024).max(1 << 20), 4096)
 }
 
 pub(crate) fn align_up(v: u64, align: u64) -> u64 {

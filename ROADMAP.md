@@ -485,15 +485,30 @@ the orphan sweep propagated a dead node's transport error instead of
 skipping it (node loss is the repair loop's domain). 105 workspace tests
 green (ci.sh). (S19 by the orchestrator.)
 
-**S20 · Production hardening**
-Prometheus dashboard (cache hit rate / WAL backlog / per-disk queue depth),
-panic-safe FUSE loop, upgrade/format-version policy (exact-version dependency
-pins + storage adapter), runbook, chaos drill vs. design doc §10.2 table,
-Arena format v2 (persistent chunk_id→slot index checkpoint + delta journal —
-bounded boot on multi-TiB HDDs; full scan demoted to offline fsck;
-contract-first), S-slot→L-slot fallback against 90/10 ENOSPC asymmetry, bench
-matrix (4 KiB randwrite amplification, save-file sizes, 1–8 GiB asset load).
-Gate: fio + game-workload benchmark report; chaos drill passes the failure table.
+**S20 · Production hardening** ✅ DONE
+Delivered: **Arena format v2** (contract-first, format-arena.md v2) —
+clean-close checkpoint region (index + bitmaps, crc-validated, 16-slot
+sample verify) with a `CLEAN_CLOSE` superblock flag: planned restarts skip
+the full slot-header scan entirely (boot 2–4 ms vs 224–642 ms at 1.5k/8k
+chunks, ~100–160×); dirty shutdowns always fall back to the scan; data
+nodes close the arena on SIGTERM. S-slot→L-slot fallback against the 90/10
+ENOSPC asymmetry. Prometheus dashboard completed: cache hit-rate counters
+(S11) + `plfs_wal_backlog_records` + `plfs_arena_queue_depth` gauges.
+Panic-safe FUSE worker (a panicking handler fails its own op with EIO; the
+mount keeps serving). `docs/runbook.md` (failure response, metrics,
+snapshot ops, upgrade/format-version policy: v1→v2 = re-mkfs, exact-version
+pins, storage-adapter boundaries). Bench matrix on release builds
+(`scripts/bench-matrix.sh` → target/bench-report.md).
+Gate: ✅ **benchmark report produced — bounded boot 2–4 ms vs 224–642 ms;
+4 KiB randwrite 154 KiB/s (the known 1 MiB-CoW amplification, quantified);
+saves 8 KiB 4.0 MiB/s / 64 KiB 35.1 MiB/s; asset write 363 MiB/s, reads
+30 MiB/s — and the chaos drill passes the whole §10.2 table 7/7**
+(`scripts/chaos-drill.sh`: CHAOS_DRILL_OK). Bugs found & fixed en route:
+the scrub treated a data node's DataLoss reply (its own crc proof of rot)
+as "unreachable" and skipped the repair — S17's pass had been masked by
+failover reads; the bit-rot pattern search could wedge on a 4096 boundary
+(0-step seek loop); out_of_space test updated to the v2 fallback
+semantics. (S20 by the orchestrator.)
 
 ### Review disposition (2026-07-20, external design review)
 
@@ -670,4 +685,10 @@ S20 = production candidate.
     data/registry/writer, SIGSTOP delay, slot corruption; fsync'd acked
     ledger, full verify per leg; 10/10 legs, 246 acked files byte-exact,
     final scrub clean; 105 tests green)
-20. 🏃 S20 (Production hardening) — next
+20. ✅ S20 (Production hardening: Arena format v2 clean-close checkpoint —
+    boot 2–4 ms vs 224–642 ms (~100–160×); S→L fallback; WAL-backlog +
+    queue-depth gauges; panic-safe FUSE; runbook + upgrade policy; bench
+    report on release builds + chaos drill §10.2 7/7 PASS)
+
+All 20 steps complete. Honest label: production candidate — the remaining
+knowns are documented in the review disposition (§2) and runbook.

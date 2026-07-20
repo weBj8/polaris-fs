@@ -11,13 +11,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nix::fcntl::{FallocateFlags, fallocate};
 
 use crate::bitmap::Bitmaps;
+use crate::checkpoint;
 use crate::geom::{self, Geometry, MkfsConfig, MkfsReport, align_up};
 use crate::header::{HEADER_LEN, SlotHeader};
 use crate::index::{ChunkMeta, Index, SlotClass};
 use crate::io::{AlignedBuf, IoEngine, IoPrep, blk_discard, block_device_size, is_block_device};
 use crate::sb::{
-    FLAG_BLOCK_DEVICE, FLAG_DISCARD_OK, FLAG_PUNCH_OK, FORMAT_VERSION, SB_A_OFFSET, SB_B_OFFSET,
-    SB_LEN, Superblock,
+    FLAG_BLOCK_DEVICE, FLAG_CLEAN_CLOSE, FLAG_DISCARD_OK, FLAG_PUNCH_OK, FORMAT_VERSION,
+    SB_A_OFFSET, SB_B_OFFSET, SB_LEN, Superblock,
 };
 use crate::{ArenaError, ChunkId, Result};
 
@@ -61,6 +62,15 @@ pub struct SparsifyReport {
     pub bytes_reclaimed: u64,
 }
 
+/// How the arena state was reconstructed at open (v2 instrumentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootMode {
+    /// Full slot-header scan (dirty shutdown or no valid checkpoint).
+    Scan,
+    /// v2 checkpoint fast path (clean-close snapshot, sample-verified).
+    Checkpoint,
+}
+
 /// An open ChunkArena (one sparse image file or block device).
 pub struct Arena {
     io: IoEngine,
@@ -74,6 +84,7 @@ pub struct Arena {
     corruptions: Vec<CorruptionEvidence>,
     closed: bool,
     punch_enabled: bool,
+    boot_mode: BootMode,
 }
 
 impl Arena {
@@ -155,7 +166,15 @@ impl Arena {
             corruptions: Vec::new(),
             closed: false,
             punch_enabled: true,
+            boot_mode: BootMode::Scan,
         };
+        if sb.flags & FLAG_CLEAN_CLOSE != 0 && arena.load_checkpoint().is_ok() {
+            arena.boot_mode = BootMode::Checkpoint;
+            arena.clear_clean_close()?;
+            arena.io.reset_pool();
+            arena.flush_bitmap()?;
+            return Ok(arena);
+        }
         arena.scan_class(SlotClass::L)?;
         arena.scan_class(SlotClass::S)?;
         arena.io.reset_pool();
@@ -272,13 +291,23 @@ impl Arena {
                 max: self.geom.capacity(SlotClass::L) as usize,
             });
         };
-        let count = self.geom.slot_count(class);
         let id_hash = u64::from_le_bytes(id.as_bytes()[0..8].try_into().expect("16 bytes"));
-        let start = (id_hash ^ self.alloc_seq.wrapping_mul(ALLOC_SPREAD)) % count.max(1);
         self.alloc_seq = self.alloc_seq.wrapping_add(1);
-        let slot_no = self
-            .bitmaps
-            .find_free_from(class, start)
+        // v2 class-full fallback (contract §6): an S payload lands in an
+        // L-slot when S is exhausted; L payloads have no fallback.
+        let candidates: &[SlotClass] = match class {
+            SlotClass::S => &[SlotClass::S, SlotClass::L],
+            SlotClass::L => &[SlotClass::L],
+        };
+        let (class, slot_no) = candidates
+            .iter()
+            .find_map(|c| {
+                let count = self.geom.slot_count(*c);
+                let start = (id_hash ^ self.alloc_seq.wrapping_mul(ALLOC_SPREAD)) % count.max(1);
+                self.bitmaps
+                    .find_free_from(*c, start)
+                    .map(|slot| (*c, slot))
+            })
             .ok_or(ArenaError::OutOfSpace { class })?;
         let slot_off = self.geom.slot_offset(class, slot_no);
         let header = SlotHeader {
@@ -590,8 +619,123 @@ impl Arena {
     /// Flush the bitmaps and close (best-effort flush also happens on Drop).
     pub fn close(mut self) -> Result<()> {
         self.flush_bitmap()?;
+        self.write_checkpoint()?;
         self.closed = true;
         Ok(())
+    }
+
+    /// Persist index + bitmaps into the checkpoint region and set
+    /// CLEAN_CLOSE (contract §3.5); silently skipped when the payload
+    /// outgrows the region.
+    fn write_checkpoint(&mut self) -> Result<()> {
+        let bitmap = self.bitmaps.encode();
+        let count = self.index.len();
+        let used = bitmap.len() + count * checkpoint::ENTRY_LEN;
+        let total = align_up(used as u64, 4096) as usize;
+        if 4096 + total as u64 > self.geom.checkpoint_bytes() {
+            return Ok(());
+        }
+        let mut payload = AlignedBuf::zeroed(total)?;
+        payload.write_bytes(0, &bitmap);
+        let mut off = bitmap.len();
+        for m in self.index.iter() {
+            checkpoint::encode_entry(m, &mut payload[off..off + checkpoint::ENTRY_LEN]);
+            off += checkpoint::ENTRY_LEN;
+        }
+        let generation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let hdr = checkpoint::encode_header(&checkpoint::Header {
+            generation,
+            entry_count: count as u64,
+            bitmap_len: bitmap.len() as u32,
+            payload_crc32c: crc32fast::hash(&payload[..used]),
+        });
+        write_aligned(&self.io.file, &hdr, self.geom.checkpoint_offset())?;
+        write_aligned(
+            &self.io.file,
+            &payload[..],
+            self.geom.checkpoint_offset() + 4096,
+        )?;
+        self.io.file.sync_data()?;
+        self.write_superblock_flags(self.flags | FLAG_CLEAN_CLOSE)
+    }
+
+    /// Load the checkpoint (contract §3.5): header + payload crc, then a
+    /// 16-slot sample verification against on-disk headers.
+    fn load_checkpoint(&mut self) -> Result<()> {
+        let base = self.geom.checkpoint_offset();
+        let mut hdr = AlignedBuf::zeroed(checkpoint::HEADER_LEN)?;
+        self.io.file.read_exact_at(&mut hdr[..], base)?;
+        let h = checkpoint::decode_header(&hdr[..64]).ok_or_else(|| bad_checkpoint("magic/crc"))?;
+        let used = h.bitmap_len as usize + h.entry_count as usize * checkpoint::ENTRY_LEN;
+        let total = align_up(used as u64, 4096) as usize;
+        if 4096 + total as u64 > self.geom.checkpoint_bytes() {
+            return Err(bad_checkpoint("size"));
+        }
+        let mut payload = AlignedBuf::zeroed(total)?;
+        self.io.file.read_exact_at(&mut payload[..], base + 4096)?;
+        if crc32fast::hash(&payload[..used]) != h.payload_crc32c {
+            return Err(bad_checkpoint("payload crc"));
+        }
+        let bitmaps = Bitmaps::decode(
+            &payload[..h.bitmap_len as usize],
+            self.geom.l_slot_count,
+            self.geom.s_slot_count,
+        )
+        .ok_or_else(|| bad_checkpoint("bitmap"))?;
+        let mut index = Index::new();
+        let mut off = h.bitmap_len as usize;
+        for _ in 0..h.entry_count {
+            let m = checkpoint::decode_entry(&payload[off..off + checkpoint::ENTRY_LEN])
+                .ok_or_else(|| bad_checkpoint("entry"))?;
+            index.insert(m);
+            off += checkpoint::ENTRY_LEN;
+        }
+        let entries: Vec<ChunkMeta> = index.iter().cloned().collect();
+        let n = entries.len();
+        for k in 0..16.min(n) {
+            let m = &entries[k * n / 16];
+            let mut page = AlignedBuf::zeroed(4096)?;
+            self.io
+                .file
+                .read_exact_at(&mut page[..], self.geom.slot_offset(m.class, m.slot_no))?;
+            let ok = SlotHeader::decode_valid(&page[..HEADER_LEN], self.geom.capacity(m.class))
+                .is_some_and(|h| {
+                    h.sealed
+                        && h.chunk_id == m.chunk_id
+                        && h.version == m.version
+                        && h.payload_crc32c == m.payload_crc32c
+                });
+            if !ok {
+                return Err(bad_checkpoint("sample"));
+            }
+        }
+        self.bitmaps = bitmaps;
+        self.index = index;
+        Ok(())
+    }
+
+    fn write_superblock_flags(&self, flags: u32) -> Result<()> {
+        let sb = geom::superblock_for(&self.geom, flags, self.arena_uuid, self.created_at);
+        let block = sb.encode();
+        write_aligned(&self.io.file, &block, SB_A_OFFSET)?;
+        write_aligned(&self.io.file, &block, SB_B_OFFSET)?;
+        self.io.file.sync_data()?;
+        Ok(())
+    }
+
+    fn clear_clean_close(&mut self) -> Result<()> {
+        if self.flags & FLAG_CLEAN_CLOSE == 0 {
+            return Ok(());
+        }
+        self.flags &= !FLAG_CLEAN_CLOSE;
+        self.write_superblock_flags(self.flags)
+    }
+
+    /// How this open reconstructed the arena state (v2 instrumentation).
+    pub fn boot_mode(&self) -> BootMode {
+        self.boot_mode
     }
 
     /// Abandon the arena WITHOUT the Drop-time bitmap flush, simulating a
@@ -646,6 +790,10 @@ fn seek_hole(fd: RawFd, from: u64) -> Result<u64> {
         return Err(std::io::Error::last_os_error().into());
     }
     Ok(r as u64)
+}
+
+fn bad_checkpoint(msg: &'static str) -> ArenaError {
+    ArenaError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, msg))
 }
 
 /// Write `bytes` (length a multiple of 4096) at `offset` through an aligned
@@ -890,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn out_of_space_when_class_full() {
+    fn class_full_falls_back_then_out_of_space() {
         let (mut arena, _p, _g) = mk_arena("oos");
         let s_cap = arena.geometry().capacity(SlotClass::S) as usize;
         let s_count = arena.geometry().s_slot_count;
@@ -899,6 +1047,20 @@ mod tests {
             arena.put(id, i, &fill(1, 100)).expect("fill");
         }
         assert_eq!(arena.free_slots(SlotClass::S), 0);
+        // v2: an S payload falls back to an L-slot before OutOfSpace.
+        arena
+            .put(ChunkId::new_v7(), 0, &fill(1, 100))
+            .expect("S payload falls back to L");
+        assert_eq!(
+            arena.free_slots(SlotClass::L),
+            arena.geometry().l_slot_count - 1
+        );
+        let l_free = arena.free_slots(SlotClass::L);
+        for _ in 0..l_free {
+            arena
+                .put(ChunkId::new_v7(), 0, &fill(2, 200))
+                .expect("fill L via fallback");
+        }
         let err = arena.put(ChunkId::new_v7(), 0, &fill(1, 100));
         assert!(matches!(
             err,
@@ -906,10 +1068,14 @@ mod tests {
                 class: SlotClass::S
             })
         ));
-        let l_free = arena.free_slots(SlotClass::L);
-        assert_eq!(l_free, arena.geometry().l_slot_count);
-        let big = fill(2, s_cap + 1);
-        arena.put(ChunkId::new_v7(), 0, &big).expect("L still open");
+        let big = fill(3, s_cap + 1);
+        let err = arena.put(ChunkId::new_v7(), 0, &big);
+        assert!(matches!(
+            err,
+            Err(ArenaError::OutOfSpace {
+                class: SlotClass::L
+            })
+        ));
     }
 
     #[test]
@@ -935,6 +1101,33 @@ mod tests {
         let mut want: Vec<ChunkId> = expected.iter().map(|e| e.0).collect();
         want.sort();
         assert_eq!(listed, want);
+    }
+
+    #[test]
+    fn close_then_open_boots_from_checkpoint() {
+        let (mut arena, path, _g) = mk_arena("fastboot");
+        let mut expected = Vec::new();
+        for i in 0..4u64 {
+            let id = ChunkId::new_v7();
+            let payload = fill(i as u8, 500 + i as usize);
+            arena.put(id, i + 1, &payload).expect("put");
+            expected.push((id, i + 1, payload));
+        }
+        arena.close().expect("close");
+        let mut arena = Arena::open(&path).expect("reopen");
+        assert_eq!(arena.boot_mode(), BootMode::Checkpoint);
+        assert_eq!(arena.len(), expected.len());
+        for (id, version, payload) in &expected {
+            let (v, got) = arena.get(id).expect("get");
+            assert_eq!(&v, version);
+            assert_eq!(&got, payload);
+        }
+        // The flag clears at open: dropping without close means the next
+        // open must take the scan path again.
+        drop(arena);
+        let arena = Arena::open(&path).expect("reopen after drop");
+        assert_eq!(arena.boot_mode(), BootMode::Scan);
+        assert_eq!(arena.len(), expected.len());
     }
 
     #[test]

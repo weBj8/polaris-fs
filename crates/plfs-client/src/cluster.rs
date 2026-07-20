@@ -75,6 +75,46 @@ async fn get_one(addr: &str, chunk_id: [u8; 16]) -> Result<(u64, Vec<u8>), Clien
     Ok((version, data))
 }
 
+/// Why a per-replica scrub read failed.
+pub(crate) enum ReplicaError {
+    /// The data node proved the rot (DataLoss from its own crc check).
+    Corrupt,
+    /// Anything else (unreachable, transport, ...).
+    Other,
+}
+
+/// Per-replica read for the scrubber: unlike the failover get, a DataLoss
+/// reply is surfaced as Corrupt so the scrub repairs the replica.
+pub(crate) async fn get_replica_verbose(
+    addr: &str,
+    chunk_id: [u8; 16],
+) -> Result<(u64, Vec<u8>), ReplicaError> {
+    let mut client = connect(addr).await.map_err(|_| ReplicaError::Other)?;
+    let req = pb::GetRequest {
+        chunk_id: chunk_id.to_vec(),
+        if_version: 0,
+    };
+    let mut stream = match client.get(req).await {
+        Ok(r) => r.into_inner(),
+        Err(s) if s.code() == tonic::Code::DataLoss => return Err(ReplicaError::Corrupt),
+        Err(_) => return Err(ReplicaError::Other),
+    };
+    let mut version = 0;
+    let mut data = Vec::new();
+    loop {
+        match stream.message().await {
+            Ok(Some(frame)) => {
+                version = frame.version;
+                data.extend_from_slice(&frame.data);
+            }
+            Ok(None) => break,
+            Err(s) if s.code() == tonic::Code::DataLoss => return Err(ReplicaError::Corrupt),
+            Err(_) => return Err(ReplicaError::Other),
+        }
+    }
+    Ok((version, data))
+}
+
 pub(crate) async fn delete_one(
     addr: &str,
     chunk_id: [u8; 16],

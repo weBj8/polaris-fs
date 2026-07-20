@@ -1,18 +1,27 @@
-# ChunkArena On-Disk Format — v1 (binding contract)
+# ChunkArena On-Disk Format — v2 (binding contract)
 
-Status: **v1, binding**. Change this document and bump `FORMAT_VERSION` BEFORE
-changing code. Source of truth for v1: `docs/design.md` §6; where the design doc is
+Status: **v2, binding**. Change this document and bump `FORMAT_VERSION` BEFORE
+changing code. Source of truth: `docs/design.md` §6; where the design doc is
 ambiguous this document is the resolution. All multi-byte integers are
 **little-endian** unless stated otherwise. `crc32c` = CRC-32C (Castagnoli), as in
 `crc32fast`.
 
+**v2 changes vs v1** (bounded boot, review P0-3; slot-class fallback, review
+P1-5): a checkpoint region between the bitmap copies and the slot region with a
+`CLEAN_CLOSE` superblock flag — a clean close persists the in-memory index +
+bitmaps, and the next open loads them instead of scanning every slot header
+(dirty shutdown or any validation failure falls back to the v1 full scan); and
+S-class Puts fall back to L-slots before reporting OutOfSpace. v2 and v1 arenas
+are mutually unreadable (`Error::UnsupportedVersion`); upgrade = re-mkfs
+(docs/runbook.md).
+
 ## 1. Region layout
 
 ```
-┌──────────────────┬──────────────────┬─────────────────────┬──────────────────────┐
-│ Superblock A(4K) │ Superblock B(4K) │ Bitmap region       │ Slot region          │
-│ off 0            │ off 4096         │ (2 copies + crc)    │ L-slots, then S-slots│
-└──────────────────┴──────────────────┴─────────────────────┴──────────────────────┘
+┌────────────┬────────────┬───────────────┬──────────────────┬────────────────────┐
+│ Superblock │ Superblock │ Bitmap region │ Checkpoint (v2)  │ Slot region        │
+│ A(4K) off0 │ B(4K) 4096 │ (2 copies+crc)│ index + bitmaps  │ L-slots, then S    │
+└────────────┴────────────┴───────────────┴──────────────────┴────────────────────┘
 ```
 
 A ChunkArena is a single regular file (sparse image) or block device. All offsets
@@ -25,6 +34,7 @@ not recomputed constants.
 | Superblock B | 4096 | 4096 |
 | Bitmap copy A | `bitmap_region_offset` (= 8192) | `bitmap_copy_bytes` |
 | Bitmap copy B | `bitmap_region_offset + bitmap_copy_bytes` | `bitmap_copy_bytes` |
+| Checkpoint (v2) | `bitmap_region_offset + 2*bitmap_copy_bytes` | `checkpoint_bytes` = max(1 MiB, `total_bytes`/1024), 4096-aligned |
 | L-slot i (0-based) | `slot_region_offset + i * l_slot_size` | `l_slot_size` |
 | S-slot j (0-based) | `slot_region_offset + l_slot_count*l_slot_size + j * s_slot_size` | `s_slot_size` |
 
@@ -33,8 +43,8 @@ not recomputed constants.
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 8 | magic = ASCII `GFARENA1` |
-| 8 | 4 | `format_version` u32 = **1** |
-| 12 | 4 | `flags` u32: bit0 `PUNCH_OK`, bit1 `DISCARD_OK`, bit2 `BLOCK_DEVICE` |
+| 8 | 4 | `format_version` u32 = **2** |
+| 12 | 4 | `flags` u32: bit0 `PUNCH_OK`, bit1 `DISCARD_OK`, bit2 `BLOCK_DEVICE`, bit3 `CLEAN_CLOSE` (v2, §3.5) |
 | 16 | 4 | `l_slot_size` u32 = 1048576 (1 MiB) |
 | 20 | 4 | `s_slot_size` u32 = 65536 (64 KiB) |
 | 24 | 8 | `l_slot_count` u64 |
@@ -50,7 +60,8 @@ not recomputed constants.
 | 108 | 3988 | zero padding |
 
 - Written once at mkfs; A and B are identical copies. Read A; on magic/crc failure
-  read B; both bad ⇒ `Error::BadSuperblock`. Writers update neither in v1.
+  read B; both bad ⇒ `Error::BadSuperblock`. In v2 the only post-mkfs update is
+  `CLEAN_CLOSE` (§3.5) — always written to both copies.
 - `PUNCH_OK`: sparse-image backend supports `fallocate(FALLOC_FL_PUNCH_HOLE |
   FALLOC_FL_KEEP_SIZE)` (probed at mkfs, §6).
 - `DISCARD_OK`: block-device backend supports `BLKDISCARD` (probed at mkfs).
@@ -65,7 +76,40 @@ padded with zeros to `bitmap_copy_bytes` (multiple of 4096).
 
 - The **slot header is the source of truth; the bitmap is a hint**. Bitmaps are
   flushed lazily (clean close, and opportunistically); they are fully rebuilt from
-  slot headers at every open (§5).
+  slot headers at every open that takes the scan path (§5).
+
+## 3.5 Checkpoint region (v2)
+
+`checkpoint_bytes` = max(1 MiB, `total_bytes` / 1024), 4096-aligned; located
+immediately after bitmap copy B (offset and size derivable from the superblock,
+like every other region). Header (64 bytes):
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 8 | magic = ASCII `GFCPNT01` |
+| 8 | 8 | `gen` u64 (close counter; diagnostics) |
+| 16 | 8 | `entry_count` u64 |
+| 24 | 4 | `bitmap_len` u32 (bitmap payload bytes that follow) |
+| 28 | 4 | `payload_crc32c` u32 over `bitmap_len` bitmap bytes + `entry_count`×48 entry bytes |
+| 32 | 4 | `header_crc32c` u32 over header bytes [0, 32) |
+| 36 | 28 | reserved, zero |
+
+Entry (48 bytes): `chunk_id`(16) · `version` u64 · `payload_len` u64 ·
+`payload_crc32c` u32 · `class` u8 (0 = S, 1 = L) · reserved(3) · `slot_no` u64.
+
+**Clean close**: write header + bitmap payload + all index entries into the
+region, fdatasync, then set `CLEAN_CLOSE` in BOTH superblocks and fdatasync
+again. If the payload does not fit the region, close skips the checkpoint (the
+flag stays clear).
+
+**Fast boot**: `format_version` = 2 with `CLEAN_CLOSE` set ⇒ read and validate
+the checkpoint (magic, both crcs, payload fits the region); on success verify
+16 pseudo-random slots against the loaded index (any mismatch ⇒ treat the
+checkpoint as absent), then CLEAR `CLEAN_CLOSE` in both superblocks
+(+fdatasync) BEFORE accepting writes and skip the header scan entirely. Any
+validation failure ⇒ the v1 full scan. The flag ordering is the safety
+property: the checkpoint is durable before the flag is set, and the flag is
+cleared before any new write — a crash anywhere lands on the scan path.
 
 ## 4. Slot header (first 64 bytes of each slot)
 
@@ -90,7 +134,9 @@ padded with zeros to `bitmap_copy_bytes` (multiple of 4096).
 
 ## 5. Invariants & reconciliation (headers are truth)
 
-At `open`, scan every slot header sequentially and rebuild state:
+At `open`, either load the v2 checkpoint (§3.5 fast boot) or — dirty shutdown,
+missing/invalid checkpoint — scan every slot header sequentially and rebuild
+state:
 
 | On-disk observation | Conclusion |
 |---|---|
@@ -116,8 +162,10 @@ fdatasync. The slot region is NOT touched (stays sparse holes).
 
 **Put**(chunk_id, version, payload):
 1. Choose slot class: `payload_len` ≤ S capacity ⇒ S-slot, else L-slot (must fit L
-   capacity, else `Error::Oversize`). No cross-class fallback in v1: no free slot of
-   the needed class ⇒ `Error::OutOfSpace`.
+   capacity, else `Error::Oversize`). Class-full fallback (v2): no free S-slot ⇒
+   try an L-slot instead (an S payload in one L-slot); no free L-slot either ⇒
+   `Error::OutOfSpace`. (The reverse — an L payload in an S-slot — is impossible
+   by capacity.)
 2. Find a free slot (bitmap scan starting at a random offset).
 3. `pwrite` payload at slot+64.
 4. `pwrite` the complete 64-byte header **with `SEALED` set**, one write, then

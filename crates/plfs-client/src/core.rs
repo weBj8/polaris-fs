@@ -539,6 +539,7 @@ impl ClientCore {
                 bincode::serialize(&record).map_err(|e| ClientError::Codec(e.to_string()))?;
             self.wal.append(&bytes)?;
             self.pending.insert(seqs[i], record);
+            metrics::gauge!("plfs_wal_backlog_records").set(self.pending.len() as f64);
         }
         self.wal.sync()?;
         Ok(buf.len())
@@ -580,6 +581,7 @@ impl ClientCore {
     /// Flush all pending records (Put → CommitLayout → WAL truncate → GC).
     pub async fn flush(&mut self) -> Result<(), ClientError> {
         let records: Vec<WalRecord> = std::mem::take(&mut self.pending).into_values().collect();
+        metrics::gauge!("plfs_wal_backlog_records").set(0.0);
         let merged = merge_records(&self.state, records)?;
         self.flush_records(&merged).await?;
         let pos = self.wal.append_pos();

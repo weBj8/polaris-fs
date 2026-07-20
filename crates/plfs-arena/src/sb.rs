@@ -6,10 +6,11 @@ pub(crate) const SB_LEN: usize = 4096;
 pub(crate) const SB_A_OFFSET: u64 = 0;
 pub(crate) const SB_B_OFFSET: u64 = 4096;
 pub(crate) const SB_MAGIC: &[u8; 8] = b"GFARENA1";
-pub(crate) const FORMAT_VERSION: u32 = 1;
+pub(crate) const FORMAT_VERSION: u32 = 2;
 pub(crate) const FLAG_PUNCH_OK: u32 = 1 << 0;
 pub(crate) const FLAG_DISCARD_OK: u32 = 1 << 1;
 pub(crate) const FLAG_BLOCK_DEVICE: u32 = 1 << 2;
+pub(crate) const FLAG_CLEAN_CLOSE: u32 = 1 << 3;
 
 const OFF_FORMAT_VERSION: usize = 8;
 const OFF_FLAGS: usize = 12;
