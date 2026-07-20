@@ -529,7 +529,7 @@ mod tests {
                 )
                 .expect("write");
             engine.file.sync_data().expect("sync");
-            let mut out = Vec::new();
+            let mut out = vec![0u8; 2 * 4096];
             engine
                 .drive(
                     2,
@@ -542,11 +542,7 @@ mod tests {
                         })
                     },
                     |i, buf| {
-                        out.extend_from_slice(&buf[..4096]);
-                        assert_eq!(
-                            &out[i * 4096..(i + 1) * 4096],
-                            &payload[i * 4096..(i + 1) * 4096]
-                        );
+                        out[i * 4096..(i + 1) * 4096].copy_from_slice(&buf[..4096]);
                         Ok(())
                     },
                 )

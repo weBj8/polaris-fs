@@ -233,6 +233,20 @@ pub enum MetaOp {
         /// Snapshot id.
         id: u64,
     },
+    /// Roll back the volume namespace to a snapshot (§9): the apply replays
+    /// the checkpoint's tables into the live store in this one transaction —
+    /// never a DB-file restore, so the raft log, GC state and the snapshot
+    /// catalog are untouched.
+    RestoreSnap {
+        /// Snapshot id to restore from.
+        id: u64,
+    },
+    /// Enqueue dead chunks for data-node deletion (dedup against the queue;
+    /// used when a snapshot delete releases exclusively-referenced chunks).
+    GcEnqueue {
+        /// Chunks to collect.
+        entries: Vec<GcEntry>,
+    },
 }
 
 /// Result of an applied [`MetaOp`].

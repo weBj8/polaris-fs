@@ -43,7 +43,8 @@ Key properties:
 | S13 | Registry | ✅ 3 registry + 3 data nodes registered/live, 3 clients × 3 data nodes workload byte-exact, survives one registry member loss (quorum) |
 | S14 | Replication | ✅ kill 1-of-4 data nodes → reads keep serving (failover), 5/5 dead-node chunks self-healed (re-replicated), byte-exact |
 | S15 | Snapshots | ✅ delete+rewrite half the tree post-snap → snapshot view byte-exact for all 8 originals; FUSE `.snapshots` serves pre-snap content |
-| S16–S20 | See [ROADMAP.md](ROADMAP.md) | not started |
+| S16 | Rollback + GC + scheduler | ✅ rollback byte-exact + reversible (implicit pre-rollback snap); snapshot delete reclaims — du 37.2 MB → 3.7 MB; retention keeps 3/3 on schedule |
+| S17–S20 | See [ROADMAP.md](ROADMAP.md) | not started |
 
 Current test surface: 105 workspace tests green, every test < 5 s (deep gates
 live behind `PROPTEST_CASES` and scripts/).
@@ -80,6 +81,7 @@ kernels where fusermount3 is restricted.
 ./scripts/gate-cache-warm.sh       # S11 gate: warm cache pass + Prometheus hit rate
 ./scripts/gate-replication.sh      # S14 gate: kill a data node — reads failover, chunks self-heal
 ./scripts/gate-snapshots.sh        # S15 gate: snapshot → delete/rewrite half → snapshot byte-exact + FUSE .snapshots view
+./scripts/gate-rollback.sh         # S16 gate: rollback byte-exact + reversible; snapshot delete du reclaim; retention schedule
 ```
 
 Mounting needs FUSE: root, or a user+mount namespace (`unshare -rm`) on

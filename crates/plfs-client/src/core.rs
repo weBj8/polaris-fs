@@ -386,6 +386,18 @@ impl ClientCore {
                 ChunkSink::Cluster(Box::new(c))
             }
         };
+        let retention_cfg = wal_dir
+            .parent()
+            .map(|d| d.join("snapshots.toml"))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| toml::from_str::<crate::scheduler::RetentionConfig>(&s).ok());
+        if let Some(cfg) = retention_cfg {
+            tokio::spawn(crate::scheduler::retention_loop(
+                cfg,
+                raft.raft().clone(),
+                state.clone(),
+            ));
+        }
         let (wal, replay) = Wal::open(&wal_dir, crate::wal::DEFAULT_SEGMENT_LEN)?;
         let cache_dir = wal_dir.parent().map(std::path::Path::to_path_buf);
         let cache = match &cache_dir {
@@ -702,12 +714,22 @@ impl ClientCore {
 
     /// Delete a snapshot.
     pub async fn snapshot_delete(&mut self, id: u64) -> Result<(), ClientError> {
-        match self.meta_op(MetaOp::DeleteSnap { id }).await? {
-            Ok(_) => {}
-            Err(e) => return Err(ClientError::Meta(e)),
-        }
+        delete_snap_with_reclaim(&self.state, self.meta.raft(), id).await?;
         self.checkpoints.lock().expect("checkpoints").remove(&id);
-        Ok(())
+        self.gc_drain().await
+    }
+
+    /// Roll the volume back to a snapshot (§9, reversible via the implicit
+    /// pre-rollback snapshot); returns the pre-rollback snapshot id.
+    pub async fn snapshot_rollback(&mut self, snap: u64) -> Result<u64, ClientError> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let pre = self.snapshot_create(&format!("pre-rollback-{ts}")).await?;
+        match self.meta_op(MetaOp::RestoreSnap { id: snap }).await? {
+            Ok(_) => Ok(pre),
+            Err(e) => Err(ClientError::Meta(e)),
+        }
     }
 
     fn checkpoint(&self, id: u64) -> Result<MetaState, ClientError> {
@@ -723,12 +745,7 @@ impl ClientCore {
     /// GC rule (design doc §9): a chunk is collectable only when no
     /// snapshot checkpoint references it anymore.
     fn chunk_pinned_by_snapshot(&self, chunk_id: &[u8; 16]) -> Result<bool, ClientError> {
-        for snap in self.state.list_snaps()? {
-            if self.checkpoint(snap.id)?.chunk_refcount(chunk_id)? > 0 {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        pinned_by_any_snapshot(&self.state, chunk_id)
     }
 
     /// Resolve a directory entry inside a snapshot.
@@ -946,6 +963,50 @@ impl ClientCore {
         self.meta.shutdown().await?;
         Ok(())
     }
+}
+
+/// Delete a snapshot and re-enqueue the chunks it exclusively referenced
+/// for GC (design doc §9). Shared by the client API and the retention
+/// scheduler.
+pub(crate) async fn delete_snap_with_reclaim(
+    state: &MetaState,
+    raft: &openraft::Raft<plfs_meta::raft::MetaRaftConfig>,
+    id: u64,
+) -> Result<(), ClientError> {
+    let chunks = state.open_checkpoint(id)?.chunk_map()?;
+    let resp = raft
+        .client_write(MetaOp::DeleteSnap { id })
+        .await
+        .map_err(|e| ClientError::Codec(format!("raft: {e}")))?;
+    match resp.data {
+        Ok(_) => {}
+        Err(e) => return Err(ClientError::Meta(e)),
+    }
+    let mut entries = Vec::new();
+    for (chunk_id, (version, replicas)) in chunks {
+        if state.chunk_refcount(&chunk_id)? == 0 && !pinned_by_any_snapshot(state, &chunk_id)? {
+            entries.push(plfs_meta::GcEntry {
+                chunk_id,
+                version,
+                replicas,
+            });
+        }
+    }
+    if !entries.is_empty() {
+        raft.client_write(MetaOp::GcEnqueue { entries })
+            .await
+            .map_err(|e| ClientError::Codec(format!("raft: {e}")))?;
+    }
+    Ok(())
+}
+
+fn pinned_by_any_snapshot(state: &MetaState, chunk_id: &[u8; 16]) -> Result<bool, ClientError> {
+    for snap in state.list_snaps()? {
+        if state.open_checkpoint(snap.id)?.chunk_refcount(chunk_id)? > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn now() -> (i64, u32) {

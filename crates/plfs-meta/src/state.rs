@@ -19,6 +19,9 @@ use crate::{ChunkRef, GcEntry, Inode, Kind, MetaError, MetaOp, OpResult, Snapsho
 /// Root directory inode number.
 pub const ROOT_INO: u64 = 1;
 
+/// chunk_id → (version, replicas) reachability map (rollback diff, GC).
+pub type ChunkMap = std::collections::HashMap<[u8; 16], (u64, Vec<String>)>;
+
 const INODES: TableDefinition<u64, &[u8]> = TableDefinition::new("inodes");
 const DENTRIES: TableDefinition<&[u8], u64> = TableDefinition::new("dentries");
 const LAYOUTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("layouts");
@@ -713,6 +716,186 @@ impl MetaState {
                 }
                 Ok(OpResult::None)
             }
+            MetaOp::RestoreSnap { id } => {
+                let cp = self.open_checkpoint(*id)?;
+                // This read txn sees the last commit — the pre-rollback
+                // namespace — which is exactly what the orphan diff needs.
+                let live_chunks = self.chunk_map()?;
+                let rtx = cp.db.begin_read().map_err(storage)?;
+                let mut inodes = Vec::new();
+                for row in rtx
+                    .open_table(INODES)
+                    .map_err(storage)?
+                    .iter()
+                    .map_err(storage)?
+                {
+                    let (k, v) = row.map_err(storage)?;
+                    inodes.push((k.value(), v.value().to_vec()));
+                }
+                let mut dentries = Vec::new();
+                for row in rtx
+                    .open_table(DENTRIES)
+                    .map_err(storage)?
+                    .iter()
+                    .map_err(storage)?
+                {
+                    let (k, v) = row.map_err(storage)?;
+                    dentries.push((k.value().to_vec(), v.value()));
+                }
+                let mut layouts = Vec::new();
+                for row in rtx
+                    .open_table(LAYOUTS)
+                    .map_err(storage)?
+                    .iter()
+                    .map_err(storage)?
+                {
+                    let (k, v) = row.map_err(storage)?;
+                    layouts.push((k.value().to_vec(), v.value().to_vec()));
+                }
+                let mut chunkrefs = Vec::new();
+                for row in rtx
+                    .open_table(CHUNKREFS)
+                    .map_err(storage)?
+                    .iter()
+                    .map_err(storage)?
+                {
+                    let (k, v) = row.map_err(storage)?;
+                    chunkrefs.push((k.value().to_vec(), v.value()));
+                }
+                let (cp_next_ino, cp_next_snap) = {
+                    let counters = rtx.open_table(COUNTERS).map_err(storage)?;
+                    (
+                        counters
+                            .get("next_ino")
+                            .map_err(storage)?
+                            .map_or(ROOT_INO + 1, |v| v.value()),
+                        counters
+                            .get("next_snap")
+                            .map_err(storage)?
+                            .map_or(1, |v| v.value()),
+                    )
+                };
+                drop(rtx);
+                let cp_refs: std::collections::HashSet<[u8; 16]> = chunkrefs
+                    .iter()
+                    .map(|(k, _)| {
+                        <[u8; 16]>::try_from(k.as_slice())
+                            .map_err(|_| MetaError::Codec("bad chunkref key".into()))
+                    })
+                    .collect::<Result<_, _>>()?;
+                {
+                    let mut t = txn.open_table(INODES).map_err(storage)?;
+                    let keys: Vec<u64> = t
+                        .iter()
+                        .map_err(storage)?
+                        .filter_map(|r| r.ok().map(|(k, _)| k.value()))
+                        .collect();
+                    for k in keys {
+                        t.remove(k).map_err(storage)?;
+                    }
+                    for (k, v) in inodes {
+                        t.insert(k, v.as_slice()).map_err(storage)?;
+                    }
+                }
+                {
+                    let mut t = txn.open_table(DENTRIES).map_err(storage)?;
+                    let keys: Vec<Vec<u8>> = t
+                        .iter()
+                        .map_err(storage)?
+                        .filter_map(|r| r.ok().map(|(k, _)| k.value().to_vec()))
+                        .collect();
+                    for k in keys {
+                        t.remove(k.as_slice()).map_err(storage)?;
+                    }
+                    for (k, v) in dentries {
+                        t.insert(k.as_slice(), v).map_err(storage)?;
+                    }
+                }
+                {
+                    let mut t = txn.open_table(LAYOUTS).map_err(storage)?;
+                    let keys: Vec<Vec<u8>> = t
+                        .iter()
+                        .map_err(storage)?
+                        .filter_map(|r| r.ok().map(|(k, _)| k.value().to_vec()))
+                        .collect();
+                    for k in keys {
+                        t.remove(k.as_slice()).map_err(storage)?;
+                    }
+                    for (k, v) in layouts {
+                        t.insert(k.as_slice(), v.as_slice()).map_err(storage)?;
+                    }
+                }
+                {
+                    let mut t = txn.open_table(CHUNKREFS).map_err(storage)?;
+                    let keys: Vec<Vec<u8>> = t
+                        .iter()
+                        .map_err(storage)?
+                        .filter_map(|r| r.ok().map(|(k, _)| k.value().to_vec()))
+                        .collect();
+                    for k in keys {
+                        t.remove(k.as_slice()).map_err(storage)?;
+                    }
+                    for (k, v) in chunkrefs {
+                        t.insert(k.as_slice(), v).map_err(storage)?;
+                    }
+                }
+                // Counters never move backwards: snap ids name checkpoint
+                // files (reuse would clobber one), and a reused ino could
+                // collide with entries in the other snapshots.
+                {
+                    let mut counters = txn.open_table(COUNTERS).map_err(storage)?;
+                    let live_ino = counters
+                        .get("next_ino")
+                        .map_err(storage)?
+                        .map_or(ROOT_INO + 1, |v| v.value());
+                    counters
+                        .insert("next_ino", live_ino.max(cp_next_ino))
+                        .map_err(storage)?;
+                    let live_snap = counters
+                        .get("next_snap")
+                        .map_err(storage)?
+                        .map_or(1, |v| v.value());
+                    counters
+                        .insert("next_snap", live_snap.max(cp_next_snap))
+                        .map_err(storage)?;
+                }
+                {
+                    let mut gc = txn.open_table(GC).map_err(storage)?;
+                    let mut counters = txn.open_table(COUNTERS).map_err(storage)?;
+                    for (chunk_id, (version, replicas)) in live_chunks {
+                        if !cp_refs.contains(&chunk_id) {
+                            let seq = bump(&mut counters, "next_gc_seq")?;
+                            gc.insert(
+                                seq,
+                                enc(&GcEntry {
+                                    chunk_id,
+                                    version,
+                                    replicas,
+                                })?
+                                .as_slice(),
+                            )
+                            .map_err(storage)?;
+                        }
+                    }
+                }
+                Ok(OpResult::None)
+            }
+            MetaOp::GcEnqueue { entries } => {
+                let mut gc = txn.open_table(GC).map_err(storage)?;
+                let mut queued = std::collections::HashSet::new();
+                for row in gc.iter().map_err(storage)? {
+                    let (_, v) = row.map_err(storage)?;
+                    queued.insert(dec::<GcEntry>(v.value())?.chunk_id);
+                }
+                let mut counters = txn.open_table(COUNTERS).map_err(storage)?;
+                for entry in entries {
+                    if queued.insert(entry.chunk_id) {
+                        let seq = bump(&mut counters, "next_gc_seq")?;
+                        gc.insert(seq, enc(entry)?.as_slice()).map_err(storage)?;
+                    }
+                }
+                Ok(OpResult::None)
+            }
         }
     }
 
@@ -832,6 +1015,19 @@ impl MetaState {
             .get(chunk_id.as_slice())
             .map_err(storage)?
             .map_or(0, |v| v.value()))
+    }
+
+    /// All layout chunks: chunk_id → (version, replicas).
+    pub fn chunk_map(&self) -> Result<ChunkMap, MetaError> {
+        let txn = self.db.begin_read().map_err(storage)?;
+        let layouts = txn.open_table(LAYOUTS).map_err(storage)?;
+        let mut out = std::collections::HashMap::new();
+        for row in layouts.iter().map_err(storage)? {
+            let (_, v) = row.map_err(storage)?;
+            let chunk = dec::<ChunkRef>(v.value())?;
+            out.insert(chunk.chunk_id, (chunk.version, chunk.replicas));
+        }
+        Ok(out)
     }
 
     /// Last applied write-path commit sequence (idempotent re-commit

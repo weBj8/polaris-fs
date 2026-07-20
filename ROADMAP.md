@@ -409,15 +409,27 @@ stale pre-snapshots binary; opendir missed the snap branch; orphaned mount
 held the gate's stdout pipe. 105 workspace tests green (ci.sh). (S15 by the
 orchestrator.)
 
-**S16 · Rollback + GC + scheduler** (design doc §9)
-Reversible rollback (implicit pre-rollback snapshot → `MetaOp::RestoreSnap`:
-replay the checkpoint namespace into the live tables as one raft-committed op —
-never a DB-file restore, which would roll back raft state, GC and the snap
-catalog — → orphaned chunks to GC); refcount GC with snapshot awareness
-(snapshot delete re-enqueues exclusively-referenced chunks; version-checked
-Delete → hole punch); retention scheduler (toml).
-Gate: rollback restores byte-exact state and is itself reversible; GC reclaims
-space (du evidence); retention policies run on schedule.
+**S16 · Rollback + GC + scheduler** (design doc §9) ✅ DONE
+Delivered: `MetaOp::RestoreSnap` — the apply replays the checkpoint's
+inodes/dentries/layouts/chunkrefs into the live tables in one raft-committed
+transaction (never a DB-file restore: raft log, GC state and the snap catalog
+are untouched; counters only move forward), diffing live-vs-checkpoint
+chunkrefs so chunks orphaned by the rollback go straight to the GC queue.
+`snapshot_rollback` fsyncs, takes an implicit `pre-rollback-<ts>` snapshot
+(always reversible) and commits the restore. Snapshot delete re-enqueues
+exclusively-referenced chunks (`MetaOp::GcEnqueue`, deduped) and drains.
+Retention scheduler: `<volume>/snapshots.toml` (interval_secs / keep /
+name_prefix) spawns `retention_loop` in boot — crash-consistent interval
+snapshots with keep-N pruning through the same reclaim path.
+Gate: ✅ **rollback to an older snapshot is byte-exact and rolling back to
+the implicit pre-rollback snapshot restores the newest state byte-exact
+(reversible); deleting snapshot C re-enqueues its exclusive 32 MiB and the
+arena du drops 37,216,256 → 3,657,728 B; the scheduler keeps exactly 3 auto
+snapshots on a 1 s interval** (`scripts/gate-rollback.sh`: ROLLBACK_OK +
+RECLAIM_OK + SCHEDULER_OK). Also fixed en route: the S2-era
+drive_writes_then_reads_back test assumed in-order io_uring completions
+(latent flake exposed by CI parallelism) — now places by index. 105
+workspace tests green (ci.sh). (S16 by the orchestrator.)
 
 **S17 · Re-replication & scrubber** (design doc §7.4, §10.3)
 Background repair workers (rate-limited 30 MB/s/disk); weekly List-driven scrub
@@ -610,4 +622,8 @@ S20 = production candidate.
     barrier, `.snapshots` FUSE view sharing the SSD cache, GC pin rule;
     delete+rewrite half the tree post-snap → all 8 originals byte-exact,
     sentinel v1 via mount; 105 tests green)
-16. 🏃 S16 (Rollback + GC + scheduler) — next
+16. ✅ S16 (Rollback + GC + scheduler: RestoreSnap state-machine replay (no
+    DB restore), rollback byte-exact + reversible via implicit pre-rollback
+    snapshot; snapshot delete re-enqueues exclusive chunks — du 37.2 MB →
+    3.7 MB; snapshots.toml retention keeps 3/3; 105 tests green)
+17. 🏃 S17 (Re-replication & scrubber) — next
