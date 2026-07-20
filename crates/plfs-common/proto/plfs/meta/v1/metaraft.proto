@@ -1,0 +1,27 @@
+syntax = "proto3";
+package plfs.meta.v1;
+
+// Metadata-raft peer transport and client-facing metadata ops (wire format
+// v1). Payloads are bincode-serialized openraft / plfs-meta types — the
+// structured contracts live in the Rust types; these envelopes carry them.
+
+// openraft peer transport: AppendEntries / Vote / InstallSnapshot carry
+// bincode(openraft request/response) — the raft protocol verbatim.
+service MetaRaft {
+  rpc AppendEntries(RpcEnvelope) returns (RpcEnvelope);
+  rpc Vote(RpcEnvelope)         returns (RpcEnvelope);
+  rpc InstallSnapshot(RpcEnvelope) returns (RpcEnvelope);
+}
+
+// Client-facing metadata ops. Followers reply with leader_hint set (design
+// doc §7.3: follower reads proxy to the leader — linearizable metadata).
+service MetaOps {
+  rpc Apply(RpcEnvelope) returns (LeaderReply);  // bincode(MetaOp) -> bincode(Result<OpResult, MetaError>)
+  rpc Read(RpcEnvelope)  returns (LeaderReply);  // bincode(MetaRead) -> bincode(MetaReadReply)
+}
+
+message RpcEnvelope { bytes payload = 1; }
+message LeaderReply {
+  bytes payload = 1;
+  string leader_hint = 2;  // "id@host:port" of the current leader, when this node isn't it
+}

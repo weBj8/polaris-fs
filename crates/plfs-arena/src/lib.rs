@@ -23,7 +23,7 @@ mod index;
 mod io;
 mod sb;
 
-pub use arena::{Arena, CorruptionEvidence, PutOutcome};
+pub use arena::{Arena, CorruptionEvidence, PutOutcome, SparsifyReport};
 pub use geom::{Geometry, MkfsConfig, MkfsReport};
 pub use index::{ChunkMeta, SlotClass};
 

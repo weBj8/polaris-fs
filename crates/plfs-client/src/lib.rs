@@ -1,9 +1,8 @@
-//! FUSE client + cache + WAL — implemented from S6.
+//! FUSE client subsystems: WAL (S6), client core write path (S8), SSD read
+//! cache (S11), the FUSE daemon (S9+).
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn shell_crate_builds() {
-        assert_eq!(env!("CARGO_PKG_NAME"), "plfs-client");
-    }
-}
+pub mod cache;
+pub mod cluster;
+pub mod core;
+pub mod fuse;
+pub mod wal;

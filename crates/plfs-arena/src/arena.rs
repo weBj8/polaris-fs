@@ -4,6 +4,7 @@
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -47,6 +48,19 @@ pub enum PutOutcome {
     NoOp,
 }
 
+/// Outcome of [`Arena::sparsify`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SparsifyReport {
+    /// Whether any punch/discard was performed (false when the backend
+    /// supports neither, or punching is disabled).
+    pub punched: bool,
+    /// Data extents (regular files) or free ranges (discard backends)
+    /// actually reclaimed.
+    pub free_ranges_punched: u64,
+    /// Bytes returned to the host.
+    pub bytes_reclaimed: u64,
+}
+
 /// An open ChunkArena (one sparse image file or block device).
 pub struct Arena {
     io: IoEngine,
@@ -59,6 +73,7 @@ pub struct Arena {
     alloc_seq: u64,
     corruptions: Vec<CorruptionEvidence>,
     closed: bool,
+    punch_enabled: bool,
 }
 
 impl Arena {
@@ -139,6 +154,7 @@ impl Arena {
             alloc_seq: 0,
             corruptions: Vec::new(),
             closed: false,
+            punch_enabled: true,
         };
         arena.scan_class(SlotClass::L)?;
         arena.scan_class(SlotClass::S)?;
@@ -407,10 +423,12 @@ impl Arena {
         self.bitmaps.clear(meta.class, meta.slot_no);
         let slot_off = self.geom.slot_offset(meta.class, meta.slot_no);
         let slot_size = u64::from(self.geom.slot_size(meta.class));
-        if self.flags & FLAG_PUNCH_OK != 0 {
-            punch_hole(&self.io.file, slot_off, slot_size)?;
-        } else if self.flags & FLAG_DISCARD_OK != 0 {
-            blk_discard(&self.io.file, slot_off, slot_size)?;
+        if self.punch_enabled {
+            if self.flags & FLAG_PUNCH_OK != 0 {
+                punch_hole(&self.io.file, slot_off, slot_size)?;
+            } else if self.flags & FLAG_DISCARD_OK != 0 {
+                blk_discard(&self.io.file, slot_off, slot_size)?;
+            }
         }
         Ok(true)
     }
@@ -471,6 +489,88 @@ impl Arena {
         self.flags & FLAG_BLOCK_DEVICE != 0
     }
 
+    /// Enable/disable hole punching on the delete path. Maintenance/testing
+    /// support: with punching disabled, delete is bitmap-only and freed
+    /// ranges keep their host blocks until [`Arena::sparsify`] reclaims them.
+    /// Default: enabled.
+    pub fn set_punch_enabled(&mut self, enabled: bool) {
+        self.punch_enabled = enabled;
+    }
+
+    /// Re-punch the range of every free slot (design doc §6.4): the
+    /// maintenance pass that reclaims space after bitmap-only deletes. On
+    /// punch-capable files only extents that actually hold data are punched
+    /// (SEEK_DATA/SEEK_HOLE), so a second run reclaims 0; on BLKDISCARD
+    /// backends whole free ranges are discarded instead. No fsync: sparsify
+    /// only ever frees space, and a crash simply leaves it to the next run.
+    pub fn sparsify(&mut self) -> Result<SparsifyReport> {
+        let can_punch = self.punch_enabled
+            && (self.flags & FLAG_PUNCH_OK != 0 || self.flags & FLAG_DISCARD_OK != 0);
+        let mut report = SparsifyReport {
+            punched: can_punch,
+            free_ranges_punched: 0,
+            bytes_reclaimed: 0,
+        };
+        if !can_punch {
+            return Ok(report);
+        }
+        for class in [SlotClass::L, SlotClass::S] {
+            let count = self.geom.slot_count(class);
+            let slot_size = u64::from(self.geom.slot_size(class));
+            let mut run_start: Option<u64> = None;
+            for idx in 0..=count {
+                let free = idx < count && !self.bitmaps.test(class, idx);
+                match (run_start, free) {
+                    (None, true) => run_start = Some(idx),
+                    (Some(s), false) => {
+                        let off = self.geom.slot_offset(class, s);
+                        let len = (idx - s) * slot_size;
+                        let (n, bytes) = self.reclaim_range(off, len)?;
+                        report.free_ranges_punched += n;
+                        report.bytes_reclaimed += bytes;
+                        run_start = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// Reclaim one coalesced run of free slots. Discard backends discard the
+    /// whole run; punch-capable files punch only extents with real data
+    /// (idempotent — holes are skipped).
+    fn reclaim_range(&self, off: u64, len: u64) -> Result<(u64, u64)> {
+        if self.flags & FLAG_DISCARD_OK != 0 && self.flags & FLAG_PUNCH_OK == 0 {
+            blk_discard(&self.io.file, off, len)?;
+            return Ok((1, len));
+        }
+        let fd = self.io.file.as_raw_fd();
+        let end = off + len;
+        let mut pos = off;
+        let mut ranges = 0u64;
+        let mut bytes = 0u64;
+        while pos < end {
+            let Some(data) = seek_data(fd, pos)? else {
+                break;
+            };
+            if data >= end {
+                break;
+            }
+            let hole = seek_hole(fd, data)?;
+            // Clip to the free run and align outward to 4K: run boundaries
+            // are slot (4K-multiple) aligned, so the punch never touches a
+            // live slot outside the run.
+            let punch_start = data & !4095;
+            let punch_end = geom::align_up(hole.min(end), 4096).min(end);
+            punch_hole(&self.io.file, punch_start, punch_end - punch_start)?;
+            ranges += 1;
+            bytes += punch_end - punch_start;
+            pos = punch_end.max(pos + 1);
+        }
+        Ok((ranges, bytes))
+    }
+
     /// Duplicate-chunkId corruption evidence collected during open's scan.
     pub fn corruption_evidence(&self) -> &[CorruptionEvidence] {
         &self.corruptions
@@ -521,6 +621,31 @@ fn punch_hole(file: &File, offset: u64, len: u64) -> Result<()> {
     )
     .map_err(std::io::Error::from)?;
     Ok(())
+}
+
+/// Next data extent at or after `from` (SEEK_DATA); `None` when the file has
+/// no more data beyond `from`.
+fn seek_data(fd: RawFd, from: u64) -> Result<Option<u64>> {
+    // SAFETY: lseek on a valid open fd; no memory is touched.
+    let r = unsafe { libc::lseek(fd, from as libc::off_t, libc::SEEK_DATA) };
+    if r < 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ENXIO) {
+            return Ok(None);
+        }
+        return Err(err.into());
+    }
+    Ok(Some(r as u64))
+}
+
+/// End of the data extent containing `from` (SEEK_HOLE).
+fn seek_hole(fd: RawFd, from: u64) -> Result<u64> {
+    // SAFETY: lseek on a valid open fd; no memory is touched.
+    let r = unsafe { libc::lseek(fd, from as libc::off_t, libc::SEEK_HOLE) };
+    if r < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(r as u64)
 }
 
 /// Write `bytes` (length a multiple of 4096) at `offset` through an aligned

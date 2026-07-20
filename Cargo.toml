@@ -7,6 +7,7 @@ members = [
     "crates/plfs-common",
     "crates/plfs-data",
     "crates/plfs-meta",
+    "crates/plfs-registry",
 ]
 
 [workspace.package]
@@ -28,7 +29,16 @@ tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
 tonic-prost-build = "0.14"
+tokio-stream = { version = "0.1", features = ["sync", "net"] }
 bytes = "1"
+
+# workspace crates
+plfs-common = { path = "crates/plfs-common" }
+plfs-arena = { path = "crates/plfs-arena" }
+plfs-data = { path = "crates/plfs-data" }
+plfs-meta = { path = "crates/plfs-meta" }
+plfs-registry = { path = "crates/plfs-registry" }
+plfs-client = { path = "crates/plfs-client" }
 
 # ChunkArena storage engine (S2)
 io-uring = "0.7"
@@ -36,6 +46,18 @@ libc = "0.2"
 nix = { version = "0.31", default-features = false, features = ["fs", "ioctl"] }
 uuid = { version = "1", features = ["v7"] }
 crc32fast = "1"
+
+# observability
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }
+
+# read cache hot index (S11)
+lru = "0.16"
+
+# metadata state machine (S7)
+redb = "2"
+serde = { version = "1", features = ["derive"] }
+bincode = "1.3"
 thiserror = "2"
 
 # test-only

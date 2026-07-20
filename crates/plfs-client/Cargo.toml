@@ -6,3 +6,29 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+plfs-arena.workspace = true
+plfs-common.workspace = true
+plfs-meta.workspace = true
+plfs-registry.workspace = true
+crc32fast.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+bincode.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+lru.workspace = true
+redb.workspace = true
+metrics.workspace = true
+fuser = "0.17.0"
+futures = "0.3.33"
+openraft = { version = "0.9.24", features = ["serde", "storage-v2"] }
+
+[dev-dependencies]
+proptest.workspace = true
+rand.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+plfs-data.workspace = true
+plfs-registry.workspace = true
+tokio-stream.workspace = true
+metrics-exporter-prometheus.workspace = true

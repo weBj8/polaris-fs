@@ -6,6 +6,15 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+plfs-common.workspace = true
+plfs-client.workspace = true
+plfs-data.workspace = true
+plfs-registry.workspace = true
+plfs-meta.workspace = true
+tonic.workspace = true
+tokio-stream.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true

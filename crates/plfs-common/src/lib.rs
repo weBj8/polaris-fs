@@ -9,6 +9,18 @@ pub mod data {
     }
 }
 
+pub mod meta {
+    pub mod v1 {
+        tonic::include_proto!("plfs.meta.v1");
+    }
+}
+
+pub mod registry {
+    pub mod v1 {
+        tonic::include_proto!("plfs.registry.v1");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::data::v1::PutRequest;

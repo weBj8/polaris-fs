@@ -1,0 +1,21 @@
+[package]
+name = "plfs-registry"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+plfs-common.workspace = true
+redb.workspace = true
+serde.workspace = true
+bincode.workspace = true
+thiserror.workspace = true
+openraft = { version = "0.9.24", features = ["serde", "storage-v2"] }
+tonic.workspace = true
+tokio.workspace = true
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-core = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

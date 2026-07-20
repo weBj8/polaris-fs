@@ -12,7 +12,21 @@ FUSE client with persistent SSD cache and WAL. Implementation language: Rust.
 - **Design contract**: [`docs/design.md`](docs/design.md) (GameFS Design Document
   v0.2 — binding; `gamefs` spellings there map to project/binary names here).
 - **Master plan**: [`ROADMAP.md`](ROADMAP.md) (20 steps, each with a measurable gate).
+- **On-disk contract**: [`docs/format-arena.md`](docs/format-arena.md) (ChunkArena
+  format v1 — binding; change it and bump the version BEFORE code).
 - **Workflow skill**: `.opencode/skills/roadmap-workflow` — follow it for every step.
+
+## Architecture decisions worth knowing
+
+- **I/O split**: storage-engine data path uses **io_uring** (O_DIRECT + buffered
+  fallback, porfs P1 lineage — SQ pipeline, aligned buffer pool); control plane
+  and RPC use tokio + tonic/gRPC. (Owner amendment 2026-07-19, ROADMAP §0.1.)
+- **The `!Send` arena never crosses threads**: it is created on and owned by a
+  dedicated actor thread (see `plfs-data::spawn_actor`); async gRPC handlers
+  exchange commands with it over a channel.
+- **Headers are truth, the bitmap is a hint**: ChunkArena boot reconciles the
+  bitmap from slot headers at every open. A bitmap-only delete can resurrect at
+  reopen; `sparsify` must run in-session (format-arena.md §5–§7).
 
 ## Build & verify
 
@@ -39,29 +53,34 @@ cargo fmt --all -- --check
 7. **Gates & evidence**: every step closes with measured evidence (test counts,
    bench numbers, soak results) run by the orchestrator personally, and
    ROADMAP.md is updated with the numbers.
-8. **Test hygiene**: `/tmp` is tmpfs (RAM, 16 GiB on this box). Iterative tests
-   must delete per-iteration device files inside the loop; prefer
-   `CARGO_TARGET_TMPDIR` (real disk) for device files.
-9. **Never commit** `.omo/`, `target/`, or `*.img`.
+8. **Every `cargo test` test must finish in < 5 s** (owner ruling). Deep gates
+   (hundreds of proptest cases, kill -9 soaks, 10 GiB write tests) live behind
+   env knobs (`PROPTEST_CASES`, `ITERS`) and runnable scripts under `scripts/`;
+   CI defaults stay fast.
+9. **Test hygiene**: `/tmp` is tmpfs (RAM, 16 GiB on this box). Iterative tests
+   must delete per-iteration device files inside the loop; use
+   `CARGO_TARGET_TMPDIR` or `target/` (real disk) for device files.
+10. **Never commit** `.omo/`, `target/`, or `*.img`.
 
 ## Machine facts
 
 - Rust 1.96+ (edition 2024), protoc 35.1, fio available, 16 cores.
-- Kernel on this dev box: ≥ 6.15 (FUSE3 fine).
+- Kernel on this dev box: ≥ 6.15 (io_uring + FUSE3 fine); root fs is xfs
+  (hole punching works; /dev/shm is the forced-buffered fallback test path).
 
 ## Repo layout
 
 ```
 ROADMAP.md              20-step master plan, every step has a measurable gate
 docs/design.md          GameFS design document v0.2 (binding design contract)
-docs/format-arena.md    arena on-disk format contract (from S2; versioned)
-crates/plfs-common      proto/types (data-plane gRPC contracts)
-crates/plfs-arena       ChunkArena storage engine
-crates/plfs-data        data node gRPC service
-crates/plfs-meta        metadata state machine + Raft
-crates/plfs-client      FUSE client + cache + WAL
+docs/format-arena.md    ChunkArena on-disk format v1 (binding on-disk contract)
+crates/plfs-common      proto/types (data-plane gRPC wire contract v1)
+crates/plfs-arena       ChunkArena storage engine (io_uring, O_DIRECT + fallback)
+crates/plfs-data        data node gRPC service (ChunkStore over ChunkArena)
+crates/plfs-meta        metadata state machine + Raft (from S7)
+crates/plfs-client      FUSE client + cache + WAL (from S6)
 crates/plfs             the plfs binary (one binary, three roles + standalone)
-scripts/                gate scripts (ci.sh, soak/fuzz harnesses, ...)
+scripts/                gate scripts (ci.sh, kill9-arena, gate-* deep gates)
 ```
 
 ## Current phase

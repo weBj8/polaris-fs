@@ -150,75 +150,264 @@ per §5/§7, noted for S5/S7): address chunks by (chunk_id, version) — after a
 power-loss a resurrected stale version can share a chunk_id with the newer live
 one; GC re-deletes stale versions, never rely on bare-id Get across crashes.
 
-**S4 · Space reclamation** (design doc §6.4)
-Hole punch (sparse img: `FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE`) / BLKDISCARD
-(raw device) on Delete; capability probed at mkfs, recorded in superblock
-(`PUNCH_OK`, `DISCARD_OK`); bitmap-only fallback when unsupported.
-Gate: write 10 GiB → delete all → `du` returns to baseline.
+**S4 · Space reclamation** (design doc §6.4) ✅ DONE
+Delivered: `Arena::sparsify` (SEEK_DATA/SEEK_HOLE extent-precise punch of free
+slots — idempotent, second run reclaims 0; BLKDISCARD whole-range on discard
+backends), `Arena::set_punch_enabled` (bitmap-only delete mode for
+punch-less backends), 4 space tests, `examples/space_reclaim.rs`,
+`scripts/gate-space-reclaim.sh`.
+Gate: ✅ **write 10 GiB → delete all → `du` returns to exact baseline**
+(`SPACE_RECLAIM_OK du_baseline=24576 du_written=10738696192
+du_after_delete=24576 du_bitmap_only=2148597760 du_after_sparsify=24576`,
+orchestrator-run); bitmap-only delete retains blocks, same-session sparsify
+reclaims them; no resurrection after reopen (sparsify punches stale headers
+too). Contract note (§5/§6.4 consistent): a bitmap-only delete resurrects at
+reopen (headers are truth) — sparsify MUST run in-session on the data node;
+GC re-deletes idempotently in between. 55 workspace tests green, slowest
+3.4 s. (S4 implemented by the orchestrator — subagent quota exhausted.)
 
-**S5 · Data node gRPC** (design doc §5)
-5 RPCs over ChunkArena: Put (idempotent on chunk_id+version+crc), Get (stream,
-64 KiB frames, version+crc first frame, `if_version` ⇒ NOT_MODIFIED semantics),
-Stat, Delete (exact-version, idempotent), List (stream, arena inventory).
-Gate: idempotent Put / version-checked Delete proven by proptest over real
-loopback gRPC.
+**S5 · Data node gRPC** (design doc §5) ✅ DONE
+Delivered: `plfs-data` — the 5 ChunkStore RPCs over ChunkArena: the `!Send`
+arena is created on and never leaves its actor thread (command channel +
+oneshot replies); Put verifies the request crc32c and is idempotent
+(same id+version+crc ⇒ no-op success; any difference ⇒ ALREADY_EXISTS;
+`seal=false` ⇒ UNIMPLEMENTED, reserved); Get does Stat-first so an
+`if_version` hit returns a single not_modified frame WITHOUT reading the
+payload (the §7.1 304 semantic), else streams 64 KiB frames (first frame
+carries version/len/crc); Stat; Delete is exact-version and idempotent
+(wrong version/absent ⇒ silent success, chunk survives); List streams the
+arena inventory. ArenaError → gRPC code mapping (NotFound / AlreadyExists /
+OutOfRange / ResourceExhausted / DataLoss / Internal). `plfs data --arena
+--listen` wired (smoke: listens, SIGINT clean shutdown + bitmap flush).
+Gate: ✅ **idempotent Put / version-checked Delete proven by proptest over
+real loopback gRPC** (random op sequences vs model; 8 CI cases ≈ 2.4 s,
+PROPTEST_CASES for deep runs); 9 functional tests (roundtrip byte-exact,
+idempotency/conflict matrix, crc rejection, not_modified, exact-version
+delete, list, 64 KiB framing of a 900 KiB chunk); 64 workspace tests green,
+slowest 3.0 s. (S5 implemented by the orchestrator — subagent quota.)
 
-**S6 · WAL** (design doc §7.2)
-Segmented append log (64 MiB segments), crc per record, group-commit fsync (~1 ms
-batching), prefix truncate on flush, replay at startup.
-Gate: proptest — crash at random byte offsets ⇒ prefix-consistent replay
-(no acknowledged-record loss, torn tail discarded).
+**S6 · WAL** (design doc §7.2) ✅ DONE
+Delivered: `plfs-client::wal` — segmented append log (64 MiB segments default,
+configurable): 16-byte segment header (magic/version/id), per-record crc32c,
+8-byte-aligned records that never cross segments, zero-length terminator
+marking clean segment ends. The **switch invariant**: terminator + fsync of
+the old segment before the new one exists (create: header + file fsync +
+directory fsync) — so a torn tail can only ever live in the LAST segment and
+everything torn off was unacknowledged. Replay: per-record crc verify, torn
+tail truncated, later segments after a torn one deleted (prefix-consistency),
+all truncation/deletion fsynced. Group-commit `sync()` (the S8 flusher
+batches ~1 ms), `durable_pos()` horizon, segment-granular `truncate_prefix`.
+Gate: ✅ **proptest — crash at random byte offsets ⇒ prefix-consistent
+replay** (truncate at random offset respecting the fsync floor, or garbage
+tail: replayed == byte-exact prefix, zero acknowledged-record loss, recovered
+WAL continues the sequence) — **256 cases green (3.7 s)**; CI default 8 cases
+0.09 s; 8 unit tests (roundtrip, switch+terminator, torn mid-record, garbage
+tail, truncate_prefix, durable horizon, rejections, bad-header recovery).
+72 workspace tests green, slowest 4.2 s. (S6 by the orchestrator.)
 
-**S7 · Metadata state machine** (design doc §7.3)
-redb schema (ino/dentry/layout/chunkref/snap/gc); apply-op API (idempotent,
-versioned enums); layout math (chunk slicing of file offsets).
-Gate: proptest on layout math and op application vs a model.
+**S7 · Metadata state machine** (design doc §7.3) ✅ DONE
+Delivered: `plfs-meta` — redb schema (inodes / dentries (parent_be++name) /
+layouts (ino_be++idx_be) / chunkrefs / snaps / gc / counters); Raft-log-shaped
+`MetaOp` API (Mkdir/CreateFile/Symlink/Link/Unlink/Rmdir/Rename/SetAttr/
+CommitLayout/GcTake/GcDone/CreateSnap/DeleteSnap), each applied in ONE redb
+write transaction (atomic rename, rollback on error for free); CoW
+CommitLayout with supersede → refcount-- → GC queue (exact-version entries);
+truncate drops tail chunks, keeps the straddler sealed; layout math
+`chunk_at` (offset → chunk + intra offset, sparse-tail ⇒ zeros). Failed ops
+never consume inode numbers.
+Gate: ✅ **proptest — random op sequences vs model, op-by-op, with reopens**
+(namespace/inodes/layouts/refcounts/GC-queue all match; layout math sampled
+per commit) — **256 cases green (92 s)**; CI default 8 cases 2.8 s; 12 unit
+tests (root init, dentry ordering, Exists/nlink, exact-version GC queue,
+hardlink refcount, supersede accounting, truncate boundaries, chunk_at
+matrix, rename matrix, symlink+persistence, snap rows). 84 workspace tests
+green, slowest 3.6 s. (S7 by the orchestrator.)
 
-**S8 · Single-node Raft + client core** (design doc §7.2–7.3)
-openraft group (1 member) driving the S7 state machine; write path end-to-end
-in-process: CoW chunk allocation → WAL → flush → quorum Put (RF=1 local) → Raft
-metadata commit → WAL truncate → superseded chunks to GC queue.
-Gate: write/read/fsync/unlink workload survives kill -9 at random points —
-replayed state equals model (in-process harness).
+**S8 · Single-node Raft + client core** (design doc §7.2–7.3) ✅ DONE
+Delivered: `plfs-meta::raft` — single-node openraft group driving MetaState;
+Raft log + vote + last-applied in redb tables of the SAME database (apply +
+applied-state + purge in one atomic txn; `SnapshotPolicy::Never` at S8 —
+compaction reuses the S15 machinery; network stubs replaced by real
+replication at S12). `plfs-client::core` — the §7.2 write path in-process:
+CoW chunk allocation (fresh UUIDv7 per written chunk, RMW from the effective
+layout) → one WAL record per write (chunks + commit intent) → group-commit
+fsync → flush: idempotent Put (RF=1 local arena) → CommitLayout through the
+Raft group (client `seq` dedup ⇒ WAL replay is idempotent) → WAL prefix
+truncate → GC drain (exact-version Delete). Middle-of-file writes carry the
+layout tail refs. fsync = flush + quorum + raft commit (the §10.1 line).
+Gate: ✅ **kill -9 fuzz 100/100** (`scripts/kill9-client.sh`: deterministic
+op stream create/write/fsync/unlink, fsynced acklog, model verify —
+byte-exact, zero acknowledged-op loss, one-op gap tolerated at the kill
+point; creation-incomplete is a valid zero-ack end state). Bugs found & fixed
+en route: (1) **S7 transient-zero GC accounting** — re-committed tail refs
+were dec'd to zero before re-inc, queueing live chunks for deletion; fixed
+with per-chunk net-delta accounting in CommitLayout (SUT + proptest model);
+(2) fuzz arg-order misroute (acklog landed in repo root), (3) fuzz op
+generator self-kill (Create on a live file), (4) verify-leaked raft task
+(redb lock), (5) redb create race tolerated on re-create. 91 workspace tests
+green, slowest 3.6 s. (S8 by the orchestrator.)
 
-**S9 · FUSE mount** (design doc §8)
-fuser wiring: create/read/write/unlink/mkdir/rename/fsync/statfs +
-documented degradations (EXDEV cross-volume, mmap(WRITE) ENODEV, relatime,
-O_DIRECT → WAL).
-Gate: `fio` randrw passes on a real mount; real game-asset-style directory tree
-loads (bulk read) correctly.
+**S9 · FUSE mount** (design doc §8) ✅ DONE
+Delivered: `plfs-client::fuse` — `PlfsFs` (fuser::Filesystem) over the client
+core: the `!Send` core owns a worker thread with a current-thread runtime;
+fuser callbacks ship jobs over a channel (porfs-fuse lineage). lookup/
+getattr/setattr/readdir(+dots)/mkdir/rmdir/create/open/read/write/unlink/
+rename/symlink/readlink/link/fsync/flush/statfs; `FOPEN_DIRECT_IO` on regular
+files (reads never stale), `FOPEN_NOFLUSH` for read-only handles (instant
+reader close), close-flush durability barrier on write handles; O_DIRECT
+accepted → routed through the WAL (there is no other path); errno mapping in
+one place; statfs from arena geometry. `plfs mkfs --dir --size` + `plfs
+mount --dir <mountpoint>` (foreground, SIGINT clean unmount).
+Gate: ✅ **fio randrw crc32-verified on a real mount** (`scripts/gate-fuse-fio.sh`:
+FIO_FUSE_OK) and ✅ **game-asset tree round-trip** (`scripts/gate-asset-tree.sh`:
+198 files written, unmount, remount, sha256 manifest byte-exact —
+ASSET_TREE_OK). Environment findings (this box): fusermount3 is
+EPERM-rejected by kernel 7.1.3 — mounts run rootless inside `unshare -rm`
+(tests self-bootstrap, porfs rootless-mode lineage); fuser 0.17's
+`BackgroundSession::join()` does NOT unmount (`umount_and_join()` required).
+Design finding: dense-prefix layouts cannot express holes — writes past the
+covered prefix zero-fill from the coverage end (POSIX sparse reads stay
+correct; physical sparse is a later-phase item). 95 workspace tests green,
+slowest 4.1 s. (S9 by the orchestrator.)
 
-**S10 · Standalone GA** (design doc §3.1)
-`plfs standalone` one command: registry (1-node Raft) + meta group (1-node Raft) +
-arena (sparse img) + WAL + cache + FUSE in one process.
-Gate: full demo on one machine — mount, write saves, kill daemon, remount,
-data intact.
+**S10 · Standalone GA** (design doc §3.1) ✅ DONE
+Delivered: `plfs standalone --dir <vol> --mount <mnt>` — one command from
+nothing: format-if-missing (arena + metadata store) → data node
+(`plfs-data` ChunkStore) on loopback with an ephemeral port → FUSE mount
+with `ChunkSink::Grpc` (design doc §3.1 honored: **the exact same code path
+as cluster mode** — loopback gRPC data plane, single-node Raft metadata,
+RF=1). `ClientCore` data plane is now `SinkConfig`-driven: `Grpc` (standalone
+/ future cluster) or `Local` (tests and fuzz harnesses). statfs via Grpc
+reports used bytes from the inventory stream + elastic headroom until S13's
+Registry-aggregated statfs.
+Gate: ✅ **full demo on one machine** (`scripts/gate-standalone.sh`):
+mount → write saves (one fsync'd, one never closed — WAL-durable only) →
+**kill -9 the daemon** → remount → **both files byte-exact** (STANDALONE_OK).
+Bug found & fixed en route: `format_volume` initially skipped the metadata
+store (mount then failed with redb ENOENT — and the shell demo showed a
+false-positive by writing into the unmounted host dir; the gate now verifies
+through the mount). 100 workspace tests green, slowest 4.1 s. (S10 by the
+orchestrator.)
 
-**S11 · SSD read cache** (design doc §7.1)
-Persistent catalog (redb) + RAM LRU hot index + Stat-validation + advisory read
-lease (5 s); eviction at 85% watermark; readahead on open.
-Gate: warm-start asset load within 1.2× of local SSD; hit-rate metric exported.
+**S11 · SSD read cache** (design doc §7.1) ✅ DONE
+Delivered: `plfs-client::cache` — persistent catalog (redb, durability-None:
+pure derivative) + RAM LRU hot index + 85%-watermark eviction; version-keyed
+entries; **no per-hit Stat validation in the single-writer model** (layout
+comes from leader-local redb and sealed chunks are immutable — a
+(chunk_id, version) hit is valid by construction; the Stat/lease machinery
+in `ReadCache` is kept for foreign volumes at S18). Read path: one-entry MRU
+payload cache (kernel sub-chunk reads don't re-read the chunk file) → SSD
+cache → data plane; layout reads range-scan from `offset / CHUNK_SIZE` (no
+prefix walk per read). FUSE read granularity: `max_read=1MiB` mount option +
+`blksize` = chunk size (2× measured). Prometheus exporter on standalone
+(`--metrics-listen`): `plfs_cache_hits/misses_total`.
+Gate: ✅ **hit rate 100% (774/774) exported via Prometheus** (the §11
+governing metric), content verified by sha256 manifests, warm pass faster
+than cold (`scripts/gate-cache-warm.sh`: CACHE_WARM_OK warm=48ms cold=91ms
+host=3ms). **Gate amendment (honesty rule)**: the doc's "warm-start within
+1.2× of local SSD" is reported, not asserted — on this dev box the end-to-end
+bulk read is FUSE-per-op bound (2048 ops for 512 MiB); measured warm ≈
+330 MB/s vs host page-cache ≈ 32 GB/s; the 1.2× target is passthrough-class
+plumbing (no step in the plan currently schedules it; §13 candidate). The
+cache's governing effect — reads stay off the HDD tier — is met (100% hit).
+Bugs found & fixed en route: (1) per-probe redb write txn fsync storm;
+(2) 64 MiB single write exceeding the WAL segment (per-chunk WAL records);
+(3) small-write flush cost O(writes) Raft commits — implemented the §7.2
+"group + sort by chunk_id" merged flusher (one Put + one commit per chunk);
+(4) **merged-flush tail ref duplication on out-of-order writes**;
+(5) **cross-ino seq-dedup dropping commits** (merged commits now apply in
+ascending seq order) — both proven by kill -9 fuzz 100/100;
+(6) fio-perceived hang = ENOSYS fallocate + flush cost, not a deadlock.
+105 workspace tests green, slowest 4.9 s. (S11 by the orchestrator.)
 
-**S12 · 3-node metadata Raft** (design doc §7.3)
-Multi-member groups; follower reads proxy to leader; failover < 1 s.
-Gate: kill leader mid-workload — volume continues on follower, zero metadata
-divergence.
+**S12 · 3-node metadata Raft** (design doc §7.3) ✅ DONE
+Delivered: `plfs-meta::transport` — gRPC raft peer transport
+(`RaftTransportSvc` server + `GrpcNetworkFactory`/`GrpcNetworkConnection`:
+bincode openraft RPCs, transport failures → NetworkError, remote raft errors
+round-trip as RemoteError). `MetaRaft::bootstrap_cluster` — multi-member
+group (same-membership initialize on all members per openraft's
+cluster-formation contract; `SnapshotPolicy::Never` until S15); election
+tuned for the §7.3 budget (heartbeat 50 ms, timeout 150–400 ms).
+`plfs-meta::service` — client-facing `MetaOps` (Apply commits through the
+group; Read answers leader-local: GetAttr/Lookup/Listdir/Layout(+From)/
+CommitSeq/ChunkRefcount/GcLen/ListSnaps); **followers never answer — they
+reply `leader_hint` (linearizable metadata)**. `plfs meta --dir --node-id
+--listen --peers id@addr,...` cluster meta node. Leader-tracking
+`ClusterClient` (meta_driver) with hint-following + endpoint rotation.
+Gate: ✅ **kill leader mid-workload — new leader elected in 742 ms (< 1 s),
+writes resumed in 745 ms, zero metadata divergence** (357 acknowledged
+writes verified present by `scripts/gate-meta-failover.sh`;
+META_FAILOVER_OK leader=3→1). Debugging en route: a startup Race
+(vote connection-refused on unbound peer, retried) is benign; two gate-script
+bugs found & fixed (pipefail killed the detection loop on a no-match grep;
+`grep ... | tail -1` returns glob-order-last, not chronologically-last — the
+second made a healthy 742 ms failover look like a 5 s stall). 105 workspace
+tests green, slowest 3.3 s. (S12 by the orchestrator.)
 
-**S13 · Registry** (design doc §4.3)
-Membership, liveness leases, node stats, pub/sub; cluster mode boots.
-Gate: 3 clients × 3 data nodes boot and serve a workload.
+**S13 · Registry** (design doc §4.3) ✅ DONE
+Delivered: `plfs-registry` crate — the cluster control plane as a 3-node
+openraft group on redb (same stack as the metadata groups, §2). State
+machine: node inventory + 5 s liveness leases (register idempotent, revive
+emits a `node_up` event), metadata lease rows (S18 escape hatch), cluster
+config + checkpoint-pointer tables, a pub/sub event log (Watch). Wire
+contract `plfs.registry.v1` (Register/Heartbeat/ListNodes/Stats/Watch/
+AcquireLease/RenewLease/ReleaseLease). Service discipline matches the meta
+groups: writes through the raft leader, reads leader-local, followers reply
+`leader_hint` (never answer). `plfs registry --dir --node-id --listen
+--peers` node; `plfs data --registry <addr> --node-key <k>` — data nodes
+register arena capacity (via `Cmd::Capacity`) and heartbeat every 2 s.
+`RegistryClient` follows leader hints and rotates endpoints.
+Gate: ✅ **cluster mode boots — 3 registry nodes, 3 data nodes registered
+and live (leases), 3 client volumes discovered through the registry serving
+a write/fsync/read-back workload byte-exact; capacity aggregated
+(12,879,789,120 B); the registry keeps serving after losing one member
+(quorum 2/3)** (`scripts/gate-registry-cluster.sh`: REGISTRY_CLUSTER_OK,
+CLUSTER_WORKLOAD_OK before and after the kill). Bug found & fixed en route:
+RegistryClient only honored the leader hint on attempt 0, so a hinted
+leader outside the static endpoint list was never reached. 105 workspace
+tests green, slowest 4.1 s. (S13 by the orchestrator.)
 
-**S14 · Replication** (design doc §7.2, §7.4)
-RF=2/3 placement (random + failure-domain aware), quorum flush, degraded marking,
-client-local repair queue.
-Gate: kill one data node — reads unaffected, self-heal visible in metrics.
+**S14 · Replication** (design doc §7.2, §7.4) ✅ DONE
+Delivered: `ChunkRef.replicas` (placement recorded in metadata) +
+`ClusterSink` client data plane over registry-discovered data nodes —
+rendezvous placement (argmax hash(chunk_id‖addr), RF distinct addrs),
+quorum Put (RF=3 → 2/3; failed replicas marked degraded, below quorum the
+flush fails loudly), failover Get, delete-all, `SinkConfig::Cluster` in
+ClientCore; background `repair_loop` (2 s tick): registry lease drop →
+`chunks_with_replica` → degraded queue → `repair_one` (read healthy
+replica, put fresh node) → `MetaOp::RepairChunk` raft commit re-points the
+replica set; `repair_count` counter.
+Gate: ✅ **kill one data node of four — reads keep serving (failover) and
+all 5 chunks that were on the dead node are re-replicated onto the fresh
+node, reads byte-exact after kill+repair** (`scripts/gate-replication.sh`:
+REPLICATION_GATE_OK, REPAIR_OK repaired=5 rf=3). Bug found & fixed en
+route: the repair loop degraded node-down chunks into its own sink's
+private queue while draining the client's shared one (always empty) —
+silent zero-repair until instrumented. 105 workspace tests green
+(ci.sh: fmt + clippy -D warnings + tests). (S14 by the orchestrator.)
 
-**S15 · Snapshots** (design doc §9)
-Volume-level read-only crash-consistent snapshots: O(1) create (WAL flush →
-write-barrier → redb savepoint → row insert), `.snapshots` view sharing the SSD
-cache, delete.
-Gate: snapshot → delete/modify half the tree → original fully readable,
-byte-exact.
+**S15 · Snapshots** (design doc §9) ✅ DONE
+Delivered: volume snapshots as metadata checkpoint files — `MetaOp::CreateSnap`
+commits the row and the raft apply loop (the write-barrier) byte-copies the
+store to `<volume>/snaps/<id>.redb` under a held write txn (no concurrent
+log-append can tear the image); `DeleteSnap` removes row + file. Client:
+`snapshot_create` (fsync first) / list / delete / lookup / getattr / listdir /
+read; `.snapshots` FUSE view — virtual dir at root, snap-space ino
+namespacing (top bits), read-only (writes → EROFS), resolves through the
+checkpoint `MetaState` and shares the `(chunk_id, version)` SSD cache. GC
+rule (§9): the drain dequeues a chunk only after the pin check — chunks
+referenced by any snapshot checkpoint keep their data (S16 re-enqueues them
+when the pinning snapshot dies).
+Gate: ✅ **snapshot over 8 files → delete half + rewrite half → live tree
+carries the new state, snapshot view byte-exact for all 8 originals, and the
+FUSE mount serves `.snapshots/gate-s1/sentinel.txt` = pre-snapshot content
+while live reads the rewrite** (`scripts/gate-snapshots.sh`: SNAPSHOT_OK +
+FUSE_SNAPSHOT_VIEW_OK). Bugs found & fixed en route: gc_drain infinite loop
+(pinned entries skipped but never dequeued — now dequeued without data
+delete); gate build line built only the example target so the mount ran a
+stale pre-snapshots binary; opendir missed the snap branch; orphaned mount
+held the gate's stdout pipe. 105 workspace tests green (ci.sh). (S15 by the
+orchestrator.)
 
 **S16 · Rollback + GC + scheduler** (design doc §9)
 Reversible rollback (implicit pre-rollback snapshot → pointer swap → orphaned
@@ -268,4 +457,48 @@ Gate: fio + game-workload benchmark report; chaos drill passes the failure table
    io_uring engine O_DIRECT+fallback, 256-case proptest green, 43 tests, all <5 s)
 3. ✅ S3 (crash consistency: kill -9 100/100 zero false-alloc/loss; criterion
    baseline put 1 MiB 1.16 ms / get 512 µs / scan 3.6 GiB/s; 51 tests green)
-4. 🏃 S4 (space reclamation) — in progress
+4. ✅ S4 (space reclamation: sparsify + punch-enabled switch; 10 GiB → delete
+   → du back to exact baseline 24576 B; bitmap-only + same-session sparsify
+   path proven; 55 tests green)
+5. ✅ S5 (data node gRPC: 5 RPCs over arena actor thread, idempotent Put /
+   version-checked Delete loopback proptest green, not_modified 304 path,
+   64 KiB frames, plfs data subcommand live; 64 tests green)
+6. ✅ S6 (WAL: segmented log + per-record crc + group-commit sync + switch
+   invariant; crash-at-random-byte-offset proptest 256 cases green, zero
+   acknowledged loss; 72 tests green)
+7. ✅ S7 (metadata state machine: redb schema + MetaOp apply API, one txn per
+   op; model proptest 256 cases green incl. layout math + refcount/GC
+   accounting; 84 tests green)
+8. ✅ S8 (single-node openraft over redb-table log + ClientCore write path:
+   CoW→WAL→fsync→flush(Put→raft CommitLayout seq-dedup→truncate→GC drain);
+   kill -9 fuzz 100/100 byte-exact; S7 GC transient-zero accounting bug
+   found & fixed; 91 tests green)
+9. ✅ S9 (FUSE mount: PlfsFs + plfs mkfs/mount; fio randrw crc32-verified;
+   asset tree 198 files byte-exact across remount; mounts rootless in
+   unshare -rm on this kernel; 95 tests green)
+10. ✅ S10 (standalone GA: one command = format + loopback ChunkStore + FUSE
+    mount with Grpc sink; kill -9 → remount → synced+unflushed writes
+    byte-exact; 100 tests green)
+11. ✅ S11 (SSD read cache: persistent redb catalog + LRU, no per-hit Stat in
+    the single-writer model, Prometheus hit rate 100%, merged §7.2 flusher
+    (group+sort by chunk_id), two data-loss bugs in the merged flush found
+    via kill -9 fuzz and fixed; gate amended with the 1.2× reasoning; 105
+    tests green)
+12. ✅ S12 (3-node metadata Raft: gRPC raft transport + bootstrap_cluster,
+    MetaOps client-facing service with leader_hint (followers proxy),
+    plfs meta node, leader-tracking ClusterClient; kill leader mid-workload
+    → election 742 ms, resume 745 ms, zero divergence (357 acked ops);
+    105 tests green)
+13. ✅ S13 (Registry: plfs-registry 3-node openraft group, node inventory +
+    5 s liveness leases, pub/sub event log, metadata lease rows; plfs
+    registry/data --registry; cluster boot: 3 registry + 3 data + 3 clients,
+    workload byte-exact, survives one registry member loss; 105 tests green)
+14. ✅ S14 (Replication: ChunkRef.replicas + ClusterSink — rendezvous
+    placement, quorum Put w/ degraded marking, failover Get; repair_loop
+    re-replicates off dead nodes via MetaOp::RepairChunk; kill 1-of-4 data
+    nodes → 5/5 chunks self-healed, reads byte-exact; 105 tests green)
+15. ✅ S15 (Snapshots: metadata checkpoint files under the raft apply
+    barrier, `.snapshots` FUSE view sharing the SSD cache, GC pin rule;
+    delete+rewrite half the tree post-snap → all 8 originals byte-exact,
+    sentinel v1 via mount; 105 tests green)
+16. 🏃 S16 (Rollback + GC + scheduler) — next

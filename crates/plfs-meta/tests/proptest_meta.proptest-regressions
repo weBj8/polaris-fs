@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6762f627e0b607bf5381cdf68138bcc0dd3587e507a306196e2f01390bfc1407 # shrinks to ops = [Rename { sn: 0, dp: 5, dn: 1 }, CommitLayout { ino: 7, first_idx: 3, chunks: [(7, 3, 149)], new_size: 959 }, Reopen, CommitLayout { ino: 9, first_idx: 0, chunks: [(8, 2, 507), (3, 1, 316)], new_size: 2709 }, CommitLayout { ino: 1, first_idx: 3, chunks: [(9, 1, 218), (8, 2, 498)], new_size: 1022 }, GcDrain, Rmdir { name: 3 }, Create { name: 0 }, Create { name: 1 }, CommitLayout { ino: 8, first_idx: 2, chunks: [(5, 1, 186)], new_size: 3801 }, Mkdir { name: 3 }, Truncate { ino: 0, size: 1540 }, Unlink { parent: 3, name: 2 }, CommitLayout { ino: 12, first_idx: 3, chunks: [(7, 2, 443), (6, 1, 479), (8, 1, 376)], new_size: 729 }, Unlink { parent: 0, name: 1 }, Rename { sn: 2, dp: 6, dn: 3 }, GcDrain, Unlink { parent: 1, name: 0 }, Reopen, Rename { sn: 1, dp: 5, dn: 2 }]

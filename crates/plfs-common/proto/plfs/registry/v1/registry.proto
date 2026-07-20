@@ -1,0 +1,74 @@
+syntax = "proto3";
+package plfs.registry.v1;
+
+// The Registry (design doc §4.3): cluster control plane. 3-node openraft
+// group (single-node in standalone); node inventory + liveness leases,
+// cluster config, checkpoint pointers, pub/sub, metadata lease issuer.
+// NO file metadata lives here — registry loss pauses membership changes only.
+
+service Registry {
+  // A node announces itself (kind/addr/capacity). Idempotent re-register.
+  rpc Register(RegisterRequest) returns (RegisterReply);
+  // Liveness lease renewal; returns the granted lease deadline.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
+  // Current inventory (optionally filtered by kind).
+  rpc ListNodes(ListNodesRequest) returns (ListNodesReply);
+  // Aggregated capacity (statfs backend, design doc §8.1).
+  rpc Stats(StatsRequest) returns (StatsReply);
+  // Pub/sub: node up/down and volume-leader change events (S18).
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+  // Metadata lease escape hatch for cross-client writes (S18).
+  rpc AcquireLease(AcquireLeaseRequest) returns (AcquireLeaseReply);
+  rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseReply);
+  rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseReply);
+}
+
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_DATA = 1;      // ChunkArena host (capacity unit)
+  NODE_KIND_META = 2;      // metadata raft group member
+  NODE_KIND_CLIENT = 3;    // FUSE client (volume owner)
+  NODE_KIND_REGISTRY = 4;
+}
+
+message NodeInfo {
+  string node_key = 1;         // caller-chosen unique key (e.g. "data-0")
+  NodeKind kind = 2;
+  string addr = 3;             // host:port of its service endpoint
+  string volume = 4;           // meta/client: owned volume name
+  uint64 capacity_bytes = 5;   // data: total payload capacity
+  uint64 used_bytes = 6;       // data: used payload bytes
+  int64 last_seen = 7;         // registry-side last heartbeat (unix s)
+  int64 lease_until = 8;       // liveness lease deadline (unix s)
+}
+
+message RegisterRequest { NodeInfo node = 1; }
+message RegisterReply { int64 lease_until = 1; }
+
+message HeartbeatRequest { string node_key = 1; uint64 used_bytes = 2; }
+message HeartbeatReply { int64 lease_until = 1; }
+
+message ListNodesRequest { NodeKind kind = 1; }  // UNSPECIFIED = all
+message ListNodesReply { repeated NodeInfo nodes = 1; }
+
+message StatsRequest {}
+message StatsReply {
+  uint64 capacity_bytes = 1;
+  uint64 used_bytes = 2;
+  uint64 live_data_nodes = 3;
+}
+
+message WatchRequest { uint64 since_seq = 1; }
+message WatchEvent {
+  uint64 seq = 1;
+  string node_key = 2;
+  string kind = 3;     // "node_up" | "node_down" | "leader"
+  string detail = 4;
+}
+
+message AcquireLeaseRequest { string volume = 1; string holder = 2; }
+message AcquireLeaseReply { bool granted = 1; int64 lease_until = 2; string holder = 3; }
+message RenewLeaseRequest { string volume = 1; string holder = 2; }
+message RenewLeaseReply { bool granted = 1; int64 lease_until = 2; }
+message ReleaseLeaseRequest { string volume = 1; string holder = 2; }
+message ReleaseLeaseReply {}
