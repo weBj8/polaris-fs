@@ -38,7 +38,7 @@ async fn connect(addr: &str) -> Result<ChunkStoreClient<Channel>, ClientError> {
         .map_err(grpc_err)
 }
 
-async fn put_one(
+pub(crate) async fn put_one(
     addr: &str,
     chunk_id: [u8; 16],
     version: u64,
@@ -75,7 +75,11 @@ async fn get_one(addr: &str, chunk_id: [u8; 16]) -> Result<(u64, Vec<u8>), Clien
     Ok((version, data))
 }
 
-async fn delete_one(addr: &str, chunk_id: [u8; 16], version: u64) -> Result<(), ClientError> {
+pub(crate) async fn delete_one(
+    addr: &str,
+    chunk_id: [u8; 16],
+    version: u64,
+) -> Result<(), ClientError> {
     let mut client = connect(addr).await?;
     client
         .delete(pb::DeleteRequest {
@@ -85,6 +89,55 @@ async fn delete_one(addr: &str, chunk_id: [u8; 16], version: u64) -> Result<(), 
         .await
         .map_err(grpc_err)?;
     Ok(())
+}
+
+/// Single-replica Stat (scrub needs per-replica answers, not failover).
+pub(crate) async fn stat_one(
+    addr: &str,
+    chunk_id: [u8; 16],
+) -> Result<Option<(u64, u64, u32)>, ClientError> {
+    let mut client = connect(addr).await?;
+    match client
+        .stat(pb::StatRequest {
+            chunk_id: chunk_id.to_vec(),
+        })
+        .await
+    {
+        Ok(reply) => {
+            let r = reply.into_inner();
+            Ok(Some((r.version, r.len, r.crc32c)))
+        }
+        Err(s) if s.code() == tonic::Code::NotFound => Ok(None),
+        Err(s) => Err(grpc_err(s)),
+    }
+}
+
+/// Arena inventory of one node (scrub's orphan sweep, §10.3).
+pub(crate) async fn list_chunks(addr: &str) -> Result<Vec<([u8; 16], u64)>, ClientError> {
+    let mut client = connect(addr).await?;
+    let mut stream = client
+        .list(pb::ListRequest {})
+        .await
+        .map_err(grpc_err)?
+        .into_inner();
+    let mut out = Vec::new();
+    while let Some(item) = stream.message().await.map_err(grpc_err)? {
+        let id: [u8; 16] = item
+            .chunk_id
+            .try_into()
+            .map_err(|_| ClientError::Codec("bad chunk id in List".into()))?;
+        out.push((id, item.version));
+    }
+    Ok(out)
+}
+
+/// Repair-worker pacing (§7.4): 30 MB/s per disk by default.
+pub(crate) const REPAIR_RATE: u64 = 30 * 1024 * 1024;
+
+pub(crate) async fn throttle(len: u64, rate: u64) {
+    if rate > 0 && len > 0 {
+        tokio::time::sleep(std::time::Duration::from_secs_f64(len as f64 / rate as f64)).await;
+    }
 }
 
 /// The replication data plane.
@@ -281,18 +334,20 @@ impl ClusterSink {
     }
 
     /// Re-replicate one degraded chunk: read a healthy replica, put to a
-    /// fresh live node, return the new replica set (dead addr swapped).
+    /// fresh live node, return the new replica set (dead addr swapped) and
+    /// the payload length (repair pacing).
     pub async fn repair_one(
         &mut self,
         entry: &DegradedChunk,
         replicas: &[String],
-    ) -> Result<Vec<String>, ClientError> {
+    ) -> Result<(Vec<String>, u64), ClientError> {
         let healthy: Vec<String> = replicas
             .iter()
             .filter(|a| **a != entry.dead_addr)
             .cloned()
             .collect();
         let (_, payload) = self.get(entry.chunk_id, &healthy).await?;
+        let len = payload.len() as u64;
         let fresh = self
             .live
             .iter()
@@ -300,7 +355,10 @@ impl ClusterSink {
             .cloned()
             .ok_or_else(|| ClientError::Codec("no fresh node for repair".into()))?;
         put_one(&fresh, entry.chunk_id, entry.version, payload).await?;
-        Ok(healthy.into_iter().chain(std::iter::once(fresh)).collect())
+        Ok((
+            healthy.into_iter().chain(std::iter::once(fresh)).collect(),
+            len,
+        ))
     }
 }
 
@@ -358,7 +416,7 @@ pub async fn repair_loop(
                 .map(|c| c.replicas)
                 .unwrap_or_default();
             match sink.repair_one(&entry, &replicas).await {
-                Ok(new_replicas) => {
+                Ok((new_replicas, len)) => {
                     let op = plfs_meta::MetaOp::RepairChunk {
                         chunk_id: entry.chunk_id,
                         version: entry.version,
@@ -368,6 +426,7 @@ pub async fn repair_loop(
                         Ok(_) => {
                             tracing::info!("repair: re-replicated chunk onto fresh node");
                             counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            throttle(len, REPAIR_RATE).await;
                         }
                         Err(e) => {
                             tracing::warn!("repair: RepairChunk commit failed: {e}");

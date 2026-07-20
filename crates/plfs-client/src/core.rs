@@ -383,6 +383,15 @@ impl ClientCore {
                     repair_raft,
                     repair_counter,
                 ));
+                let scrub_interval = std::env::var("PLFS_SCRUB_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(7 * 24 * 3600);
+                tokio::spawn(crate::scrub::scrub_loop(
+                    registry.clone(),
+                    state.clone(),
+                    scrub_interval,
+                ));
                 ChunkSink::Cluster(Box::new(c))
             }
         };
@@ -956,6 +965,16 @@ impl ClientCore {
     /// Chunks re-replicated by the background repair worker (§7.4).
     pub fn repair_count(&self) -> u64 {
         self.repair_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Run one scrub pass over the cluster data plane (§10.3); `rate`
+    /// paces I/O in bytes/sec (0 = unthrottled). Non-cluster sinks hold a
+    /// single copy — nothing to compare — so this is a no-op there.
+    pub async fn scrub(&mut self, rate: u64) -> Result<crate::scrub::ScrubStats, ClientError> {
+        match &mut self.sink {
+            ChunkSink::Cluster(c) => crate::scrub::scrub_once(c, &self.state, rate).await,
+            _ => Ok(crate::scrub::ScrubStats::default()),
+        }
     }
 
     /// Stop the raft core (before dropping, so the redb handle is freed).

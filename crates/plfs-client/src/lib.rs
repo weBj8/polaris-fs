@@ -6,4 +6,5 @@ pub mod cluster;
 pub mod core;
 pub mod fuse;
 pub mod scheduler;
+pub mod scrub;
 pub mod wal;

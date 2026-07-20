@@ -431,12 +431,22 @@ drive_writes_then_reads_back test assumed in-order io_uring completions
 (latent flake exposed by CI parallelism) — now places by index. 105
 workspace tests green (ci.sh). (S16 by the orchestrator.)
 
-**S17 · Re-replication & scrubber** (design doc §7.4, §10.3)
-Background repair workers (rate-limited 30 MB/s/disk); weekly List-driven scrub
-with crc verify + orphan sweep (arena inventory vs reachable metadata —
-quorum-Put-then-failed-commit orphans).
-Gate: inject bit rot (flip bytes in a slot) → detected → repaired from healthy
-replica.
+**S17 · Re-replication & scrubber** (design doc §7.4, §10.3) ✅ DONE
+Delivered: repair pacing — the repair worker throttles to 30 MB/s
+(`REPAIR_RATE`); `scrub_once` walks the reachable chunk set (live layouts +
+every snapshot checkpoint), Stats every replica and re-reads each payload
+to recompute its crc against the slot header, repairs rotten/missing
+replicas from a healthy copy (never propagates rot — a chunk with no
+healthy copy fails loudly), and sweeps orphans (List per live node vs the
+reachable set ∪ GC queue — the quorum-Put-then-failed-commit leak from the
+review). `ClientCore::scrub(rate)` + a periodic `scrub_loop` spawned in
+boot (`PLFS_SCRUB_INTERVAL_SECS`, default weekly).
+Gate: ✅ **4 payload bytes flipped inside one replica's slot → the scrub
+detects the crc mismatch, repairs the replica from a healthy copy (reads
+stay byte-exact, second pass clean), and a chunk written straight to a
+data node with no metadata reference is swept** (`scripts/gate-scrub.sh`:
+SCRUB_OK repaired=1 orphans=1). 105 workspace tests green (ci.sh). (S17 by
+the orchestrator.)
 
 **S18 · Cross-client sync** (design doc §4.3, §8.2)
 Pub/sub merge of foreign volumes; writer fencing (volume writer_epoch + txid
@@ -626,4 +636,8 @@ S20 = production candidate.
     DB restore), rollback byte-exact + reversible via implicit pre-rollback
     snapshot; snapshot delete re-enqueues exclusive chunks — du 37.2 MB →
     3.7 MB; snapshots.toml retention keeps 3/3; 105 tests green)
-17. 🏃 S17 (Re-replication & scrubber) — next
+17. ✅ S17 (Re-replication & scrubber: repair throttled 30 MB/s;
+    per-replica crc scrub over live+snapshot chunks, rot repaired from a
+    healthy copy, orphan sweep vs reachable set; bit-rot injected →
+    repaired=1 orphans=1, second pass clean; 105 tests green)
+18. 🏃 S18 (Cross-client sync) — next

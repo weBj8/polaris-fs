@@ -1030,6 +1030,18 @@ impl MetaState {
         Ok(out)
     }
 
+    /// Chunk ids currently queued for GC (orphan-sweep exclusion).
+    pub fn gc_chunk_ids(&self) -> Result<std::collections::HashSet<[u8; 16]>, MetaError> {
+        let txn = self.db.begin_read().map_err(storage)?;
+        let gc = txn.open_table(GC).map_err(storage)?;
+        let mut out = std::collections::HashSet::new();
+        for row in gc.iter().map_err(storage)? {
+            let (_, v) = row.map_err(storage)?;
+            out.insert(dec::<GcEntry>(v.value())?.chunk_id);
+        }
+        Ok(out)
+    }
+
     /// Last applied write-path commit sequence (idempotent re-commit
     /// horizon for WAL replay).
     pub fn commit_seq(&self) -> Result<u64, MetaError> {
