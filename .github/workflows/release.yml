@@ -79,6 +79,8 @@ jobs:
             cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build all daemons
+        env:
+          RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
         run: ./build-all.sh
 
       - name: Smoke-test executables
