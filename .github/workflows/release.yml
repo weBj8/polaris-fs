@@ -24,7 +24,40 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libfuse3-dev zlib1g-dev libpcap-dev
+          sudo apt-get install --yes zlib1g-dev libpcap-dev meson ninja-build pkg-config curl
+
+      # ubuntu-24.04 ships libfuse 3.14, but the transpiled mfsmount uses
+      # fuse_session_new_versioned (libfuse >= 3.17). Build 3.18 from source.
+      - name: Cache libfuse 3.18
+        id: cache-fuse
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/fuse318-installed
+          key: libfuse-3.18.2-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build libfuse 3.18
+        if: steps.cache-fuse.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/libfuse/libfuse/releases/download/fuse-3.18.2/fuse-3.18.2.tar.gz | tar xz -C /tmp
+          cd /tmp/fuse-3.18.2
+          meson setup build -Dexamples=false -Dtests=false -Dutils=false
+          ninja -C build
+          sudo ninja -C build install
+          mkdir -p /tmp/fuse318-installed
+
+      - name: Restore libfuse 3.18
+        if: steps.cache-fuse.outputs.cache-hit == 'true'
+        run: |
+          sudo tar xf /tmp/fuse318-installed/install.tar -C /
+          sudo ldconfig
+
+      - name: Save libfuse 3.18
+        if: steps.cache-fuse.outputs.cache-hit != 'true'
+        run: |
+          sudo tar cf /tmp/fuse318-installed/install.tar \
+            -C / usr/local/lib usr/local/include
+          sudo ldconfig
 
       - name: Install Rust (nightly for c_variadic/extern_types-era features)
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
