@@ -1,11 +1,14 @@
-extern "C" {
-    fn gettimeofday(__tv: *mut timeval, __tz: *mut ::core::ffi::c_void) -> ::core::ffi::c_int;
-    fn setitimer(
+unsafe extern "C" {
+    unsafe fn gettimeofday(
+        __tv: *mut timeval,
+        __tz: *mut ::core::ffi::c_void,
+    ) -> ::core::ffi::c_int;
+    unsafe fn setitimer(
         __which: __itimer_which_t,
         __new: *const itimerval,
         __old: *mut itimerval,
     ) -> ::core::ffi::c_int;
-    fn getrusage(__who: __rusage_who_t, __usage: *mut rusage) -> ::core::ffi::c_int;
+    unsafe fn getrusage(__who: __rusage_who_t, __usage: *mut rusage) -> ::core::ffi::c_int;
 }
 pub type __time_t = ::core::ffi::c_long;
 pub type __suseconds_t = ::core::ffi::c_long;
@@ -155,239 +158,244 @@ static mut addsec: uint32_t = 0;
 static mut lastautime: uint64_t = 0;
 static mut lastastime: uint64_t = 0;
 static mut lastget: uint64_t = 0;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn cpu_init() {
-    let mut rc: itimerval = itimerval {
-        it_interval: timeval {
+    unsafe {
+        let mut rc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut uc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut pc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut rus: rusage = rusage {
+            ru_utime: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            ru_stime: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            c2rust_unnamed: C2Rust_Unnamed_12 { ru_maxrss: 0 },
+            c2rust_unnamed_0: C2Rust_Unnamed_11 { ru_ixrss: 0 },
+            c2rust_unnamed_1: C2Rust_Unnamed_10 { ru_idrss: 0 },
+            c2rust_unnamed_2: C2Rust_Unnamed_9 { ru_isrss: 0 },
+            c2rust_unnamed_3: C2Rust_Unnamed_8 { ru_minflt: 0 },
+            c2rust_unnamed_4: C2Rust_Unnamed_7 { ru_majflt: 0 },
+            c2rust_unnamed_5: C2Rust_Unnamed_6 { ru_nswap: 0 },
+            c2rust_unnamed_6: C2Rust_Unnamed_5 { ru_inblock: 0 },
+            c2rust_unnamed_7: C2Rust_Unnamed_4 { ru_oublock: 0 },
+            c2rust_unnamed_8: C2Rust_Unnamed_3 { ru_msgsnd: 0 },
+            c2rust_unnamed_9: C2Rust_Unnamed_2 { ru_msgrcv: 0 },
+            c2rust_unnamed_10: C2Rust_Unnamed_1 { ru_nsignals: 0 },
+            c2rust_unnamed_11: C2Rust_Unnamed_0 { ru_nvcsw: 0 },
+            c2rust_unnamed_12: C2Rust_Unnamed { ru_nivcsw: 0 },
+        };
+        let mut tod: timeval = timeval {
             tv_sec: 0,
             tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut uc: itimerval = itimerval {
-        it_interval: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut pc: itimerval = itimerval {
-        it_interval: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut rus: rusage = rusage {
-        ru_utime: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        ru_stime: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        c2rust_unnamed: C2Rust_Unnamed_12 { ru_maxrss: 0 },
-        c2rust_unnamed_0: C2Rust_Unnamed_11 { ru_ixrss: 0 },
-        c2rust_unnamed_1: C2Rust_Unnamed_10 { ru_idrss: 0 },
-        c2rust_unnamed_2: C2Rust_Unnamed_9 { ru_isrss: 0 },
-        c2rust_unnamed_3: C2Rust_Unnamed_8 { ru_minflt: 0 },
-        c2rust_unnamed_4: C2Rust_Unnamed_7 { ru_majflt: 0 },
-        c2rust_unnamed_5: C2Rust_Unnamed_6 { ru_nswap: 0 },
-        c2rust_unnamed_6: C2Rust_Unnamed_5 { ru_inblock: 0 },
-        c2rust_unnamed_7: C2Rust_Unnamed_4 { ru_oublock: 0 },
-        c2rust_unnamed_8: C2Rust_Unnamed_3 { ru_msgsnd: 0 },
-        c2rust_unnamed_9: C2Rust_Unnamed_2 { ru_msgrcv: 0 },
-        c2rust_unnamed_10: C2Rust_Unnamed_1 { ru_nsignals: 0 },
-        c2rust_unnamed_11: C2Rust_Unnamed_0 { ru_nvcsw: 0 },
-        c2rust_unnamed_12: C2Rust_Unnamed { ru_nivcsw: 0 },
-    };
-    let mut tod: timeval = timeval {
-        tv_sec: 0,
-        tv_usec: 0,
-    };
-    gettimeofday(&raw mut tod, NULL);
-    lastget = tod.tv_sec as uint64_t;
-    lastget =
-        (lastget as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
-    lastget = lastget.wrapping_add(tod.tv_usec as uint64_t);
-    addsec = 0 as uint32_t;
-    addusec = 0 as uint32_t;
-    it_set.it_interval.tv_sec = 0 as __time_t;
-    it_set.it_interval.tv_usec = 0 as __suseconds_t;
-    it_set.it_value.tv_sec = MAXITIMER as __time_t;
-    it_set.it_value.tv_usec = 999999 as __suseconds_t;
-    setitimer(ITIMER_REAL, &raw mut it_set, &raw mut rc);
-    setitimer(ITIMER_VIRTUAL, &raw mut it_set, &raw mut uc);
-    setitimer(ITIMER_PROF, &raw mut it_set, &raw mut pc);
-    getrusage(RUSAGE_SELF, &raw mut rus);
-    lastautime = rus.ru_utime.tv_sec as uint64_t;
-    lastautime = (lastautime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
-        as uint64_t;
-    lastautime = lastautime.wrapping_add(rus.ru_utime.tv_usec as uint64_t);
-    lastastime = rus.ru_stime.tv_sec as uint64_t;
-    lastastime = (lastastime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
-        as uint64_t;
-    lastastime = lastastime.wrapping_add(rus.ru_stime.tv_usec as uint64_t);
+        };
+        gettimeofday(&raw mut tod, NULL);
+        lastget = tod.tv_sec as uint64_t;
+        lastget = (lastget as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+            as uint64_t;
+        lastget = lastget.wrapping_add(tod.tv_usec as uint64_t);
+        addsec = 0 as uint32_t;
+        addusec = 0 as uint32_t;
+        it_set.it_interval.tv_sec = 0 as __time_t;
+        it_set.it_interval.tv_usec = 0 as __suseconds_t;
+        it_set.it_value.tv_sec = MAXITIMER as __time_t;
+        it_set.it_value.tv_usec = 999999 as __suseconds_t;
+        setitimer(ITIMER_REAL, &raw mut it_set, &raw mut rc);
+        setitimer(ITIMER_VIRTUAL, &raw mut it_set, &raw mut uc);
+        setitimer(ITIMER_PROF, &raw mut it_set, &raw mut pc);
+        getrusage(RUSAGE_SELF, &raw mut rus);
+        lastautime = rus.ru_utime.tv_sec as uint64_t;
+        lastautime = (lastautime as ::core::ffi::c_ulong)
+            .wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
+        lastautime = lastautime.wrapping_add(rus.ru_utime.tv_usec as uint64_t);
+        lastastime = rus.ru_stime.tv_sec as uint64_t;
+        lastastime = (lastastime as ::core::ffi::c_ulong)
+            .wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
+        lastastime = lastastime.wrapping_add(rus.ru_stime.tv_usec as uint64_t);
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn cpu_used(mut scpu: *mut uint64_t, mut ucpu: *mut uint64_t) {
-    let mut rc: itimerval = itimerval {
-        it_interval: timeval {
+    unsafe {
+        let mut rc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut uc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut pc: itimerval = itimerval {
+            it_interval: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            it_value: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+        };
+        let mut ucusec: uint64_t = 0;
+        let mut pcusec: uint64_t = 0;
+        let mut rus: rusage = rusage {
+            ru_utime: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            ru_stime: timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            c2rust_unnamed: C2Rust_Unnamed_12 { ru_maxrss: 0 },
+            c2rust_unnamed_0: C2Rust_Unnamed_11 { ru_ixrss: 0 },
+            c2rust_unnamed_1: C2Rust_Unnamed_10 { ru_idrss: 0 },
+            c2rust_unnamed_2: C2Rust_Unnamed_9 { ru_isrss: 0 },
+            c2rust_unnamed_3: C2Rust_Unnamed_8 { ru_minflt: 0 },
+            c2rust_unnamed_4: C2Rust_Unnamed_7 { ru_majflt: 0 },
+            c2rust_unnamed_5: C2Rust_Unnamed_6 { ru_nswap: 0 },
+            c2rust_unnamed_6: C2Rust_Unnamed_5 { ru_inblock: 0 },
+            c2rust_unnamed_7: C2Rust_Unnamed_4 { ru_oublock: 0 },
+            c2rust_unnamed_8: C2Rust_Unnamed_3 { ru_msgsnd: 0 },
+            c2rust_unnamed_9: C2Rust_Unnamed_2 { ru_msgrcv: 0 },
+            c2rust_unnamed_10: C2Rust_Unnamed_1 { ru_nsignals: 0 },
+            c2rust_unnamed_11: C2Rust_Unnamed_0 { ru_nvcsw: 0 },
+            c2rust_unnamed_12: C2Rust_Unnamed { ru_nivcsw: 0 },
+        };
+        let mut autime: uint64_t = 0;
+        let mut astime: uint64_t = 0;
+        let mut rdiff: uint64_t = 0;
+        let mut now: uint64_t = 0;
+        let mut tod: timeval = timeval {
             tv_sec: 0,
             tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut uc: itimerval = itimerval {
-        it_interval: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut pc: itimerval = itimerval {
-        it_interval: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        it_value: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-    };
-    let mut ucusec: uint64_t = 0;
-    let mut pcusec: uint64_t = 0;
-    let mut rus: rusage = rusage {
-        ru_utime: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        ru_stime: timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        c2rust_unnamed: C2Rust_Unnamed_12 { ru_maxrss: 0 },
-        c2rust_unnamed_0: C2Rust_Unnamed_11 { ru_ixrss: 0 },
-        c2rust_unnamed_1: C2Rust_Unnamed_10 { ru_idrss: 0 },
-        c2rust_unnamed_2: C2Rust_Unnamed_9 { ru_isrss: 0 },
-        c2rust_unnamed_3: C2Rust_Unnamed_8 { ru_minflt: 0 },
-        c2rust_unnamed_4: C2Rust_Unnamed_7 { ru_majflt: 0 },
-        c2rust_unnamed_5: C2Rust_Unnamed_6 { ru_nswap: 0 },
-        c2rust_unnamed_6: C2Rust_Unnamed_5 { ru_inblock: 0 },
-        c2rust_unnamed_7: C2Rust_Unnamed_4 { ru_oublock: 0 },
-        c2rust_unnamed_8: C2Rust_Unnamed_3 { ru_msgsnd: 0 },
-        c2rust_unnamed_9: C2Rust_Unnamed_2 { ru_msgrcv: 0 },
-        c2rust_unnamed_10: C2Rust_Unnamed_1 { ru_nsignals: 0 },
-        c2rust_unnamed_11: C2Rust_Unnamed_0 { ru_nvcsw: 0 },
-        c2rust_unnamed_12: C2Rust_Unnamed { ru_nivcsw: 0 },
-    };
-    let mut autime: uint64_t = 0;
-    let mut astime: uint64_t = 0;
-    let mut rdiff: uint64_t = 0;
-    let mut now: uint64_t = 0;
-    let mut tod: timeval = timeval {
-        tv_sec: 0,
-        tv_usec: 0,
-    };
-    let mut systime: uint64_t = 0;
-    let mut usertime: uint64_t = 0;
-    gettimeofday(&raw mut tod, NULL);
-    now = tod.tv_sec as uint64_t;
-    now = (now as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
-    now = now.wrapping_add(tod.tv_usec as uint64_t);
-    if now > lastget {
-        rdiff = now.wrapping_sub(lastget);
-        lastget = now;
-    } else {
-        rdiff = 0 as uint64_t;
-    }
-    setitimer(ITIMER_REAL, &raw mut it_set, &raw mut rc);
-    setitimer(ITIMER_VIRTUAL, &raw mut it_set, &raw mut uc);
-    setitimer(ITIMER_PROF, &raw mut it_set, &raw mut pc);
-    rc.it_value.tv_sec = MAXITIMER as __time_t - rc.it_value.tv_sec;
-    rc.it_value.tv_usec = 999999 as __suseconds_t - rc.it_value.tv_usec;
-    uc.it_value.tv_sec = MAXITIMER as __time_t - uc.it_value.tv_sec;
-    uc.it_value.tv_usec = 999999 as __suseconds_t - uc.it_value.tv_usec;
-    pc.it_value.tv_sec = MAXITIMER as __time_t - pc.it_value.tv_sec;
-    pc.it_value.tv_usec = 999999 as __suseconds_t - pc.it_value.tv_usec;
-    addsec = (addsec as __time_t + rc.it_value.tv_sec) as uint32_t;
-    addusec = (addusec as __suseconds_t + rc.it_value.tv_usec) as uint32_t;
-    while addusec > 1000000 as uint32_t {
-        addusec = addusec.wrapping_sub(1000000 as uint32_t);
-        addsec = addsec.wrapping_add(1);
-    }
-    if rc.it_value.tv_sec >= 0 as __time_t && rc.it_value.tv_usec >= 0 as __suseconds_t {
-        rdiff = rc.it_value.tv_sec as uint64_t;
-        rdiff = (rdiff as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+        };
+        let mut systime: uint64_t = 0;
+        let mut usertime: uint64_t = 0;
+        gettimeofday(&raw mut tod, NULL);
+        now = tod.tv_sec as uint64_t;
+        now =
+            (now as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
+        now = now.wrapping_add(tod.tv_usec as uint64_t);
+        if now > lastget {
+            rdiff = now.wrapping_sub(lastget);
+            lastget = now;
+        } else {
+            rdiff = 0 as uint64_t;
+        }
+        setitimer(ITIMER_REAL, &raw mut it_set, &raw mut rc);
+        setitimer(ITIMER_VIRTUAL, &raw mut it_set, &raw mut uc);
+        setitimer(ITIMER_PROF, &raw mut it_set, &raw mut pc);
+        rc.it_value.tv_sec = MAXITIMER as __time_t - rc.it_value.tv_sec;
+        rc.it_value.tv_usec = 999999 as __suseconds_t - rc.it_value.tv_usec;
+        uc.it_value.tv_sec = MAXITIMER as __time_t - uc.it_value.tv_sec;
+        uc.it_value.tv_usec = 999999 as __suseconds_t - uc.it_value.tv_usec;
+        pc.it_value.tv_sec = MAXITIMER as __time_t - pc.it_value.tv_sec;
+        pc.it_value.tv_usec = 999999 as __suseconds_t - pc.it_value.tv_usec;
+        addsec = (addsec as __time_t + rc.it_value.tv_sec) as uint32_t;
+        addusec = (addusec as __suseconds_t + rc.it_value.tv_usec) as uint32_t;
+        while addusec > 1000000 as uint32_t {
+            addusec = addusec.wrapping_sub(1000000 as uint32_t);
+            addsec = addsec.wrapping_add(1);
+        }
+        if rc.it_value.tv_sec >= 0 as __time_t && rc.it_value.tv_usec >= 0 as __suseconds_t {
+            rdiff = rc.it_value.tv_sec as uint64_t;
+            rdiff = (rdiff as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+                as uint64_t;
+            rdiff = rdiff.wrapping_add(rc.it_value.tv_usec as uint64_t);
+        }
+        if uc.it_value.tv_sec >= 0 as __time_t
+            && pc.it_value.tv_sec >= 0 as __time_t
+            && uc.it_value.tv_usec >= 0 as __suseconds_t
+            && pc.it_value.tv_usec >= 0 as __suseconds_t
+        {
+            ucusec = uc.it_value.tv_sec as uint64_t;
+            ucusec = (ucusec as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+                as uint64_t;
+            ucusec = ucusec.wrapping_add(uc.it_value.tv_usec as uint64_t);
+            pcusec = pc.it_value.tv_sec as uint64_t;
+            pcusec = (pcusec as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+                as uint64_t;
+            pcusec = pcusec.wrapping_add(pc.it_value.tv_usec as uint64_t);
+        } else {
+            ucusec = 0 as uint64_t;
+            pcusec = 0 as uint64_t;
+        }
+        if pcusec > ucusec {
+            pcusec = pcusec.wrapping_sub(ucusec);
+        } else {
+            pcusec = 0 as uint64_t;
+        }
+        usertime = ucusec;
+        systime = pcusec;
+        getrusage(RUSAGE_SELF, &raw mut rus);
+        autime = rus.ru_utime.tv_sec as uint64_t;
+        autime = (autime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
             as uint64_t;
-        rdiff = rdiff.wrapping_add(rc.it_value.tv_usec as uint64_t);
-    }
-    if uc.it_value.tv_sec >= 0 as __time_t
-        && pc.it_value.tv_sec >= 0 as __time_t
-        && uc.it_value.tv_usec >= 0 as __suseconds_t
-        && pc.it_value.tv_usec >= 0 as __suseconds_t
-    {
-        ucusec = uc.it_value.tv_sec as uint64_t;
-        ucusec = (ucusec as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
+        autime = autime.wrapping_add(rus.ru_utime.tv_usec as uint64_t);
+        astime = rus.ru_stime.tv_sec as uint64_t;
+        astime = (astime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
             as uint64_t;
-        ucusec = ucusec.wrapping_add(uc.it_value.tv_usec as uint64_t);
-        pcusec = pc.it_value.tv_sec as uint64_t;
-        pcusec = (pcusec as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong)
-            as uint64_t;
-        pcusec = pcusec.wrapping_add(pc.it_value.tv_usec as uint64_t);
-    } else {
-        ucusec = 0 as uint64_t;
-        pcusec = 0 as uint64_t;
+        astime = astime.wrapping_add(rus.ru_stime.tv_usec as uint64_t);
+        if autime > lastautime {
+            usertime = autime.wrapping_sub(lastautime);
+            lastautime = autime;
+        }
+        if astime > lastastime {
+            systime = astime.wrapping_sub(lastastime);
+            lastastime = astime;
+        }
+        if rdiff > 0 as uint64_t {
+            *scpu = systime
+                .wrapping_mul(1000000000 as uint64_t)
+                .wrapping_div(rdiff);
+            *ucpu = usertime
+                .wrapping_mul(1000000000 as uint64_t)
+                .wrapping_div(rdiff);
+        } else {
+            *scpu = 0 as uint64_t;
+            *ucpu = 0 as uint64_t;
+        };
     }
-    if pcusec > ucusec {
-        pcusec = pcusec.wrapping_sub(ucusec);
-    } else {
-        pcusec = 0 as uint64_t;
-    }
-    usertime = ucusec;
-    systime = pcusec;
-    getrusage(RUSAGE_SELF, &raw mut rus);
-    autime = rus.ru_utime.tv_sec as uint64_t;
-    autime =
-        (autime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
-    autime = autime.wrapping_add(rus.ru_utime.tv_usec as uint64_t);
-    astime = rus.ru_stime.tv_sec as uint64_t;
-    astime =
-        (astime as ::core::ffi::c_ulong).wrapping_mul(1000000 as ::core::ffi::c_ulong) as uint64_t;
-    astime = astime.wrapping_add(rus.ru_stime.tv_usec as uint64_t);
-    if autime > lastautime {
-        usertime = autime.wrapping_sub(lastautime);
-        lastautime = autime;
-    }
-    if astime > lastastime {
-        systime = astime.wrapping_sub(lastastime);
-        lastastime = astime;
-    }
-    if rdiff > 0 as uint64_t {
-        *scpu = systime
-            .wrapping_mul(1000000000 as uint64_t)
-            .wrapping_div(rdiff);
-        *ucpu = usertime
-            .wrapping_mul(1000000000 as uint64_t)
-            .wrapping_div(rdiff);
-    } else {
-        *scpu = 0 as uint64_t;
-        *ucpu = 0 as uint64_t;
-    };
 }

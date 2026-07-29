@@ -6,7 +6,7 @@ name = "mfsmetalogger"
 authors = ["C2Rust"]
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition = "2024"
 autobins = false
 
 [lib]
@@ -21,5 +21,7 @@ c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
 libc = "0.2"
 
 
+
 [profile.release]
-strip = "debuginfo"
+lto = true
+codegen-units = 1

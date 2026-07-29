@@ -1,42 +1,42 @@
-extern "C" {
-    pub type __dirstream;
-    fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> ::core::ffi::c_int;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn sleep(__seconds: ::core::ffi::c_uint) -> ::core::ffi::c_uint;
-    fn nanosleep(
+pub enum __dirstream {}
+unsafe extern "C" {
+    unsafe fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> ::core::ffi::c_int;
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
+    unsafe fn sleep(__seconds: ::core::ffi::c_uint) -> ::core::ffi::c_uint;
+    unsafe fn nanosleep(
         __requested_time: *const timespec,
         __remaining: *mut timespec,
     ) -> ::core::ffi::c_int;
-    fn pthread_join(
+    unsafe fn pthread_join(
         __th: pthread_t,
         __thread_return: *mut *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    fn sparents_get(inode: uint32_t) -> uint32_t;
-    fn fs_add_entry(inode: uint32_t);
-    fn fs_forget_entry(inode: uint32_t);
-    fn lwt_minthread_create(
+    unsafe fn sparents_get(inode: uint32_t) -> uint32_t;
+    unsafe fn fs_add_entry(inode: uint32_t);
+    unsafe fn fs_forget_entry(inode: uint32_t);
+    unsafe fn lwt_minthread_create(
         th: *mut pthread_t,
         detached: uint8_t,
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    fn snprintf(
+    unsafe fn snprintf(
         __s: *mut ::core::ffi::c_char,
         __maxlen: size_t,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn mfs_log(
+    unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
         ...
     );
-    fn closedir(__dirp: *mut DIR) -> ::core::ffi::c_int;
-    fn opendir(__name: *const ::core::ffi::c_char) -> *mut DIR;
-    fn readdir(__dirp: *mut DIR) -> *mut dirent;
+    unsafe fn closedir(__dirp: *mut DIR) -> ::core::ffi::c_int;
+    unsafe fn opendir(__name: *const ::core::ffi::c_char) -> *mut DIR;
+    unsafe fn readdir(__dirp: *mut DIR) -> *mut dirent;
 }
 pub type __dev_t = ::core::ffi::c_ulong;
 pub type __uid_t = ::core::ffi::c_uint;
@@ -105,26 +105,28 @@ pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::
 pub const RINODES_CHECK_INTERVAL_100MS: ::core::ffi::c_int = 300 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn portable_usleep(mut usec: uint64_t) {
-    let mut req: timespec = timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    let mut rem: timespec = timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    let mut s: ::core::ffi::c_int = 0;
-    req.tv_sec = usec.wrapping_div(1000000 as uint64_t) as __time_t;
-    req.tv_nsec = usec
-        .wrapping_rem(1000000 as uint64_t)
-        .wrapping_mul(1000 as uint64_t) as __syscall_slong_t;
-    loop {
-        s = nanosleep(&raw mut req, &raw mut rem);
-        if s < 0 as ::core::ffi::c_int {
-            req = rem;
-        }
-        if s >= 0 as ::core::ffi::c_int {
-            break;
+    unsafe {
+        let mut req: timespec = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut rem: timespec = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut s: ::core::ffi::c_int = 0;
+        req.tv_sec = usec.wrapping_div(1000000 as uint64_t) as __time_t;
+        req.tv_nsec = usec
+            .wrapping_rem(1000000 as uint64_t)
+            .wrapping_mul(1000 as uint64_t) as __syscall_slong_t;
+        loop {
+            s = nanosleep(&raw mut req, &raw mut rem);
+            if s < 0 as ::core::ffi::c_int {
+                req = rem;
+            }
+            if s >= 0 as ::core::ffi::c_int {
+                break;
+            }
         }
     }
 }
@@ -138,265 +140,295 @@ static mut lastlist: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
 static mut currentlist: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
 #[inline]
 unsafe extern "C" fn sinodes_close(mut inode: uint32_t) {
-    fs_forget_entry(inode);
+    unsafe {
+        fs_forget_entry(inode);
+    }
 }
 #[inline]
 unsafe extern "C" fn sinodes_open(mut inode: uint32_t) {
-    fs_add_entry(inode);
+    unsafe {
+        fs_add_entry(inode);
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_process_inode(mut inode: uint32_t) {
-    let mut ril: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-    let mut rilp: *mut *mut sinodes_ino = ::core::ptr::null_mut::<*mut sinodes_ino>();
-    let mut parent: uint32_t = 0;
-    rilp = &raw mut currentlist;
-    loop {
-        ril = *rilp;
-        if ril.is_null() {
-            break;
-        }
-        if inode > (*ril).inode {
-            rilp = &raw mut (*ril).next as *mut *mut sinodes_ino;
-        } else {
-            if inode != (*ril).inode {
+    unsafe {
+        let mut ril: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
+        let mut rilp: *mut *mut sinodes_ino = ::core::ptr::null_mut::<*mut sinodes_ino>();
+        let mut parent: uint32_t = 0;
+        rilp = &raw mut currentlist;
+        loop {
+            ril = *rilp;
+            if ril.is_null() {
                 break;
             }
-            parent = sparents_get(inode);
-            if parent != 0 as uint32_t {
-                (*ril).parent = parent;
-            }
-            return;
-        }
-    }
-    ril = malloc(::core::mem::size_of::<sinodes_ino>()) as *mut sinodes_ino;
-    (*ril).inode = inode;
-    (*ril).parent = sparents_get(inode);
-    (*ril).next = *rilp as *mut _sinodes_ino;
-    *rilp = ril;
-}
-#[no_mangle]
-pub unsafe extern "C" fn sinodes_end() {
-    let mut rill: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-    let mut ricl: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-    rill = lastlist;
-    ricl = currentlist;
-    while !rill.is_null() || !ricl.is_null() {
-        if ricl.is_null() || !rill.is_null() && (*rill).inode < (*ricl).inode {
-            if (*rill).parent != 0 as uint32_t {
-                sinodes_close((*rill).parent);
-            }
-            sinodes_close((*rill).inode);
-            rill = (*rill).next as *mut sinodes_ino;
-        } else if rill.is_null() || (*rill).inode > (*ricl).inode {
-            sinodes_open((*ricl).inode);
-            if (*ricl).parent != 0 as uint32_t {
-                sinodes_open((*ricl).parent);
-            }
-            ricl = (*ricl).next as *mut sinodes_ino;
-        } else {
-            if (*rill).parent != (*ricl).parent {
-                if (*rill).parent != 0 as uint32_t {
-                    if (*ricl).parent == 0 as uint32_t {
-                        (*ricl).parent = (*rill).parent;
-                    } else {
-                        sinodes_close((*rill).parent);
-                    }
+            if inode > (*ril).inode {
+                rilp = &raw mut (*ril).next as *mut *mut sinodes_ino;
+            } else {
+                if inode != (*ril).inode {
+                    break;
                 }
+                parent = sparents_get(inode);
+                if parent != 0 as uint32_t {
+                    (*ril).parent = parent;
+                }
+                return;
+            }
+        }
+        ril = malloc(::core::mem::size_of::<sinodes_ino>()) as *mut sinodes_ino;
+        (*ril).inode = inode;
+        (*ril).parent = sparents_get(inode);
+        (*ril).next = *rilp as *mut _sinodes_ino;
+        *rilp = ril;
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sinodes_end() {
+    unsafe {
+        let mut rill: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
+        let mut ricl: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
+        rill = lastlist;
+        ricl = currentlist;
+        while !rill.is_null() || !ricl.is_null() {
+            if ricl.is_null() || !rill.is_null() && (*rill).inode < (*ricl).inode {
+                if (*rill).parent != 0 as uint32_t {
+                    sinodes_close((*rill).parent);
+                }
+                sinodes_close((*rill).inode);
+                rill = (*rill).next as *mut sinodes_ino;
+            } else if rill.is_null() || (*rill).inode > (*ricl).inode {
+                sinodes_open((*ricl).inode);
                 if (*ricl).parent != 0 as uint32_t {
                     sinodes_open((*ricl).parent);
                 }
+                ricl = (*ricl).next as *mut sinodes_ino;
+            } else {
+                if (*rill).parent != (*ricl).parent {
+                    if (*rill).parent != 0 as uint32_t {
+                        if (*ricl).parent == 0 as uint32_t {
+                            (*ricl).parent = (*rill).parent;
+                        } else {
+                            sinodes_close((*rill).parent);
+                        }
+                    }
+                    if (*ricl).parent != 0 as uint32_t {
+                        sinodes_open((*ricl).parent);
+                    }
+                }
+                rill = (*rill).next as *mut sinodes_ino;
+                ricl = (*ricl).next as *mut sinodes_ino;
             }
-            rill = (*rill).next as *mut sinodes_ino;
-            ricl = (*ricl).next as *mut sinodes_ino;
         }
+        rill = lastlist;
+        while !rill.is_null() {
+            ricl = (*rill).next as *mut sinodes_ino;
+            free(rill as *mut ::core::ffi::c_void);
+            rill = ricl;
+        }
+        lastlist = currentlist;
+        currentlist = ::core::ptr::null_mut::<sinodes_ino>();
     }
-    rill = lastlist;
-    while !rill.is_null() {
-        ricl = (*rill).next as *mut sinodes_ino;
-        free(rill as *mut ::core::ffi::c_void);
-        rill = ricl;
-    }
-    lastlist = currentlist;
-    currentlist = ::core::ptr::null_mut::<sinodes_ino>();
 }
 static mut mydevid: uint32_t = 0;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_pid_inodes(mut pid: pid_t) {
-    let mut devid: uint32_t = 0;
-    let mut inode: uint64_t = 0;
-    let mut path: [::core::ffi::c_char; 100] = [0; 100];
-    let mut st: stat = stat {
-        st_dev: 0,
-        st_ino: 0,
-        st_nlink: 0,
-        st_mode: 0,
-        st_uid: 0,
-        st_gid: 0,
-        __pad0: 0,
-        st_rdev: 0,
-        st_size: 0,
-        st_blksize: 0,
-        st_blocks: 0,
-        st_atim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_mtim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_ctim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        __glibc_reserved: [0; 3],
-    };
-    snprintf(
-        &raw mut path as *mut ::core::ffi::c_char,
-        100 as size_t,
-        b"/proc/%lld/cwd\0".as_ptr() as *const ::core::ffi::c_char,
-        pid as ::core::ffi::c_longlong,
-    );
-    if stat(&raw mut path as *mut ::core::ffi::c_char, &raw mut st) >= 0 as ::core::ffi::c_int {
-        devid = st.st_dev as uint32_t;
-        inode = st.st_ino as uint64_t;
-        if devid == mydevid {
-            sinodes_process_inode(inode as uint32_t);
-        }
-    }
-}
-#[no_mangle]
-pub unsafe extern "C" fn sinodes_all_pids() {
-    let mut dd: *mut DIR = ::core::ptr::null_mut::<DIR>();
-    let mut de: *mut dirent = ::core::ptr::null_mut::<dirent>();
-    let mut np: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-    let mut pid: ::core::ffi::c_int = 0;
-    dd = opendir(b"/proc\0".as_ptr() as *const ::core::ffi::c_char);
-    if dd.is_null() {
-        return;
-    }
-    loop {
-        de = readdir(dd);
-        if de.is_null() {
-            break;
-        }
-        pid = 0 as ::core::ffi::c_int;
-        np = &raw mut (*de).d_name as *mut ::core::ffi::c_char;
-        while *np != 0 {
-            if *np as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
-                && *np as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
-            {
-                pid *= 10 as ::core::ffi::c_int;
-                pid += *np as ::core::ffi::c_int - '0' as ::core::ffi::c_int;
-                np = np.offset(1);
-            } else {
-                pid = 0 as ::core::ffi::c_int;
-                break;
+    unsafe {
+        let mut devid: uint32_t = 0;
+        let mut inode: uint64_t = 0;
+        let mut path: [::core::ffi::c_char; 100] = [0; 100];
+        let mut st: stat = stat {
+            st_dev: 0,
+            st_ino: 0,
+            st_nlink: 0,
+            st_mode: 0,
+            st_uid: 0,
+            st_gid: 0,
+            __pad0: 0,
+            st_rdev: 0,
+            st_size: 0,
+            st_blksize: 0,
+            st_blocks: 0,
+            st_atim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            st_mtim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            st_ctim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            __glibc_reserved: [0; 3],
+        };
+        snprintf(
+            &raw mut path as *mut ::core::ffi::c_char,
+            100 as size_t,
+            b"/proc/%lld/cwd\0".as_ptr() as *const ::core::ffi::c_char,
+            pid as ::core::ffi::c_longlong,
+        );
+        if stat(&raw mut path as *mut ::core::ffi::c_char, &raw mut st) >= 0 as ::core::ffi::c_int {
+            devid = st.st_dev as uint32_t;
+            inode = st.st_ino as uint64_t;
+            if devid == mydevid {
+                sinodes_process_inode(inode as uint32_t);
             }
         }
-        if pid > 0 as ::core::ffi::c_int {
-            sinodes_pid_inodes(pid as pid_t);
-        }
     }
-    closedir(dd);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sinodes_all_pids() {
+    unsafe {
+        let mut dd: *mut DIR = ::core::ptr::null_mut::<DIR>();
+        let mut de: *mut dirent = ::core::ptr::null_mut::<dirent>();
+        let mut np: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
+        let mut pid: ::core::ffi::c_int = 0;
+        dd = opendir(b"/proc\0".as_ptr() as *const ::core::ffi::c_char);
+        if dd.is_null() {
+            return;
+        }
+        loop {
+            de = readdir(dd);
+            if de.is_null() {
+                break;
+            }
+            pid = 0 as ::core::ffi::c_int;
+            np = &raw mut (*de).d_name as *mut ::core::ffi::c_char;
+            while *np != 0 {
+                if *np as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
+                    && *np as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
+                {
+                    pid *= 10 as ::core::ffi::c_int;
+                    pid += *np as ::core::ffi::c_int - '0' as ::core::ffi::c_int;
+                    np = np.offset(1);
+                } else {
+                    pid = 0 as ::core::ffi::c_int;
+                    break;
+                }
+            }
+            if pid > 0 as ::core::ffi::c_int {
+                sinodes_pid_inodes(pid as pid_t);
+            }
+        }
+        closedir(dd);
+    }
+}
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_scanthread(
     mut arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
-    let mut st: stat = stat {
-        st_dev: 0,
-        st_ino: 0,
-        st_nlink: 0,
-        st_mode: 0,
-        st_uid: 0,
-        st_gid: 0,
-        __pad0: 0,
-        st_rdev: 0,
-        st_size: 0,
-        st_blksize: 0,
-        st_blocks: 0,
-        st_atim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_mtim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_ctim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        __glibc_reserved: [0; 3],
-    };
-    let mut i: uint32_t = 0;
-    let mut mountpoint: *mut ::core::ffi::c_char = arg as *mut ::core::ffi::c_char;
-    st.st_ino = 1 as __ino_t;
-    while stat(mountpoint, &raw mut st) < 0 as ::core::ffi::c_int || st.st_ino != 1 as __ino_t {
-        if st.st_ino == 1 as __ino_t {
-            mfs_log(
-                MFSLOG_ERRNO_SYSLOG_STDERR,
-                MFSLOG_WARNING,
-                b"can't stat my mountpoint (%s)\0".as_ptr() as *const ::core::ffi::c_char,
-                mountpoint,
-            );
-        } else {
-            st.st_ino = 1 as __ino_t;
+    unsafe {
+        let mut st: stat = stat {
+            st_dev: 0,
+            st_ino: 0,
+            st_nlink: 0,
+            st_mode: 0,
+            st_uid: 0,
+            st_gid: 0,
+            __pad0: 0,
+            st_rdev: 0,
+            st_size: 0,
+            st_blksize: 0,
+            st_blocks: 0,
+            st_atim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            st_mtim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            st_ctim: timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            __glibc_reserved: [0; 3],
+        };
+        let mut i: uint32_t = 0;
+        let mut mountpoint: *mut ::core::ffi::c_char = arg as *mut ::core::ffi::c_char;
+        st.st_ino = 1 as __ino_t;
+        while stat(mountpoint, &raw mut st) < 0 as ::core::ffi::c_int || st.st_ino != 1 as __ino_t {
+            if st.st_ino == 1 as __ino_t {
+                mfs_log(
+                    MFSLOG_ERRNO_SYSLOG_STDERR,
+                    MFSLOG_WARNING,
+                    b"can't stat my mountpoint (%s)\0".as_ptr() as *const ::core::ffi::c_char,
+                    mountpoint,
+                );
+            } else {
+                st.st_ino = 1 as __ino_t;
+            }
+            sleep(1 as ::core::ffi::c_uint);
+            if ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
+                &raw mut term,
+                0 as uint8_t,
+            ) as ::core::ffi::c_int
+                == 1 as ::core::ffi::c_int
+            {
+                free(arg);
+                return NULL;
+            }
         }
-        sleep(1 as ::core::ffi::c_uint);
-        if ::core::intrinsics::atomic_or_seqcst(&raw mut term, 0 as uint8_t) as ::core::ffi::c_int
-            == 1 as ::core::ffi::c_int
-        {
-            free(arg);
-            return NULL;
-        }
-    }
-    free(mountpoint as *mut ::core::ffi::c_void);
-    mountpoint = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    mydevid = st.st_dev as uint32_t;
-    mfs_log(
-        MFSLOG_SYSLOG,
-        MFSLOG_INFO,
-        b"my st_dev: %u\0".as_ptr() as *const ::core::ffi::c_char,
-        mydevid,
-    );
-    i = 0 as uint32_t;
-    loop {
-        if i > RINODES_CHECK_INTERVAL_100MS as uint32_t {
-            sinodes_all_pids();
-            sinodes_end();
-            i = 0 as uint32_t;
-        } else {
-            i = i.wrapping_add(1);
-        }
-        portable_usleep(100000 as uint64_t);
-        if ::core::intrinsics::atomic_or_seqcst(&raw mut term, 0 as uint8_t) as ::core::ffi::c_int
-            == 1 as ::core::ffi::c_int
-        {
-            return NULL;
+        free(mountpoint as *mut ::core::ffi::c_void);
+        mountpoint = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        mydevid = st.st_dev as uint32_t;
+        mfs_log(
+            MFSLOG_SYSLOG,
+            MFSLOG_INFO,
+            b"my st_dev: %u\0".as_ptr() as *const ::core::ffi::c_char,
+            mydevid,
+        );
+        i = 0 as uint32_t;
+        loop {
+            if i > RINODES_CHECK_INTERVAL_100MS as uint32_t {
+                sinodes_all_pids();
+                sinodes_end();
+                i = 0 as uint32_t;
+            } else {
+                i = i.wrapping_add(1);
+            }
+            portable_usleep(100000 as uint64_t);
+            if ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
+                &raw mut term,
+                0 as uint8_t,
+            ) as ::core::ffi::c_int
+                == 1 as ::core::ffi::c_int
+            {
+                return NULL;
+            }
         }
     }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_term() {
-    ::core::intrinsics::atomic_or_seqcst(&raw mut term, 1 as uint8_t);
-    pthread_join(
-        clthread,
-        ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-    );
-    sinodes_end();
+    unsafe {
+        ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
+            &raw mut term,
+            1 as uint8_t,
+        );
+        pthread_join(
+            clthread,
+            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
+        );
+        sinodes_end();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_init(mut mp: *const ::core::ffi::c_char) {
-    ::core::intrinsics::atomic_and_seqcst(&raw mut term, 0 as uint8_t);
-    lwt_minthread_create(
-        &raw mut clthread,
-        0 as uint8_t,
-        Some(
-            sinodes_scanthread
-                as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-        ),
-        strdup(mp) as *mut ::core::ffi::c_void,
-    );
+    unsafe {
+        ::core::intrinsics::atomic_and::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
+            &raw mut term,
+            0 as uint8_t,
+        );
+        lwt_minthread_create(
+            &raw mut clthread,
+            0 as uint8_t,
+            Some(
+                sinodes_scanthread
+                    as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
+            ),
+            strdup(mp) as *mut ::core::ffi::c_void,
+        );
+    }
 }

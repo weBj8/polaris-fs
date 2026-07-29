@@ -1,27 +1,27 @@
-extern "C" {
-    fn charts_add(data: *mut uint64_t, datats: uint32_t);
-    fn charts_store();
-    fn charts_init(
+unsafe extern "C" {
+    unsafe fn charts_add(data: *mut uint64_t, datats: uint32_t);
+    unsafe fn charts_store();
+    unsafe fn charts_init(
         calcs: *const uint32_t,
         stats: *const statdef,
         estats: *const estatdef,
         filename: *const ::core::ffi::c_char,
         mode: uint8_t,
     ) -> ::core::ffi::c_int;
-    fn charts_term();
-    fn main_destruct_register_fname(
+    unsafe fn charts_term();
+    unsafe fn main_destruct_register_fname(
         fun: Option<unsafe extern "C" fn() -> ()>,
         fname: *const ::core::ffi::c_char,
     );
-    fn main_time_register_fname(
+    unsafe fn main_time_register_fname(
         seconds: uint32_t,
         offset: uint32_t,
         fun: Option<unsafe extern "C" fn() -> ()>,
         fname: *const ::core::ffi::c_char,
     ) -> *mut ::core::ffi::c_void;
-    fn main_time() -> uint32_t;
-    fn chunk_stats(chunkops: *mut uint32_t);
-    fn chunk_chart_data(
+    unsafe fn main_time() -> uint32_t;
+    unsafe fn chunk_stats(chunkops: *mut uint32_t);
+    unsafe fn chunk_chart_data(
         copychunks: *mut uint64_t,
         ec8chunks: *mut uint64_t,
         ec4chunks: *mut uint64_t,
@@ -30,19 +30,19 @@ extern "C" {
         allendangered: *mut uint64_t,
         allundergoal: *mut uint64_t,
     );
-    fn fs_stats(stats: *mut uint32_t);
-    fn fs_charts_data(file_objects: *mut uint32_t, meta_objects: *mut uint32_t);
-    fn matoclserv_stats(stats: *mut uint64_t);
-    fn mem_used(rss_0: *mut uint64_t, virt_0: *mut uint64_t) -> uint8_t;
-    fn cpu_init();
-    fn cpu_used(scpu_0: *mut uint64_t, ucpu_0: *mut uint64_t);
-    fn matocsserv_getusagediff() -> uint32_t;
-    fn matocsserv_getspace(
+    unsafe fn fs_stats(stats: *mut uint32_t);
+    unsafe fn fs_charts_data(file_objects: *mut uint32_t, meta_objects: *mut uint32_t);
+    unsafe fn matoclserv_stats(stats: *mut uint64_t);
+    unsafe fn mem_used(rss_0: *mut uint64_t, virt_0: *mut uint64_t) -> uint8_t;
+    unsafe fn cpu_init();
+    unsafe fn cpu_used(scpu_0: *mut uint64_t, ucpu_0: *mut uint64_t);
+    unsafe fn matocsserv_getusagediff() -> uint32_t;
+    unsafe fn matocsserv_getspace(
         totalspace: *mut uint64_t,
         availspace: *mut uint64_t,
         freespace: *mut uint64_t,
     );
-    fn csdb_get_server_counters(
+    unsafe fn csdb_get_server_counters(
         servers_ptr: *mut uint32_t,
         disconnected_servers_ptr: *mut uint32_t,
         disconnected_servers_in_maintenance_ptr: *mut uint32_t,
@@ -212,1501 +212,1554 @@ static mut rss: uint64_t = 0;
 static mut virt: uint64_t = 0;
 static mut scpu: uint64_t = 0;
 static mut ucpu: uint64_t = 0;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chartsdata_resusage(
     mut mem: *mut uint64_t,
     mut syscpu: *mut uint64_t,
     mut usrcpu: *mut uint64_t,
 ) {
-    *mem = rss;
-    *syscpu = scpu;
-    *usrcpu = ucpu;
+    unsafe {
+        *mem = rss;
+        *syscpu = scpu;
+        *usrcpu = ucpu;
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chartsdata_refresh() {
-    let mut data: [uint64_t; 70] = [0; 70];
-    let mut fsdata: [uint32_t; 24] = [0; 24];
-    let mut fobj: uint32_t = 0;
-    let mut mobj: uint32_t = 0;
-    let mut cldata: [uint64_t; 12] = [0; 12];
-    let mut chunkops: [uint32_t; 15] = [0; 15];
-    let mut i: uint32_t = 0;
-    let mut total: uint64_t = 0;
-    let mut avail: uint64_t = 0;
-    let mut servers: uint32_t = 0;
-    let mut disc_servers: uint32_t = 0;
-    let mut mdisc_servers: uint32_t = 0;
-    i = 0 as uint32_t;
-    while i < CHARTS as uint32_t {
-        data[i as usize] = 0xffffffffffffffff as ::core::ffi::c_ulong as uint64_t;
-        i = i.wrapping_add(1);
+    unsafe {
+        let mut data: [uint64_t; 70] = [0; 70];
+        let mut fsdata: [uint32_t; 24] = [0; 24];
+        let mut fobj: uint32_t = 0;
+        let mut mobj: uint32_t = 0;
+        let mut cldata: [uint64_t; 12] = [0; 12];
+        let mut chunkops: [uint32_t; 15] = [0; 15];
+        let mut i: uint32_t = 0;
+        let mut total: uint64_t = 0;
+        let mut avail: uint64_t = 0;
+        let mut servers: uint32_t = 0;
+        let mut disc_servers: uint32_t = 0;
+        let mut mdisc_servers: uint32_t = 0;
+        i = 0 as uint32_t;
+        while i < CHARTS as uint32_t {
+            data[i as usize] = 0xffffffffffffffff as ::core::ffi::c_ulong as uint64_t;
+            i = i.wrapping_add(1);
+        }
+        cpu_used(&raw mut scpu, &raw mut ucpu);
+        if scpu > 0 as uint64_t || ucpu > 0 as uint64_t {
+            data[CHARTS_UCPU as usize] = ucpu
+                .wrapping_mul(6 as uint64_t)
+                .wrapping_div(100 as uint64_t);
+            data[CHARTS_SCPU as usize] = scpu
+                .wrapping_mul(6 as uint64_t)
+                .wrapping_div(100 as uint64_t);
+        }
+        if mem_used(&raw mut rss, &raw mut virt) != 0 {
+            data[CHARTS_MEMORY_RSS as usize] = rss;
+            data[CHARTS_MEMORY_VIRT as usize] = virt;
+        }
+        chunk_stats(&raw mut chunkops as *mut uint32_t);
+        data[CHARTS_DELCHUNK as usize] = chunkops[CHUNK_OP_DELETE_TRY as usize] as uint64_t;
+        data[CHARTS_REPLCHUNK as usize] = chunkops[CHUNK_OP_REPLICATE_TRY as usize] as uint64_t;
+        data[CHARTS_CREATECHUNK as usize] = chunkops[CHUNK_OP_CREATE_TRY as usize] as uint64_t;
+        data[CHARTS_CHANGECHUNK as usize] = chunkops[CHUNK_OP_CHANGE_TRY as usize]
+            .wrapping_add(chunkops[CHUNK_OP_SPLIT_TRY as usize])
+            as uint64_t;
+        data[CHARTS_DELETECHUNK_OK as usize] = chunkops[CHUNK_OP_DELETE_OK as usize] as uint64_t;
+        data[CHARTS_REPLICATECHUNK_OK as usize] =
+            chunkops[CHUNK_OP_REPLICATE_OK as usize] as uint64_t;
+        data[CHARTS_CREATECHUNK_OK as usize] = chunkops[CHUNK_OP_CREATE_OK as usize] as uint64_t;
+        data[CHARTS_CHANGECHUNK_OK as usize] = chunkops[CHUNK_OP_CHANGE_OK as usize] as uint64_t;
+        data[CHARTS_SPLITCHUNK_OK as usize] = chunkops[CHUNK_OP_SPLIT_OK as usize] as uint64_t;
+        data[CHARTS_DELETECHUNK_ERR as usize] = chunkops[CHUNK_OP_DELETE_ERR as usize] as uint64_t;
+        data[CHARTS_REPLICATECHUNK_ERR as usize] =
+            chunkops[CHUNK_OP_REPLICATE_ERR as usize] as uint64_t;
+        data[CHARTS_CREATECHUNK_ERR as usize] = chunkops[CHUNK_OP_CREATE_ERR as usize] as uint64_t;
+        data[CHARTS_CHANGECHUNK_ERR as usize] = chunkops[CHUNK_OP_CHANGE_ERR as usize] as uint64_t;
+        data[CHARTS_SPLITCHUNK_ERR as usize] = chunkops[CHUNK_OP_SPLIT_ERR as usize] as uint64_t;
+        fs_stats(&raw mut fsdata as *mut uint32_t);
+        i = 0 as uint32_t;
+        while i < 16 as uint32_t {
+            data[(CHARTS_STATFS as uint32_t).wrapping_add(i) as usize] =
+                fsdata[i as usize] as uint64_t;
+            i = i.wrapping_add(1);
+        }
+        i = 0 as uint32_t;
+        while i < 8 as uint32_t {
+            data[(CHARTS_SNAPSHOT as uint32_t).wrapping_add(i) as usize] =
+                fsdata[(16 as uint32_t).wrapping_add(i) as usize] as uint64_t;
+            i = i.wrapping_add(1);
+        }
+        matoclserv_stats(&raw mut cldata as *mut uint64_t);
+        data[CHARTS_PACKETSRCVD as usize] = cldata[0 as usize];
+        data[CHARTS_PACKETSSENT as usize] = cldata[1 as usize];
+        data[CHARTS_BYTESRCVD as usize] = cldata[2 as usize];
+        data[CHARTS_BYTESSENT as usize] = cldata[3 as usize];
+        data[CHARTS_BYTESREAD as usize] = cldata[4 as usize];
+        data[CHARTS_BYTESWRITE as usize] = cldata[5 as usize];
+        data[CHARTS_READ as usize] = cldata[6 as usize];
+        data[CHARTS_WRITE as usize] = cldata[7 as usize];
+        data[CHARTS_FSYNC as usize] = cldata[8 as usize];
+        data[CHARTS_MOUNTS_BYTES_RECEIVED as usize] = cldata[9 as usize];
+        data[CHARTS_MOUNTS_BYTES_SENT as usize] = cldata[10 as usize];
+        data[CHARTS_LOCK as usize] = cldata[11 as usize];
+        matocsserv_getspace(
+            &raw mut total,
+            &raw mut avail,
+            ::core::ptr::null_mut::<uint64_t>(),
+        );
+        data[CHARTS_USED_SPACE as usize] = total.wrapping_sub(avail);
+        data[CHARTS_TOTAL_SPACE as usize] = total;
+        fs_charts_data(&raw mut fobj, &raw mut mobj);
+        data[CHARTS_FILE_OBJECTS as usize] = fobj as uint64_t;
+        data[CHARTS_META_OBJECTS as usize] = mobj as uint64_t;
+        chunk_chart_data(
+            (&raw mut data as *mut uint64_t).offset(CHARTS_COPY_CHUNKS as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_EC8_CHUNKS as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_EC4_CHUNKS as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_REG_ENDANGERED as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_REG_UNDERGOAL as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_ALL_ENDANGERED as isize),
+            (&raw mut data as *mut uint64_t).offset(CHARTS_ALL_UNDERGOAL as isize),
+        );
+        data[CHARTS_DELAY as usize] = 0xffffffffffffffff as ::core::ffi::c_ulong as uint64_t;
+        csdb_get_server_counters(
+            &raw mut servers,
+            &raw mut disc_servers,
+            &raw mut mdisc_servers,
+        );
+        data[CHARTS_ALL_SERVERS as usize] = servers as uint64_t;
+        data[CHARTS_MDISC_SERVERS as usize] = mdisc_servers as uint64_t;
+        data[CHARTS_DISC_SERVERS as usize] = disc_servers as uint64_t;
+        data[CHARTS_USAGE_DIFF as usize] = matocsserv_getusagediff() as uint64_t;
+        charts_add(
+            &raw mut data as *mut uint64_t,
+            main_time().wrapping_sub(60 as uint32_t),
+        );
     }
-    cpu_used(&raw mut scpu, &raw mut ucpu);
-    if scpu > 0 as uint64_t || ucpu > 0 as uint64_t {
-        data[CHARTS_UCPU as usize] = ucpu
-            .wrapping_mul(6 as uint64_t)
-            .wrapping_div(100 as uint64_t);
-        data[CHARTS_SCPU as usize] = scpu
-            .wrapping_mul(6 as uint64_t)
-            .wrapping_div(100 as uint64_t);
-    }
-    if mem_used(&raw mut rss, &raw mut virt) != 0 {
-        data[CHARTS_MEMORY_RSS as usize] = rss;
-        data[CHARTS_MEMORY_VIRT as usize] = virt;
-    }
-    chunk_stats(&raw mut chunkops as *mut uint32_t);
-    data[CHARTS_DELCHUNK as usize] = chunkops[CHUNK_OP_DELETE_TRY as usize] as uint64_t;
-    data[CHARTS_REPLCHUNK as usize] = chunkops[CHUNK_OP_REPLICATE_TRY as usize] as uint64_t;
-    data[CHARTS_CREATECHUNK as usize] = chunkops[CHUNK_OP_CREATE_TRY as usize] as uint64_t;
-    data[CHARTS_CHANGECHUNK as usize] = chunkops[CHUNK_OP_CHANGE_TRY as usize]
-        .wrapping_add(chunkops[CHUNK_OP_SPLIT_TRY as usize])
-        as uint64_t;
-    data[CHARTS_DELETECHUNK_OK as usize] = chunkops[CHUNK_OP_DELETE_OK as usize] as uint64_t;
-    data[CHARTS_REPLICATECHUNK_OK as usize] = chunkops[CHUNK_OP_REPLICATE_OK as usize] as uint64_t;
-    data[CHARTS_CREATECHUNK_OK as usize] = chunkops[CHUNK_OP_CREATE_OK as usize] as uint64_t;
-    data[CHARTS_CHANGECHUNK_OK as usize] = chunkops[CHUNK_OP_CHANGE_OK as usize] as uint64_t;
-    data[CHARTS_SPLITCHUNK_OK as usize] = chunkops[CHUNK_OP_SPLIT_OK as usize] as uint64_t;
-    data[CHARTS_DELETECHUNK_ERR as usize] = chunkops[CHUNK_OP_DELETE_ERR as usize] as uint64_t;
-    data[CHARTS_REPLICATECHUNK_ERR as usize] =
-        chunkops[CHUNK_OP_REPLICATE_ERR as usize] as uint64_t;
-    data[CHARTS_CREATECHUNK_ERR as usize] = chunkops[CHUNK_OP_CREATE_ERR as usize] as uint64_t;
-    data[CHARTS_CHANGECHUNK_ERR as usize] = chunkops[CHUNK_OP_CHANGE_ERR as usize] as uint64_t;
-    data[CHARTS_SPLITCHUNK_ERR as usize] = chunkops[CHUNK_OP_SPLIT_ERR as usize] as uint64_t;
-    fs_stats(&raw mut fsdata as *mut uint32_t);
-    i = 0 as uint32_t;
-    while i < 16 as uint32_t {
-        data[(CHARTS_STATFS as uint32_t).wrapping_add(i) as usize] = fsdata[i as usize] as uint64_t;
-        i = i.wrapping_add(1);
-    }
-    i = 0 as uint32_t;
-    while i < 8 as uint32_t {
-        data[(CHARTS_SNAPSHOT as uint32_t).wrapping_add(i) as usize] =
-            fsdata[(16 as uint32_t).wrapping_add(i) as usize] as uint64_t;
-        i = i.wrapping_add(1);
-    }
-    matoclserv_stats(&raw mut cldata as *mut uint64_t);
-    data[CHARTS_PACKETSRCVD as usize] = cldata[0 as usize];
-    data[CHARTS_PACKETSSENT as usize] = cldata[1 as usize];
-    data[CHARTS_BYTESRCVD as usize] = cldata[2 as usize];
-    data[CHARTS_BYTESSENT as usize] = cldata[3 as usize];
-    data[CHARTS_BYTESREAD as usize] = cldata[4 as usize];
-    data[CHARTS_BYTESWRITE as usize] = cldata[5 as usize];
-    data[CHARTS_READ as usize] = cldata[6 as usize];
-    data[CHARTS_WRITE as usize] = cldata[7 as usize];
-    data[CHARTS_FSYNC as usize] = cldata[8 as usize];
-    data[CHARTS_MOUNTS_BYTES_RECEIVED as usize] = cldata[9 as usize];
-    data[CHARTS_MOUNTS_BYTES_SENT as usize] = cldata[10 as usize];
-    data[CHARTS_LOCK as usize] = cldata[11 as usize];
-    matocsserv_getspace(
-        &raw mut total,
-        &raw mut avail,
-        ::core::ptr::null_mut::<uint64_t>(),
-    );
-    data[CHARTS_USED_SPACE as usize] = total.wrapping_sub(avail);
-    data[CHARTS_TOTAL_SPACE as usize] = total;
-    fs_charts_data(&raw mut fobj, &raw mut mobj);
-    data[CHARTS_FILE_OBJECTS as usize] = fobj as uint64_t;
-    data[CHARTS_META_OBJECTS as usize] = mobj as uint64_t;
-    chunk_chart_data(
-        (&raw mut data as *mut uint64_t).offset(CHARTS_COPY_CHUNKS as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_EC8_CHUNKS as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_EC4_CHUNKS as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_REG_ENDANGERED as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_REG_UNDERGOAL as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_ALL_ENDANGERED as isize),
-        (&raw mut data as *mut uint64_t).offset(CHARTS_ALL_UNDERGOAL as isize),
-    );
-    data[CHARTS_DELAY as usize] = 0xffffffffffffffff as ::core::ffi::c_ulong as uint64_t;
-    csdb_get_server_counters(
-        &raw mut servers,
-        &raw mut disc_servers,
-        &raw mut mdisc_servers,
-    );
-    data[CHARTS_ALL_SERVERS as usize] = servers as uint64_t;
-    data[CHARTS_MDISC_SERVERS as usize] = mdisc_servers as uint64_t;
-    data[CHARTS_DISC_SERVERS as usize] = disc_servers as uint64_t;
-    data[CHARTS_USAGE_DIFF as usize] = matocsserv_getusagediff() as uint64_t;
-    charts_add(
-        &raw mut data as *mut uint64_t,
-        main_time().wrapping_sub(60 as uint32_t),
-    );
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chartsdata_term() {
-    chartsdata_refresh();
-    charts_store();
-    charts_term();
+    unsafe {
+        chartsdata_refresh();
+        charts_store();
+        charts_term();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chartsdata_store() {
-    charts_store();
+    unsafe {
+        charts_store();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chartsdata_init() -> ::core::ffi::c_int {
-    cpu_init();
-    ucpu = 0 as uint64_t;
-    scpu = ucpu;
-    mem_used(&raw mut rss, &raw mut virt);
-    main_time_register_fname(
-        60 as uint32_t,
-        0 as uint32_t,
-        Some(chartsdata_refresh as unsafe extern "C" fn() -> ()),
-        b"chartsdata_refresh\0".as_ptr() as *const ::core::ffi::c_char,
-    );
-    main_time_register_fname(
-        3600 as uint32_t,
-        30 as uint32_t,
-        Some(chartsdata_store as unsafe extern "C" fn() -> ()),
-        b"chartsdata_store\0".as_ptr() as *const ::core::ffi::c_char,
-    );
-    main_destruct_register_fname(
-        Some(chartsdata_term as unsafe extern "C" fn() -> ()),
-        b"chartsdata_term\0".as_ptr() as *const ::core::ffi::c_char,
-    );
-    return charts_init(
-        &raw const calcdefs as *const uint32_t,
-        &raw const statdefs as *const statdef,
-        &raw const estatdefs as *const estatdef,
-        CHARTS_FILENAME.as_ptr(),
-        0 as uint8_t,
-    );
+    unsafe {
+        cpu_init();
+        ucpu = 0 as uint64_t;
+        scpu = ucpu;
+        mem_used(&raw mut rss, &raw mut virt);
+        main_time_register_fname(
+            60 as uint32_t,
+            0 as uint32_t,
+            Some(chartsdata_refresh as unsafe extern "C" fn() -> ()),
+            b"chartsdata_refresh\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+        main_time_register_fname(
+            3600 as uint32_t,
+            30 as uint32_t,
+            Some(chartsdata_store as unsafe extern "C" fn() -> ()),
+            b"chartsdata_store\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+        main_destruct_register_fname(
+            Some(chartsdata_term as unsafe extern "C" fn() -> ()),
+            b"chartsdata_term\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+        return charts_init(
+            &raw const calcdefs as *const uint32_t,
+            &raw const statdefs as *const statdef,
+            &raw const estatdefs as *const estatdef,
+            CHARTS_FILENAME.as_ptr(),
+            0 as uint8_t,
+        );
+    }
 }
 unsafe extern "C" fn c2rust_run_static_initializers() {
-    statdefs = [
-        _statdef {
-            name: b"ucpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 1 as uint8_t,
-            scale: CHARTS_SCALE_MICRO as uint8_t,
-            multiplier: 100 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"scpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 1 as uint8_t,
-            scale: CHARTS_SCALE_MICRO as uint8_t,
-            multiplier: 100 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"delete\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"replicate\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"statfs\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"getattr\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"setattr\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"lookup\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"mkdir\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"rmdir\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"symlink\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"readlink\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"mknod\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"unlink\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"rename\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"link\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"readdir\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"open\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"readchunk\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"writechunk\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"memoryrss\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"prcvd\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"psent\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"brcvd\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 8000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"bsent\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 8000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"memoryvirt\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"usedspace\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"totalspace\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"create\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"change\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"delete_ok\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"delete_err\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"replicate_ok\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"replicate_err\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"create_ok\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"create_err\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"change_ok\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"change_err\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"split_ok\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"split_err\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"fileobjects\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('F' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"metaobjects\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"chunksec8\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('8' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"chunksec4\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('4' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"chunkscopy\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"chregdanger\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"chregunder\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"challdanger\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"challunder\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"bytesread\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"byteswrite\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"read\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"write\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"fsync\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('F' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"lock\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"snapshot\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"truncate\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"getxattr\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('X' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"setxattr\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('X' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"getfacl\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"setfacl\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"fcreate\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"meta\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"delay\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"servers\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"mdservers\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"dservers\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"udiff\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _statdef {
-            name: b"mountbytrcvd\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: b"mountbytsent\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_MILI as uint8_t,
-            multiplier: 1000 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _statdef {
-            name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-            statid: 0 as uint32_t,
-            mode: 0 as uint8_t,
-            percent: 0 as uint8_t,
-            scale: 0 as uint8_t,
-            multiplier: 0 as uint16_t,
-            divisor: 0 as uint16_t,
-        },
-    ];
-    estatdefs = [
-        _estatdef {
-            name: b"cpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (0 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (1 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 1 as uint8_t,
-            scale: CHARTS_SCALE_MICRO as uint8_t,
-            multiplier: 100 as uint16_t,
-            divisor: 60 as uint16_t,
-        },
-        _estatdef {
-            name: b"mem\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (0 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
-            c2src: (20 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"space\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (1 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
-            c2src: (26 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"delete_stat\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (30 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (31 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"replicate_stat\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (32 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (33 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"create_stat\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (34 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (35 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"change_stat\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (36 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (37 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"split_stat\0".as_ptr() as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char,
-            statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (38 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (39 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_ADD as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"objects\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('O' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('J' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (40 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (41 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"chunks\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (44 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (43 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: (42 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"regunder\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (46 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (45 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"allunder\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('A' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (48 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c2src: (47 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: b"cservers\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-            statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
-                .wrapping_mul(256 as uint32_t)
-                .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
-            c1src: (2 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
-            c2src: (65 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
-            c3src: (3 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
-            mode: CHARTS_MODE_MAX as uint8_t,
-            percent: 0 as uint8_t,
-            scale: CHARTS_SCALE_NONE as uint8_t,
-            multiplier: 1 as uint16_t,
-            divisor: 1 as uint16_t,
-        },
-        _estatdef {
-            name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-            statid: 0 as uint32_t,
-            c1src: CHARTS_NONE as uint32_t,
-            c2src: CHARTS_NONE as uint32_t,
-            c3src: CHARTS_NONE as uint32_t,
-            mode: 0 as uint8_t,
-            percent: 0 as uint8_t,
-            scale: 0 as uint8_t,
-            multiplier: 0 as uint16_t,
-            divisor: 0 as uint16_t,
-        },
-    ];
+    unsafe {
+        statdefs = [
+            _statdef {
+                name: b"ucpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 1 as uint8_t,
+                scale: CHARTS_SCALE_MICRO as uint8_t,
+                multiplier: 100 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"scpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 1 as uint8_t,
+                scale: CHARTS_SCALE_MICRO as uint8_t,
+                multiplier: 100 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"delete\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"replicate\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"statfs\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"getattr\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"setattr\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"lookup\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"mkdir\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"rmdir\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"symlink\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"readlink\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"mknod\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"unlink\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"rename\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"link\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"readdir\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"open\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"readchunk\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"writechunk\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"memoryrss\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"prcvd\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"psent\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"brcvd\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 8000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"bsent\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 8000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"memoryvirt\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"usedspace\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"totalspace\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"create\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"change\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"delete_ok\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"delete_err\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"replicate_ok\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"replicate_err\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"create_ok\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"create_err\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"change_ok\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"change_err\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"split_ok\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"split_err\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"fileobjects\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('F' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"metaobjects\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"chunksec8\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('8' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"chunksec4\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('4' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"chunkscopy\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"chregdanger\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"chregunder\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"challdanger\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"challunder\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"bytesread\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"byteswrite\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"read\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"write\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"fsync\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('F' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"lock\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"snapshot\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"truncate\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"getxattr\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('X' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"setxattr\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('X' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"getfacl\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('G' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"setfacl\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"fcreate\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"meta\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"delay\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"servers\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"mdservers\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"dservers\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"udiff\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('F' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _statdef {
+                name: b"mountbytrcvd\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: b"mountbytsent\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('Y' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_MILI as uint8_t,
+                multiplier: 1000 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _statdef {
+                name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                statid: 0 as uint32_t,
+                mode: 0 as uint8_t,
+                percent: 0 as uint8_t,
+                scale: 0 as uint8_t,
+                multiplier: 0 as uint16_t,
+                divisor: 0 as uint16_t,
+            },
+        ];
+        estatdefs = [
+            _estatdef {
+                name: b"cpu\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (0 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (1 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 1 as uint8_t,
+                scale: CHARTS_SCALE_MICRO as uint8_t,
+                multiplier: 100 as uint16_t,
+                divisor: 60 as uint16_t,
+            },
+            _estatdef {
+                name: b"mem\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('M' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (0 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
+                c2src: (20 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"space\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('C' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (1 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
+                c2src: (26 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"delete_stat\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('D' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (30 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (31 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"replicate_stat\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (32 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (33 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"create_stat\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('E' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('W' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (34 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (35 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"change_stat\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('I' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (36 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (37 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"split_stat\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('P' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('L' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (38 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (39 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_ADD as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"objects\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('O' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('B' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('J' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('T' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (40 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (41 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"chunks\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('H' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('K' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (44 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (43 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: (42 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"regunder\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (46 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (45 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"allunder\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('A' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('U' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('N' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('D' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (48 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c2src: (47 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: b"cservers\0".as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char,
+                statid: ('C' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('S' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('R' as ::core::ffi::c_int as uint8_t as uint32_t)
+                    .wrapping_mul(256 as uint32_t)
+                    .wrapping_add('V' as ::core::ffi::c_int as uint8_t as uint32_t),
+                c1src: (2 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
+                c2src: (65 as ::core::ffi::c_int + CHARTS_DIRECT_START) as uint32_t,
+                c3src: (3 as ::core::ffi::c_int + CHARTS_CALC_START) as uint32_t,
+                mode: CHARTS_MODE_MAX as uint8_t,
+                percent: 0 as uint8_t,
+                scale: CHARTS_SCALE_NONE as uint8_t,
+                multiplier: 1 as uint16_t,
+                divisor: 1 as uint16_t,
+            },
+            _estatdef {
+                name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                statid: 0 as uint32_t,
+                c1src: CHARTS_NONE as uint32_t,
+                c2src: CHARTS_NONE as uint32_t,
+                c3src: CHARTS_NONE as uint32_t,
+                mode: 0 as uint8_t,
+                percent: 0 as uint8_t,
+                scale: 0 as uint8_t,
+                multiplier: 0 as uint16_t,
+                divisor: 0 as uint16_t,
+            },
+        ];
+    }
 }
 #[used]
-#[cfg_attr(target_os = "linux", link_section = ".init_array")]
-#[cfg_attr(target_os = "windows", link_section = ".CRT$XIB")]
-#[cfg_attr(target_os = "macos", link_section = "__DATA,__mod_init_func")]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+#[cfg_attr(target_os = "windows", unsafe(link_section = ".CRT$XIB"))]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
 static INIT_ARRAY: [unsafe extern "C" fn(); 1] = [c2rust_run_static_initializers];

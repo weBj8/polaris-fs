@@ -1,5 +1,5 @@
-extern "C" {
-    fn fs_truncate(
+unsafe extern "C" {
+    unsafe fn fs_truncate(
         inode: uint32_t,
         flags: uint8_t,
         uid: uint32_t,
@@ -9,7 +9,7 @@ extern "C" {
         attr: *mut uint8_t,
         prevlength: *mut uint64_t,
     ) -> uint8_t;
-    fn nanosleep(
+    unsafe fn nanosleep(
         __requested_time: *const timespec,
         __remaining: *mut timespec,
     ) -> ::core::ffi::c_int;
@@ -36,30 +36,32 @@ pub const MFS_ERROR_EROFS: ::core::ffi::c_int = 33 as ::core::ffi::c_int;
 pub const MFS_ERROR_QUOTA: ::core::ffi::c_int = 34 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn portable_usleep(mut usec: uint64_t) {
-    let mut req: timespec = timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    let mut rem: timespec = timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    let mut s: ::core::ffi::c_int = 0;
-    req.tv_sec = usec.wrapping_div(1000000 as uint64_t) as __time_t;
-    req.tv_nsec = usec
-        .wrapping_rem(1000000 as uint64_t)
-        .wrapping_mul(1000 as uint64_t) as __syscall_slong_t;
-    loop {
-        s = nanosleep(&raw mut req, &raw mut rem);
-        if s < 0 as ::core::ffi::c_int {
-            req = rem;
-        }
-        if s >= 0 as ::core::ffi::c_int {
-            break;
+    unsafe {
+        let mut req: timespec = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut rem: timespec = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut s: ::core::ffi::c_int = 0;
+        req.tv_sec = usec.wrapping_div(1000000 as uint64_t) as __time_t;
+        req.tv_nsec = usec
+            .wrapping_rem(1000000 as uint64_t)
+            .wrapping_mul(1000 as uint64_t) as __syscall_slong_t;
+        loop {
+            s = nanosleep(&raw mut req, &raw mut rem);
+            if s < 0 as ::core::ffi::c_int {
+                req = rem;
+            }
+            if s >= 0 as ::core::ffi::c_int {
+                break;
+            }
         }
     }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn do_truncate(
     mut inode: uint32_t,
     mut flags: uint8_t,
@@ -70,39 +72,41 @@ pub unsafe extern "C" fn do_truncate(
     mut attr: *mut uint8_t,
     mut prevlength: *mut uint64_t,
 ) -> uint8_t {
-    let mut status: uint8_t = 0;
-    let mut trycnt: uint32_t = 0;
-    trycnt = 0 as uint32_t;
-    loop {
-        status = fs_truncate(inode, flags, uid, gids, gid, attrlength, attr, prevlength);
-        if status as ::core::ffi::c_int == MFS_STATUS_OK
-            || status as ::core::ffi::c_int == MFS_ERROR_EROFS
-            || status as ::core::ffi::c_int == MFS_ERROR_EACCES
-            || status as ::core::ffi::c_int == MFS_ERROR_EPERM
-            || status as ::core::ffi::c_int == MFS_ERROR_ENOENT
-            || status as ::core::ffi::c_int == MFS_ERROR_QUOTA
-            || status as ::core::ffi::c_int == MFS_ERROR_NOSPACE
-            || status as ::core::ffi::c_int == MFS_ERROR_CHUNKLOST
-        {
-            break;
-        }
-        if status as ::core::ffi::c_int != MFS_ERROR_LOCKED {
-            trycnt = trycnt.wrapping_add(1);
-            if trycnt >= 30 as uint32_t {
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut trycnt: uint32_t = 0;
+        trycnt = 0 as uint32_t;
+        loop {
+            status = fs_truncate(inode, flags, uid, gids, gid, attrlength, attr, prevlength);
+            if status as ::core::ffi::c_int == MFS_STATUS_OK
+                || status as ::core::ffi::c_int == MFS_ERROR_EROFS
+                || status as ::core::ffi::c_int == MFS_ERROR_EACCES
+                || status as ::core::ffi::c_int == MFS_ERROR_EPERM
+                || status as ::core::ffi::c_int == MFS_ERROR_ENOENT
+                || status as ::core::ffi::c_int == MFS_ERROR_QUOTA
+                || status as ::core::ffi::c_int == MFS_ERROR_NOSPACE
+                || status as ::core::ffi::c_int == MFS_ERROR_CHUNKLOST
+            {
                 break;
             }
-            portable_usleep((1000 as uint32_t).wrapping_add(
-                (if trycnt < 30 as uint32_t {
-                    trycnt
-                        .wrapping_sub(1 as uint32_t)
-                        .wrapping_mul(300000 as uint32_t)
-                } else {
-                    10000000 as uint32_t
-                }),
-            ) as uint64_t);
-        } else {
-            portable_usleep(10000 as uint64_t);
+            if status as ::core::ffi::c_int != MFS_ERROR_LOCKED {
+                trycnt = trycnt.wrapping_add(1);
+                if trycnt >= 30 as uint32_t {
+                    break;
+                }
+                portable_usleep((1000 as uint32_t).wrapping_add(
+                    (if trycnt < 30 as uint32_t {
+                        trycnt
+                            .wrapping_sub(1 as uint32_t)
+                            .wrapping_mul(300000 as uint32_t)
+                    } else {
+                        10000000 as uint32_t
+                    }),
+                ) as uint64_t);
+            } else {
+                portable_usleep(10000 as uint64_t);
+            }
         }
+        return status;
     }
-    return status;
 }

@@ -1,11 +1,11 @@
-extern "C" {
-    fn setpriority(
+unsafe extern "C" {
+    unsafe fn setpriority(
         __which: __priority_which_t,
         __who: id_t,
         __prio: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int;
-    fn syscall(__sysno: ::core::ffi::c_long, ...) -> ::core::ffi::c_long;
-    fn mfs_log(
+    unsafe fn syscall(__sysno: ::core::ffi::c_long, ...) -> ::core::ffi::c_long;
+    unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
@@ -38,41 +38,52 @@ unsafe extern "C" fn ioprio_set(
     mut who: ::core::ffi::c_int,
     mut ioprio: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    return syscall(SYS_ioprio_set as ::core::ffi::c_long, which, who, ioprio)
-        as ::core::ffi::c_int;
+    unsafe {
+        return syscall(SYS_ioprio_set as ::core::ffi::c_long, which, who, ioprio)
+            as ::core::ffi::c_int;
+    }
 }
 pub const IOPRIO_CLASS_SHIFT: ::core::ffi::c_int = 13 as ::core::ffi::c_int;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ionice_test() {
-    mfs_log(
-        MFSLOG_SYSLOG,
-        MFSLOG_INFO,
-        b"using linux ioprio (ionice) syscalls for I/O priority\0".as_ptr()
-            as *const ::core::ffi::c_char,
-    );
+    unsafe {
+        mfs_log(
+            MFSLOG_SYSLOG,
+            MFSLOG_INFO,
+            b"using linux ioprio (ionice) syscalls for I/O priority\0".as_ptr()
+                as *const ::core::ffi::c_char,
+        );
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ionice_high() {
-    ioprio_set(
-        IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (IOPRIO_CLASS_RT as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT | 0 as ::core::ffi::c_int,
-    );
+    unsafe {
+        ioprio_set(
+            IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
+            0 as ::core::ffi::c_int,
+            (IOPRIO_CLASS_RT as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT | 0 as ::core::ffi::c_int,
+        );
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ionice_medium() {
-    ioprio_set(
-        IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (IOPRIO_CLASS_BE as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT | 0 as ::core::ffi::c_int,
-    );
+    unsafe {
+        ioprio_set(
+            IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
+            0 as ::core::ffi::c_int,
+            (IOPRIO_CLASS_BE as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT | 0 as ::core::ffi::c_int,
+        );
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ionice_low() {
-    setpriority(PRIO_PROCESS, 0 as id_t, 19 as ::core::ffi::c_int);
-    ioprio_set(
-        IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (IOPRIO_CLASS_IDLE as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT | 0 as ::core::ffi::c_int,
-    );
+    unsafe {
+        setpriority(PRIO_PROCESS, 0 as id_t, 19 as ::core::ffi::c_int);
+        ioprio_set(
+            IOPRIO_WHO_PROCESS as ::core::ffi::c_int,
+            0 as ::core::ffi::c_int,
+            (IOPRIO_CLASS_IDLE as ::core::ffi::c_int) << IOPRIO_CLASS_SHIFT
+                | 0 as ::core::ffi::c_int,
+        );
+    }
 }

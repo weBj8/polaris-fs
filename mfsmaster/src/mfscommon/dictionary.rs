@@ -1,27 +1,27 @@
+pub enum _IO_wide_data {}
+pub enum _IO_codecvt {}
+pub enum _IO_marker {}
 use ::c2rust_bitfields;
-extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn abort() -> !;
-    fn memcpy(
+unsafe extern "C" {
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn abort() -> !;
+    unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
         __src: *const ::core::ffi::c_void,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn memset(
+    unsafe fn memset(
         __s: *mut ::core::ffi::c_void,
         __c: ::core::ffi::c_int,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn memcmp(
+    unsafe fn memcmp(
         __s1: *const ::core::ffi::c_void,
         __s2: *const ::core::ffi::c_void,
         __n: size_t,
     ) -> ::core::ffi::c_int;
-    fn mmap(
+    unsafe fn mmap(
         __addr: *mut ::core::ffi::c_void,
         __len: size_t,
         __prot: ::core::ffi::c_int,
@@ -29,22 +29,22 @@ extern "C" {
         __fd: ::core::ffi::c_int,
         __offset: __off64_t,
     ) -> *mut ::core::ffi::c_void;
-    fn munmap(__addr: *mut ::core::ffi::c_void, __len: size_t) -> ::core::ffi::c_int;
+    unsafe fn munmap(__addr: *mut ::core::ffi::c_void, __len: size_t) -> ::core::ffi::c_int;
     static mut stderr: *mut FILE;
-    fn fprintf(
+    unsafe fn fprintf(
         __stream: *mut FILE,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn mfs_log(
+    unsafe fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
+    unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
         ...
     );
-    fn __errno_location() -> *mut ::core::ffi::c_int;
-    fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
+    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
+    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
 }
 pub type size_t = usize;
 pub type __uint64_t = u64;
@@ -117,53 +117,59 @@ unsafe extern "C" fn dict_cmp(
     mut data: *const uint8_t,
     mut leng: uint32_t,
 ) -> ::core::ffi::c_int {
-    return ((*e).leng == leng
-        && memcmp(
-            &raw const (*e).data as *const uint8_t as *mut ::core::ffi::c_char
-                as *const ::core::ffi::c_void,
-            data as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
-            leng as size_t,
-        ) == 0 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    unsafe {
+        return ((*e).leng == leng
+            && memcmp(
+                &raw const (*e).data as *const uint8_t as *mut ::core::ffi::c_char
+                    as *const ::core::ffi::c_void,
+                data as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
+                leng as size_t,
+            ) == 0 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    }
 }
 #[inline]
 unsafe extern "C" fn dict_hash(mut data: *const uint8_t, mut leng: uint32_t) -> uint32_t {
-    let mut hash: uint32_t = 0;
-    let mut i: uint32_t = 0;
-    hash = leng;
-    i = 0 as uint32_t;
-    while i < leng {
-        hash = hash
-            .wrapping_mul(33 as uint32_t)
-            .wrapping_add(*data.offset(i as isize) as uint32_t);
-        i = i.wrapping_add(1);
+    unsafe {
+        let mut hash: uint32_t = 0;
+        let mut i: uint32_t = 0;
+        hash = leng;
+        i = 0 as uint32_t;
+        while i < leng {
+            hash = hash
+                .wrapping_mul(33 as uint32_t)
+                .wrapping_add(*data.offset(i as isize) as uint32_t);
+            i = i.wrapping_add(1);
+        }
+        return hash;
     }
-    return hash;
 }
 #[inline]
 unsafe extern "C" fn dict_print(mut e: *mut dictentry) {
-    let mut i: uint32_t = 0;
-    let mut c: uint8_t = 0;
-    printf(
-        b"(refcnt:%u,leng:%u,data:\0".as_ptr() as *const ::core::ffi::c_char,
-        (*e).refcnt,
-        (*e).leng,
-    );
-    i = 0 as uint32_t;
-    while i < (*e).leng {
-        c = *(&raw const (*e).data as *const uint8_t).offset(i as isize);
-        if c as ::core::ffi::c_int >= 32 as ::core::ffi::c_int
-            && (c as ::core::ffi::c_int) < 127 as ::core::ffi::c_int
-        {
-            printf(
-                b"%c\0".as_ptr() as *const ::core::ffi::c_char,
-                c as ::core::ffi::c_int,
-            );
-        } else {
-            printf(b".\0".as_ptr() as *const ::core::ffi::c_char);
+    unsafe {
+        let mut i: uint32_t = 0;
+        let mut c: uint8_t = 0;
+        printf(
+            b"(refcnt:%u,leng:%u,data:\0".as_ptr() as *const ::core::ffi::c_char,
+            (*e).refcnt,
+            (*e).leng,
+        );
+        i = 0 as uint32_t;
+        while i < (*e).leng {
+            c = *(&raw const (*e).data as *const uint8_t).offset(i as isize);
+            if c as ::core::ffi::c_int >= 32 as ::core::ffi::c_int
+                && (c as ::core::ffi::c_int) < 127 as ::core::ffi::c_int
+            {
+                printf(
+                    b"%c\0".as_ptr() as *const ::core::ffi::c_char,
+                    c as ::core::ffi::c_int,
+                );
+            } else {
+                printf(b".\0".as_ptr() as *const ::core::ffi::c_char);
+            }
+            i = i.wrapping_add(1);
         }
-        i = i.wrapping_add(1);
+        printf(b")\0".as_ptr() as *const ::core::ffi::c_char);
     }
-    printf(b")\0".as_ptr() as *const ::core::ffi::c_char);
 }
 pub const HASHTAB_LOBITS: ::core::ffi::c_int = LOHASH_BITS;
 pub const HASHTAB_HISIZE: ::core::ffi::c_uint = 0x80000000 as ::core::ffi::c_uint >> HASHTAB_LOBITS;
@@ -178,562 +184,609 @@ static mut dicthashsize: uint32_t = 0;
 static mut dicthashelem: uint32_t = 0;
 #[inline]
 unsafe extern "C" fn dict_calc_hash_size(mut elements: uint32_t) -> uint32_t {
-    let mut res: uint32_t = 1 as uint32_t;
-    while elements != 0 {
-        elements >>= 1 as ::core::ffi::c_int;
-        res <<= 1 as ::core::ffi::c_int;
+    unsafe {
+        let mut res: uint32_t = 1 as uint32_t;
+        while elements != 0 {
+            elements >>= 1 as ::core::ffi::c_int;
+            res <<= 1 as ::core::ffi::c_int;
+        }
+        if res == 0 as uint32_t {
+            res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
+        }
+        if res < HASHTAB_LOSIZE as uint32_t {
+            return HASHTAB_LOSIZE as uint32_t;
+        }
+        return res;
     }
-    if res == 0 as uint32_t {
-        res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
-    }
-    if res < HASHTAB_LOSIZE as uint32_t {
-        return HASHTAB_LOSIZE as uint32_t;
-    }
-    return res;
 }
 #[inline]
 unsafe extern "C" fn dict_hash_init() {
-    let mut i: uint16_t = 0;
-    dicthashsize = 0 as uint32_t;
-    dicthashelem = 0 as uint32_t;
-    dictrehashpos = 0 as uint32_t;
-    i = 0 as uint16_t;
-    while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
-        dicthashtab[i as usize] = ::core::ptr::null_mut::<*mut dictentry>();
-        i = i.wrapping_add(1);
+    unsafe {
+        let mut i: uint16_t = 0;
+        dicthashsize = 0 as uint32_t;
+        dicthashelem = 0 as uint32_t;
+        dictrehashpos = 0 as uint32_t;
+        i = 0 as uint16_t;
+        while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
+            dicthashtab[i as usize] = ::core::ptr::null_mut::<*mut dictentry>();
+            i = i.wrapping_add(1);
+        }
     }
 }
 #[inline]
 unsafe extern "C" fn dict_hash_cleanup() {
-    let mut i: uint16_t = 0;
-    let mut j: uint32_t = 0;
-    dicthashelem = 0 as uint32_t;
-    dicthashsize = 0 as uint32_t;
-    dictrehashpos = 0 as uint32_t;
-    i = 0 as uint16_t;
-    while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
-        if !dicthashtab[i as usize].is_null() {
-            j = 0 as uint32_t;
-            while j < HASHTAB_LOSIZE as uint32_t {
-                if (*dicthashtab[i as usize].offset(j as isize)).is_null() {
-                } else {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        133 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i][j]==NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"hash map has elements during clean up\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - failed assertion '%s' : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        133 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i][j]==NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"hash map has elements during clean up\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                };
-                j = j.wrapping_add(1);
+    unsafe {
+        let mut i: uint16_t = 0;
+        let mut j: uint32_t = 0;
+        dicthashelem = 0 as uint32_t;
+        dicthashsize = 0 as uint32_t;
+        dictrehashpos = 0 as uint32_t;
+        i = 0 as uint16_t;
+        while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
+            if !dicthashtab[i as usize].is_null() {
+                j = 0 as uint32_t;
+                while j < HASHTAB_LOSIZE as uint32_t {
+                    if (*dicthashtab[i as usize].offset(j as isize)).is_null() {
+                    } else {
+                        fprintf(
+                            stderr,
+                            b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            133 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                            b"GLUE_HASH_TAB_PREFIX(hashtab)[i][j]==NULL\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            b"hash map has elements during clean up\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                        );
+                        mfs_log(
+                            MFSLOG_SYSLOG,
+                            MFSLOG_ERR,
+                            b"%s:%u - failed assertion '%s' : %s\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            133 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                            b"GLUE_HASH_TAB_PREFIX(hashtab)[i][j]==NULL\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            b"hash map has elements during clean up\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                        );
+                        abort();
+                    };
+                    j = j.wrapping_add(1);
+                }
+                munmap(
+                    dicthashtab[i as usize] as *mut ::core::ffi::c_void,
+                    ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
+                );
             }
-            munmap(
-                dicthashtab[i as usize] as *mut ::core::ffi::c_void,
-                ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
-            );
+            dicthashtab[i as usize] = ::core::ptr::null_mut::<*mut dictentry>();
+            i = i.wrapping_add(1);
         }
-        dicthashtab[i as usize] = ::core::ptr::null_mut::<*mut dictentry>();
-        i = i.wrapping_add(1);
     }
 }
 #[inline]
 unsafe extern "C" fn dict_hash_print() {
-    let mut i: uint16_t = 0;
-    let mut j: uint32_t = 0;
-    let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
-    printf(
-        b"hash elem: %u\n\0".as_ptr() as *const ::core::ffi::c_char,
-        dicthashelem,
-    );
-    printf(
-        b"hash size: %u\n\0".as_ptr() as *const ::core::ffi::c_char,
-        dicthashsize,
-    );
-    i = 0 as uint16_t;
-    while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
-        if !dicthashtab[i as usize].is_null() {
-            j = 0 as uint32_t;
-            while j < HASHTAB_LOSIZE as uint32_t {
-                if !(*dicthashtab[i as usize].offset(j as isize)).is_null() {
-                    printf(
-                        b"hash pos: %hu,%u:\0".as_ptr() as *const ::core::ffi::c_char,
-                        i as ::core::ffi::c_int,
-                        j,
-                    );
-                    e = *dicthashtab[i as usize].offset(j as isize);
-                    while !e.is_null() {
-                        dict_print(e);
-                        if !(*e).next.is_null() {
-                            printf(b" , \0".as_ptr() as *const ::core::ffi::c_char);
-                        }
-                        e = (*e).next as *mut dictentry;
-                    }
-                    printf(b"\n\0".as_ptr() as *const ::core::ffi::c_char);
-                }
-                j = j.wrapping_add(1);
-            }
-        }
-        i = i.wrapping_add(1);
-    }
-}
-#[inline]
-unsafe extern "C" fn dict_hash_move() {
-    let mut hash: uint32_t = 0;
-    let mut mask: uint32_t = 0;
-    let mut moved: uint32_t = 0 as uint32_t;
-    let mut ehptr: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
-    let mut ehptralt: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
-    let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
-    mask = dicthashsize.wrapping_sub(1 as uint32_t);
-    loop {
-        if dictrehashpos >= dicthashsize {
-            dictrehashpos = dicthashsize;
-            return;
-        }
-        if dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize].is_null() {
-            dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize] = mmap(
-                NULL,
-                ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
-                PROT_READ | PROT_WRITE,
-                MAP_ANON | MAP_PRIVATE,
-                -1 as ::core::ffi::c_int,
-                0 as __off64_t,
-            )
-                as *mut *mut dictentry;
-            if dicthashtab[(dictrehashpos >> 20 as ::core::ffi::c_int) as usize].is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if dicthashtab[(dictrehashpos >> 20 as ::core::ffi::c_int) as usize]
-                == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut *mut dictentry
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-        }
-        ehptr = dicthashtab[(dictrehashpos.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t))
-            >> HASHTAB_LOBITS) as usize]
-            .offset((dictrehashpos & HASHTAB_MASK as uint32_t) as isize);
-        ehptralt = dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize]
-            .offset((dictrehashpos & HASHTAB_MASK as uint32_t) as isize);
-        *ehptralt = ::core::ptr::null_mut::<dictentry>();
-        loop {
-            e = *ehptr;
-            if e.is_null() {
-                break;
-            }
-            hash = (*e).hashval & mask;
-            if hash == dictrehashpos {
-                *ehptralt = e;
-                *ehptr = (*e).next as *mut dictentry;
-                ehptralt = &raw mut (*e).next as *mut *mut dictentry;
-                (*e).next = ::core::ptr::null_mut::<_dictentry>();
-            } else {
-                ehptr = &raw mut (*e).next as *mut *mut dictentry;
-            }
-            moved = moved.wrapping_add(1);
-        }
-        dictrehashpos = dictrehashpos.wrapping_add(1);
-        if moved >= HASHTAB_MOVEFACTOR as uint32_t {
-            break;
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn dict_find(mut data: *const uint8_t, mut leng: uint32_t) -> *mut dictentry {
-    let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
-    let mut hash: uint32_t = 0;
-    let mut hashval: uint32_t = 0;
-    if dicthashsize == 0 as uint32_t {
-        return ::core::ptr::null_mut::<dictentry>();
-    }
-    hashval = dict_hash(data, leng);
-    hash = hashval & dicthashsize.wrapping_sub(1 as uint32_t);
-    if dictrehashpos < dicthashsize {
-        dict_hash_move();
-        if hash >= dictrehashpos {
-            hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
-        }
-    }
-    e = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-        .offset((hash & HASHTAB_MASK as uint32_t) as isize);
-    while !e.is_null() {
-        if (*e).hashval == hashval && dict_cmp(e, data, leng) != 0 {
-            return e;
-        }
-        e = (*e).next as *mut dictentry;
-    }
-    return ::core::ptr::null_mut::<dictentry>();
-}
-#[inline]
-unsafe extern "C" fn dict_delete(mut e: *mut dictentry) -> uint8_t {
-    let mut ehptr: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
-    let mut eit: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
-    let mut hash: uint32_t = 0;
-    if dicthashsize == 0 as uint32_t {
-        return 0 as uint8_t;
-    }
-    hash = (*e).hashval & dicthashsize.wrapping_sub(1 as uint32_t);
-    if dictrehashpos < dicthashsize {
-        dict_hash_move();
-        if hash >= dictrehashpos {
-            hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
-        }
-    }
-    ehptr = dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-        .offset((hash & HASHTAB_MASK as uint32_t) as isize);
-    loop {
-        eit = *ehptr;
-        if eit.is_null() {
-            break;
-        }
-        if eit == e {
-            *ehptr = (*e).next as *mut dictentry;
-            dicthashelem = dicthashelem.wrapping_sub(1);
-            return 1 as uint8_t;
-        }
-        ehptr = &raw mut (*eit).next as *mut *mut dictentry;
-    }
-    return 0 as uint8_t;
-}
-#[inline]
-unsafe extern "C" fn dict_add(mut e: *mut dictentry) {
-    let mut i: uint16_t = 0;
-    let mut hash: uint32_t = 0;
-    if dicthashsize == 0 as uint32_t {
-        dicthashsize = dict_calc_hash_size(HASHTAB_SIZEHINT as uint32_t);
-        dictrehashpos = dicthashsize;
-        dicthashelem = 0 as uint32_t;
+    unsafe {
+        let mut i: uint16_t = 0;
+        let mut j: uint32_t = 0;
+        let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
+        printf(
+            b"hash elem: %u\n\0".as_ptr() as *const ::core::ffi::c_char,
+            dicthashelem,
+        );
+        printf(
+            b"hash size: %u\n\0".as_ptr() as *const ::core::ffi::c_char,
+            dicthashsize,
+        );
         i = 0 as uint16_t;
-        while (i as uint32_t) < dicthashsize >> HASHTAB_LOBITS {
-            dicthashtab[i as usize] = mmap(
-                NULL,
-                ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
-                PROT_READ | PROT_WRITE,
-                MAP_ANON | MAP_PRIVATE,
-                -1 as ::core::ffi::c_int,
-                0 as __off64_t,
-            ) as *mut *mut dictentry;
-            if dicthashtab[i as usize].is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if dicthashtab[i as usize]
-                == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut *mut dictentry
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-            memset(
-                dicthashtab[i as usize] as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<*mut dictentry>(),
-            );
-            if (*dicthashtab[i as usize].offset(0 as isize)).is_null() {
-                memset(
-                    dicthashtab[i as usize] as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
-                );
-            } else {
-                hash = 0 as uint32_t;
-                while hash < HASHTAB_LOSIZE as uint32_t {
-                    *dicthashtab[i as usize].offset(hash as isize) =
-                        ::core::ptr::null_mut::<dictentry>();
-                    hash = hash.wrapping_add(1);
+        while (i as ::core::ffi::c_uint) < HASHTAB_HISIZE {
+            if !dicthashtab[i as usize].is_null() {
+                j = 0 as uint32_t;
+                while j < HASHTAB_LOSIZE as uint32_t {
+                    if !(*dicthashtab[i as usize].offset(j as isize)).is_null() {
+                        printf(
+                            b"hash pos: %hu,%u:\0".as_ptr() as *const ::core::ffi::c_char,
+                            i as ::core::ffi::c_int,
+                            j,
+                        );
+                        e = *dicthashtab[i as usize].offset(j as isize);
+                        while !e.is_null() {
+                            dict_print(e);
+                            if !(*e).next.is_null() {
+                                printf(b" , \0".as_ptr() as *const ::core::ffi::c_char);
+                            }
+                            e = (*e).next as *mut dictentry;
+                        }
+                        printf(b"\n\0".as_ptr() as *const ::core::ffi::c_char);
+                    }
+                    j = j.wrapping_add(1);
                 }
             }
             i = i.wrapping_add(1);
         }
     }
-    (*e).hashval = dict_hash(&raw const (*e).data as *const uint8_t, (*e).leng);
-    hash = (*e).hashval & dicthashsize.wrapping_sub(1 as uint32_t);
-    if dictrehashpos < dicthashsize {
-        dict_hash_move();
-        if hash >= dictrehashpos {
-            hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
+}
+#[inline]
+unsafe extern "C" fn dict_hash_move() {
+    unsafe {
+        let mut hash: uint32_t = 0;
+        let mut mask: uint32_t = 0;
+        let mut moved: uint32_t = 0 as uint32_t;
+        let mut ehptr: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
+        let mut ehptralt: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
+        let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
+        mask = dicthashsize.wrapping_sub(1 as uint32_t);
+        loop {
+            if dictrehashpos >= dicthashsize {
+                dictrehashpos = dicthashsize;
+                return;
+            }
+            if dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize].is_null() {
+                dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize] = mmap(
+                    NULL,
+                    ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
+                    PROT_READ | PROT_WRITE,
+                    MAP_ANON | MAP_PRIVATE,
+                    -1 as ::core::ffi::c_int,
+                    0 as __off64_t,
+                )
+                    as *mut *mut dictentry;
+                if dicthashtab[(dictrehashpos >> 20 as ::core::ffi::c_int) as usize].is_null() {
+                    fprintf(
+                        stderr,
+                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        187 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                    );
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        187 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                    );
+                    abort();
+                } else if dicthashtab[(dictrehashpos >> 20 as ::core::ffi::c_int) as usize]
+                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                        -1 as ::core::ffi::c_int as usize,
+                    ) as *mut *mut dictentry
+                {
+                    let mut _mfs_errorstring: *const ::core::ffi::c_char =
+                        strerr(*__errno_location());
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        187 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        _mfs_errorstring,
+                    );
+                    fprintf(
+                        stderr,
+                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        187 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[GLUE_HASH_TAB_PREFIX(rehashpos) >> HASHTAB_LOBITS]\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        _mfs_errorstring,
+                    );
+                    abort();
+                }
+            }
+            ehptr = dicthashtab[(dictrehashpos
+                .wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t))
+                >> HASHTAB_LOBITS) as usize]
+                .offset((dictrehashpos & HASHTAB_MASK as uint32_t) as isize);
+            ehptralt = dicthashtab[(dictrehashpos >> HASHTAB_LOBITS) as usize]
+                .offset((dictrehashpos & HASHTAB_MASK as uint32_t) as isize);
+            *ehptralt = ::core::ptr::null_mut::<dictentry>();
+            loop {
+                e = *ehptr;
+                if e.is_null() {
+                    break;
+                }
+                hash = (*e).hashval & mask;
+                if hash == dictrehashpos {
+                    *ehptralt = e;
+                    *ehptr = (*e).next as *mut dictentry;
+                    ehptralt = &raw mut (*e).next as *mut *mut dictentry;
+                    (*e).next = ::core::ptr::null_mut::<_dictentry>();
+                } else {
+                    ehptr = &raw mut (*e).next as *mut *mut dictentry;
+                }
+                moved = moved.wrapping_add(1);
+            }
+            dictrehashpos = dictrehashpos.wrapping_add(1);
+            if moved >= HASHTAB_MOVEFACTOR as uint32_t {
+                break;
+            }
         }
-        (*e).next = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-            .offset((hash & HASHTAB_MASK as uint32_t) as isize)
-            as *mut _dictentry;
-        *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-            .offset((hash & HASHTAB_MASK as uint32_t) as isize) = e;
-        dicthashelem = dicthashelem.wrapping_add(1);
-    } else {
-        (*e).next = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-            .offset((hash & HASHTAB_MASK as uint32_t) as isize)
-            as *mut _dictentry;
-        *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
-            .offset((hash & HASHTAB_MASK as uint32_t) as isize) = e;
-        dicthashelem = dicthashelem.wrapping_add(1);
-        if dicthashelem > dicthashsize
-            && dicthashsize >> HASHTAB_LOBITS < HASHTAB_HISIZE as uint32_t
-        {
+    }
+}
+#[inline]
+unsafe extern "C" fn dict_find(mut data: *const uint8_t, mut leng: uint32_t) -> *mut dictentry {
+    unsafe {
+        let mut e: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
+        let mut hash: uint32_t = 0;
+        let mut hashval: uint32_t = 0;
+        if dicthashsize == 0 as uint32_t {
+            return ::core::ptr::null_mut::<dictentry>();
+        }
+        hashval = dict_hash(data, leng);
+        hash = hashval & dicthashsize.wrapping_sub(1 as uint32_t);
+        if dictrehashpos < dicthashsize {
+            dict_hash_move();
+            if hash >= dictrehashpos {
+                hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
+            }
+        }
+        e = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+            .offset((hash & HASHTAB_MASK as uint32_t) as isize);
+        while !e.is_null() {
+            if (*e).hashval == hashval && dict_cmp(e, data, leng) != 0 {
+                return e;
+            }
+            e = (*e).next as *mut dictentry;
+        }
+        return ::core::ptr::null_mut::<dictentry>();
+    }
+}
+#[inline]
+unsafe extern "C" fn dict_delete(mut e: *mut dictentry) -> uint8_t {
+    unsafe {
+        let mut ehptr: *mut *mut dictentry = ::core::ptr::null_mut::<*mut dictentry>();
+        let mut eit: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
+        let mut hash: uint32_t = 0;
+        if dicthashsize == 0 as uint32_t {
+            return 0 as uint8_t;
+        }
+        hash = (*e).hashval & dicthashsize.wrapping_sub(1 as uint32_t);
+        if dictrehashpos < dicthashsize {
+            dict_hash_move();
+            if hash >= dictrehashpos {
+                hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
+            }
+        }
+        ehptr = dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+            .offset((hash & HASHTAB_MASK as uint32_t) as isize);
+        loop {
+            eit = *ehptr;
+            if eit.is_null() {
+                break;
+            }
+            if eit == e {
+                *ehptr = (*e).next as *mut dictentry;
+                dicthashelem = dicthashelem.wrapping_sub(1);
+                return 1 as uint8_t;
+            }
+            ehptr = &raw mut (*eit).next as *mut *mut dictentry;
+        }
+        return 0 as uint8_t;
+    }
+}
+#[inline]
+unsafe extern "C" fn dict_add(mut e: *mut dictentry) {
+    unsafe {
+        let mut i: uint16_t = 0;
+        let mut hash: uint32_t = 0;
+        if dicthashsize == 0 as uint32_t {
+            dicthashsize = dict_calc_hash_size(HASHTAB_SIZEHINT as uint32_t);
             dictrehashpos = dicthashsize;
-            dicthashsize = dicthashsize.wrapping_mul(2 as uint32_t);
+            dicthashelem = 0 as uint32_t;
+            i = 0 as uint16_t;
+            while (i as uint32_t) < dicthashsize >> HASHTAB_LOBITS {
+                dicthashtab[i as usize] = mmap(
+                    NULL,
+                    ::core::mem::size_of::<*mut dictentry>().wrapping_mul(HASHTAB_LOSIZE as size_t),
+                    PROT_READ | PROT_WRITE,
+                    MAP_ANON | MAP_PRIVATE,
+                    -1 as ::core::ffi::c_int,
+                    0 as __off64_t,
+                ) as *mut *mut dictentry;
+                if dicthashtab[i as usize].is_null() {
+                    fprintf(
+                        stderr,
+                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        284 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                    );
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        284 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                    );
+                    abort();
+                } else if dicthashtab[i as usize]
+                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                        -1 as ::core::ffi::c_int as usize,
+                    ) as *mut *mut dictentry
+                {
+                    let mut _mfs_errorstring: *const ::core::ffi::c_char =
+                        strerr(*__errno_location());
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        284 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        _mfs_errorstring,
+                    );
+                    fprintf(
+                        stderr,
+                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/hash_begin.h\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        284 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"GLUE_HASH_TAB_PREFIX(hashtab)[i]\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        _mfs_errorstring,
+                    );
+                    abort();
+                }
+                memset(
+                    dicthashtab[i as usize] as *mut ::core::ffi::c_void,
+                    0 as ::core::ffi::c_int,
+                    ::core::mem::size_of::<*mut dictentry>(),
+                );
+                if (*dicthashtab[i as usize].offset(0 as isize)).is_null() {
+                    memset(
+                        dicthashtab[i as usize] as *mut ::core::ffi::c_void,
+                        0 as ::core::ffi::c_int,
+                        ::core::mem::size_of::<*mut dictentry>()
+                            .wrapping_mul(HASHTAB_LOSIZE as size_t),
+                    );
+                } else {
+                    hash = 0 as uint32_t;
+                    while hash < HASHTAB_LOSIZE as uint32_t {
+                        *dicthashtab[i as usize].offset(hash as isize) =
+                            ::core::ptr::null_mut::<dictentry>();
+                        hash = hash.wrapping_add(1);
+                    }
+                }
+                i = i.wrapping_add(1);
+            }
         }
-    };
+        (*e).hashval = dict_hash(&raw const (*e).data as *const uint8_t, (*e).leng);
+        hash = (*e).hashval & dicthashsize.wrapping_sub(1 as uint32_t);
+        if dictrehashpos < dicthashsize {
+            dict_hash_move();
+            if hash >= dictrehashpos {
+                hash = hash.wrapping_sub(dicthashsize.wrapping_div(2 as uint32_t));
+            }
+            (*e).next = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+                .offset((hash & HASHTAB_MASK as uint32_t) as isize)
+                as *mut _dictentry;
+            *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+                .offset((hash & HASHTAB_MASK as uint32_t) as isize) = e;
+            dicthashelem = dicthashelem.wrapping_add(1);
+        } else {
+            (*e).next = *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+                .offset((hash & HASHTAB_MASK as uint32_t) as isize)
+                as *mut _dictentry;
+            *dicthashtab[(hash >> HASHTAB_LOBITS) as usize]
+                .offset((hash & HASHTAB_MASK as uint32_t) as isize) = e;
+            dicthashelem = dicthashelem.wrapping_add(1);
+            if dicthashelem > dicthashsize
+                && dicthashsize >> HASHTAB_LOBITS < HASHTAB_HISIZE as uint32_t
+            {
+                dictrehashpos = dicthashsize;
+                dicthashsize = dicthashsize.wrapping_mul(2 as uint32_t);
+            }
+        };
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_init() -> ::core::ffi::c_int {
-    dict_hash_init();
-    return 0 as ::core::ffi::c_int;
+    unsafe {
+        dict_hash_init();
+        return 0 as ::core::ffi::c_int;
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_cleanup() {
-    dict_hash_cleanup();
+    unsafe {
+        dict_hash_cleanup();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_printall() {
-    dict_hash_print();
+    unsafe {
+        dict_hash_print();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_search(
     mut data: *const uint8_t,
     mut leng: uint32_t,
 ) -> *mut ::core::ffi::c_void {
-    return dict_find(data, leng) as *mut ::core::ffi::c_void;
+    unsafe {
+        return dict_find(data, leng) as *mut ::core::ffi::c_void;
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_insert(
     mut data: *const uint8_t,
     mut leng: uint32_t,
 ) -> *mut ::core::ffi::c_void {
-    let mut de: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
-    de = dict_find(data, leng);
-    if !de.is_null() {
-        (*de).refcnt = (*de).refcnt.wrapping_add(1);
+    unsafe {
+        let mut de: *mut dictentry = ::core::ptr::null_mut::<dictentry>();
+        de = dict_find(data, leng);
+        if !de.is_null() {
+            (*de).refcnt = (*de).refcnt.wrapping_add(1);
+            return de as *mut ::core::ffi::c_void;
+        }
+        de = malloc((20 as size_t).wrapping_add(leng as size_t)) as *mut dictentry;
+        if de.is_null() {
+            fprintf(
+                stderr,
+                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                111 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                111 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            abort();
+        } else if de
+            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                -1 as ::core::ffi::c_int as usize,
+            ) as *mut dictentry
+        {
+            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                111 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring,
+            );
+            fprintf(
+                stderr,
+                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                111 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring,
+            );
+            abort();
+        }
+        (*de).refcnt = 1 as uint32_t;
+        (*de).leng = leng;
+        memcpy(
+            &raw const (*de).data as *const uint8_t as *mut uint8_t as *mut ::core::ffi::c_void,
+            data as *const ::core::ffi::c_void,
+            leng as size_t,
+        );
+        dict_add(de);
         return de as *mut ::core::ffi::c_void;
     }
-    de = malloc((20 as size_t).wrapping_add(leng as size_t)) as *mut dictentry;
-    if de.is_null() {
-        fprintf(
-            stderr,
-            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            111 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            111 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        abort();
-    } else if de
-        == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-            -1 as ::core::ffi::c_int as usize,
-        ) as *mut dictentry
-    {
-        let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            111 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring,
-        );
-        fprintf(
-            stderr,
-            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            111 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring,
-        );
-        abort();
-    }
-    (*de).refcnt = 1 as uint32_t;
-    (*de).leng = leng;
-    memcpy(
-        &raw const (*de).data as *const uint8_t as *mut uint8_t as *mut ::core::ffi::c_void,
-        data as *const ::core::ffi::c_void,
-        leng as size_t,
-    );
-    dict_add(de);
-    return de as *mut ::core::ffi::c_void;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_get_ptr(mut dptr: *mut ::core::ffi::c_void) -> *const uint8_t {
-    let mut de: *mut dictentry = dptr as *mut dictentry;
-    return &raw const (*de).data as *const uint8_t;
-}
-#[no_mangle]
-pub unsafe extern "C" fn dict_get_leng(mut dptr: *mut ::core::ffi::c_void) -> uint32_t {
-    let mut de: *mut dictentry = dptr as *mut dictentry;
-    return (*de).leng;
-}
-#[no_mangle]
-pub unsafe extern "C" fn dict_get_hash(mut dptr: *mut ::core::ffi::c_void) -> uint32_t {
-    let mut de: *mut dictentry = dptr as *mut dictentry;
-    return (*de).hashval;
-}
-#[no_mangle]
-pub unsafe extern "C" fn dict_dec_ref(mut dptr: *mut ::core::ffi::c_void) {
-    let mut de: *mut dictentry = dptr as *mut dictentry;
-    if (*de).refcnt > 0 as uint32_t {
-    } else {
-        fprintf(
-            stderr,
-            b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            139 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - failed assertion '%s' : %s\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            139 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        abort();
-    };
-    (*de).refcnt = (*de).refcnt.wrapping_sub(1);
-    if (*de).refcnt == 0 as uint32_t {
-        dict_delete(de);
-        free(de as *mut ::core::ffi::c_void);
+    unsafe {
+        let mut de: *mut dictentry = dptr as *mut dictentry;
+        return &raw const (*de).data as *const uint8_t;
     }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dict_get_leng(mut dptr: *mut ::core::ffi::c_void) -> uint32_t {
+    unsafe {
+        let mut de: *mut dictentry = dptr as *mut dictentry;
+        return (*de).leng;
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dict_get_hash(mut dptr: *mut ::core::ffi::c_void) -> uint32_t {
+    unsafe {
+        let mut de: *mut dictentry = dptr as *mut dictentry;
+        return (*de).hashval;
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dict_dec_ref(mut dptr: *mut ::core::ffi::c_void) {
+    unsafe {
+        let mut de: *mut dictentry = dptr as *mut dictentry;
+        if (*de).refcnt > 0 as uint32_t {
+        } else {
+            fprintf(
+                stderr,
+                b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                139 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
+                b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - failed assertion '%s' : %s\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                139 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
+                b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            abort();
+        };
+        (*de).refcnt = (*de).refcnt.wrapping_sub(1);
+        if (*de).refcnt == 0 as uint32_t {
+            dict_delete(de);
+            free(de as *mut ::core::ffi::c_void);
+        }
+    }
+}
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_inc_ref(mut dptr: *mut ::core::ffi::c_void) {
-    let mut de: *mut dictentry = dptr as *mut dictentry;
-    if (*de).refcnt > 0 as uint32_t {
-    } else {
-        fprintf(
-            stderr,
-            b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            149 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - failed assertion '%s' : %s\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            149 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        abort();
-    };
-    (*de).refcnt = (*de).refcnt.wrapping_add(1);
+    unsafe {
+        let mut de: *mut dictentry = dptr as *mut dictentry;
+        if (*de).refcnt > 0 as uint32_t {
+        } else {
+            fprintf(
+                stderr,
+                b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                149 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
+                b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - failed assertion '%s' : %s\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/dictionary.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                149 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"de->refcnt>0\0".as_ptr() as *const ::core::ffi::c_char,
+                b"dictionary reference counter is zero\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            abort();
+        };
+        (*de).refcnt = (*de).refcnt.wrapping_add(1);
+    }
 }

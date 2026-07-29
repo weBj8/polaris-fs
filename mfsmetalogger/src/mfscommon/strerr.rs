@@ -1,30 +1,30 @@
+pub enum _IO_wide_data {}
+pub enum _IO_codecvt {}
+pub enum _IO_marker {}
 use ::c2rust_bitfields;
-extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn abort() -> !;
-    fn memset(
+unsafe extern "C" {
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn abort() -> !;
+    unsafe fn memset(
         __s: *mut ::core::ffi::c_void,
         __c: ::core::ffi::c_int,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn __errno_location() -> *mut ::core::ffi::c_int;
+    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
     static mut stderr: *mut FILE;
-    fn fprintf(
+    unsafe fn fprintf(
         __stream: *mut FILE,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn snprintf(
+    unsafe fn snprintf(
         __s: *mut ::core::ffi::c_char,
         __maxlen: size_t,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn mfs_log(
+    unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
@@ -771,138 +771,149 @@ static mut errhsize: uint32_t = 0 as uint32_t;
 pub const STRERR_BUFF_SIZE: ::core::ffi::c_int = 100 as ::core::ffi::c_int;
 static mut strerrstorage: *mut ::core::ffi::c_void = NULL;
 unsafe extern "C" fn strerr_storage_free() {
-    if !strerrstorage.is_null() {
-        free(strerrstorage);
+    unsafe {
+        if !strerrstorage.is_null() {
+            free(strerrstorage);
+        }
     }
 }
 unsafe extern "C" fn strerr_storage_get() -> *mut ::core::ffi::c_void {
-    if strerrstorage.is_null() {
-        strerrstorage = malloc(STRERR_BUFF_SIZE as size_t);
+    unsafe {
         if strerrstorage.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if strerrstorage
-            == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            )
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
+            strerrstorage = malloc(STRERR_BUFF_SIZE as size_t);
+            if strerrstorage.is_null() {
+                fprintf(
+                    stderr,
+                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                mfs_log(
+                    MFSLOG_SYSLOG,
+                    MFSLOG_ERR,
+                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                abort();
+            } else if strerrstorage
+                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                    -1 as ::core::ffi::c_int as usize,
+                )
+            {
+                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
+                mfs_log(
+                    MFSLOG_SYSLOG,
+                    MFSLOG_ERR,
+                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
+                    _mfs_errorstring,
+                );
+                fprintf(
+                    stderr,
+                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsmetalogger/../mfscommon/strerr.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
+                    _mfs_errorstring,
+                );
+                abort();
+            }
+        }
+        return strerrstorage;
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn strerr_init() {
+    unsafe {
+        let mut n: uint32_t = 0;
+        let mut hash: uint32_t = 0;
+        let mut disp: uint32_t = 0;
+        if !errhash.is_null() {
+            return;
+        }
+        n = 0 as uint32_t;
+        while !errtab[n as usize].str.is_null() {
+            n = n.wrapping_add(1);
+        }
+        n = n.wrapping_mul(3 as uint32_t).wrapping_div(2 as uint32_t);
+        errhsize = 1 as uint32_t;
+        while n > 0 as uint32_t {
+            errhsize <<= 1 as ::core::ffi::c_int;
+            n >>= 1 as ::core::ffi::c_int;
+        }
+        errhash = malloc(::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t))
+            as *mut errent;
+        memset(
+            errhash as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t),
+        );
+        n = 0 as uint32_t;
+        while !errtab[n as usize].str.is_null() {
+            hash = errtab[n as usize].num as uint32_t;
+            disp = hash.wrapping_mul(760092119 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t)
+                | 1 as uint32_t;
+            hash = hash.wrapping_mul(1905886897 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t);
+            while !(*errhash.offset(hash as isize)).str.is_null()
+                && (*errhash.offset(hash as isize)).num != errtab[n as usize].num
+            {
+                hash = hash.wrapping_add(disp);
+                hash &= errhsize.wrapping_sub(1 as uint32_t);
+            }
+            if (*errhash.offset(hash as isize)).str.is_null() {
+                *errhash.offset(hash as isize) = errtab[n as usize];
+            }
+            n = n.wrapping_add(1);
         }
     }
-    return strerrstorage;
 }
-#[no_mangle]
-pub unsafe extern "C" fn strerr_init() {
-    let mut n: uint32_t = 0;
-    let mut hash: uint32_t = 0;
-    let mut disp: uint32_t = 0;
-    if !errhash.is_null() {
-        return;
-    }
-    n = 0 as uint32_t;
-    while !errtab[n as usize].str.is_null() {
-        n = n.wrapping_add(1);
-    }
-    n = n.wrapping_mul(3 as uint32_t).wrapping_div(2 as uint32_t);
-    errhsize = 1 as uint32_t;
-    while n > 0 as uint32_t {
-        errhsize <<= 1 as ::core::ffi::c_int;
-        n >>= 1 as ::core::ffi::c_int;
-    }
-    errhash =
-        malloc(::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t)) as *mut errent;
-    memset(
-        errhash as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t),
-    );
-    n = 0 as uint32_t;
-    while !errtab[n as usize].str.is_null() {
-        hash = errtab[n as usize].num as uint32_t;
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn strerr(mut error: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    unsafe {
+        let mut hash: uint32_t = 0;
+        let mut disp: uint32_t = 0;
+        let mut strbuff: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        if error == 0 as ::core::ffi::c_int {
+            return b"Success (errno=0)\0".as_ptr() as *const ::core::ffi::c_char;
+        }
+        hash = error as uint32_t;
         disp = hash.wrapping_mul(760092119 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t)
             | 1 as uint32_t;
         hash = hash.wrapping_mul(1905886897 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t);
-        while !(*errhash.offset(hash as isize)).str.is_null()
-            && (*errhash.offset(hash as isize)).num != errtab[n as usize].num
-        {
+        while !(*errhash.offset(hash as isize)).str.is_null() {
+            if (*errhash.offset(hash as isize)).num == error {
+                return (*errhash.offset(hash as isize)).str;
+            }
             hash = hash.wrapping_add(disp);
             hash &= errhsize.wrapping_sub(1 as uint32_t);
         }
-        if (*errhash.offset(hash as isize)).str.is_null() {
-            *errhash.offset(hash as isize) = errtab[n as usize];
-        }
-        n = n.wrapping_add(1);
+        strbuff = strerr_storage_get() as *mut ::core::ffi::c_char;
+        snprintf(
+            strbuff,
+            STRERR_BUFF_SIZE as size_t,
+            b"Unknown error: %d\0".as_ptr() as *const ::core::ffi::c_char,
+            error,
+        );
+        *strbuff.offset((STRERR_BUFF_SIZE - 1 as ::core::ffi::c_int) as isize) =
+            0 as ::core::ffi::c_char;
+        return strbuff;
     }
 }
-#[no_mangle]
-pub unsafe extern "C" fn strerr(mut error: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    let mut hash: uint32_t = 0;
-    let mut disp: uint32_t = 0;
-    let mut strbuff: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if error == 0 as ::core::ffi::c_int {
-        return b"Success (errno=0)\0".as_ptr() as *const ::core::ffi::c_char;
-    }
-    hash = error as uint32_t;
-    disp = hash.wrapping_mul(760092119 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t)
-        | 1 as uint32_t;
-    hash = hash.wrapping_mul(1905886897 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t);
-    while !(*errhash.offset(hash as isize)).str.is_null() {
-        if (*errhash.offset(hash as isize)).num == error {
-            return (*errhash.offset(hash as isize)).str;
-        }
-        hash = hash.wrapping_add(disp);
-        hash &= errhsize.wrapping_sub(1 as uint32_t);
-    }
-    strbuff = strerr_storage_get() as *mut ::core::ffi::c_char;
-    snprintf(
-        strbuff,
-        STRERR_BUFF_SIZE as size_t,
-        b"Unknown error: %d\0".as_ptr() as *const ::core::ffi::c_char,
-        error,
-    );
-    *strbuff.offset((STRERR_BUFF_SIZE - 1 as ::core::ffi::c_int) as isize) =
-        0 as ::core::ffi::c_char;
-    return strbuff;
-}
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn strerr_term() {
-    free(errhash as *mut ::core::ffi::c_void);
-    strerr_storage_free();
-    errhash = ::core::ptr::null_mut::<errent>();
+    unsafe {
+        free(errhash as *mut ::core::ffi::c_void);
+        strerr_storage_free();
+        errhash = ::core::ptr::null_mut::<errent>();
+    }
 }

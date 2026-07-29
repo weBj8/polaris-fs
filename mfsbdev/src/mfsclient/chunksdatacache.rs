@@ -1,37 +1,37 @@
+pub enum _IO_wide_data {}
+pub enum _IO_codecvt {}
+pub enum _IO_marker {}
 use ::c2rust_bitfields;
-extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn abort() -> !;
-    fn memcpy(
+unsafe extern "C" {
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn abort() -> !;
+    unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
         __src: *const ::core::ffi::c_void,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn pthread_mutex_init(
+    unsafe fn pthread_mutex_init(
         __mutex: *mut pthread_mutex_t,
         __mutexattr: *const pthread_mutexattr_t,
     ) -> ::core::ffi::c_int;
-    fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
+    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
+    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
+    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     static mut stderr: *mut FILE;
-    fn fprintf(
+    unsafe fn fprintf(
         __stream: *mut FILE,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn mfs_log(
+    unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
         ...
     );
-    fn __errno_location() -> *mut ::core::ffi::c_int;
-    fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
+    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
+    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
 }
 pub type __uint64_t = u64;
 pub type __off_t = ::core::ffi::c_long;
@@ -163,184 +163,202 @@ static mut lock: pthread_mutex_t = pthread_mutex_t {
 };
 #[inline]
 unsafe extern "C" fn chunks_inode_hash_fn(mut inode: uint32_t) -> uint32_t {
-    return inode.wrapping_mul(0x72b5f387 as uint32_t)
-        & (CHUNKS_INODE_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
+    unsafe {
+        return inode.wrapping_mul(0x72b5f387 as uint32_t)
+            & (CHUNKS_INODE_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
+    }
 }
 #[inline]
 unsafe extern "C" fn chunks_data_hash_fn(mut inode: uint32_t, mut chindx: uint32_t) -> uint32_t {
-    return inode
-        .wrapping_mul(0x72b5f387 as uint32_t)
-        .wrapping_add(chindx)
-        .wrapping_mul(0x56bf7623 as uint32_t)
-        & (CHUNKS_DATA_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
+    unsafe {
+        return inode
+            .wrapping_mul(0x72b5f387 as uint32_t)
+            .wrapping_add(chindx)
+            .wrapping_mul(0x56bf7623 as uint32_t)
+            & (CHUNKS_DATA_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
+    }
 }
 #[inline]
 unsafe extern "C" fn chunks_try_remove_inode(mut ih: *mut chunks_inode_entry) {
-    if (*ih).data_head.is_null() {
-        *(*ih).prev = (*ih).next;
-        if !(*ih).next.is_null() {
-            (*(*ih).next).prev = (*ih).prev;
+    unsafe {
+        if (*ih).data_head.is_null() {
+            *(*ih).prev = (*ih).next;
+            if !(*ih).next.is_null() {
+                (*(*ih).next).prev = (*ih).prev;
+            }
+            free(ih as *mut ::core::ffi::c_void);
         }
-        free(ih as *mut ::core::ffi::c_void);
     }
 }
 #[inline]
 unsafe extern "C" fn chunks_remove_entry(mut ca: *mut chunks_data_entry) {
-    *(*ca).previnode = (*ca).nextinode;
-    if !(*ca).nextinode.is_null() {
-        (*(*ca).nextinode).previnode = (*ca).previnode;
+    unsafe {
+        *(*ca).previnode = (*ca).nextinode;
+        if !(*ca).nextinode.is_null() {
+            (*(*ca).nextinode).previnode = (*ca).previnode;
+        }
+        *(*ca).prevdata = (*ca).nextdata;
+        if !(*ca).nextdata.is_null() {
+            (*(*ca).nextdata).prevdata = (*ca).prevdata;
+        }
+        if !(*ca).csdata.is_null() {
+            free((*ca).csdata as *mut ::core::ffi::c_void);
+        }
+        chunks_try_remove_inode((*ca).parent as *mut chunks_inode_entry);
+        free(ca as *mut ::core::ffi::c_void);
     }
-    *(*ca).prevdata = (*ca).nextdata;
-    if !(*ca).nextdata.is_null() {
-        (*(*ca).nextdata).prevdata = (*ca).prevdata;
-    }
-    if !(*ca).csdata.is_null() {
-        free((*ca).csdata as *mut ::core::ffi::c_void);
-    }
-    chunks_try_remove_inode((*ca).parent as *mut chunks_inode_entry);
-    free(ca as *mut ::core::ffi::c_void);
 }
 #[inline]
 unsafe extern "C" fn chunks_new_entry(
     mut inode: uint32_t,
     mut chindx: uint32_t,
 ) -> *mut chunks_data_entry {
-    let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    let mut ihash: uint32_t = 0;
-    ihash = chunks_inode_hash_fn(inode);
-    ih = *chunks_inode_hash.offset(ihash as isize);
-    while !ih.is_null() && (*ih).inode != inode {
-        ih = (*ih).next as *mut chunks_inode_entry;
-    }
-    if ih.is_null() {
-        ih = malloc(::core::mem::size_of::<chunks_inode_entry>()) as *mut chunks_inode_entry;
-        (*ih).inode = inode;
-        (*ih).data_head = ::core::ptr::null_mut::<_chunks_data_entry>();
-        (*ih).next = *chunks_inode_hash.offset(ihash as isize) as *mut _chunks_inode_entry;
-        if !(*ih).next.is_null() {
-            (*(*ih).next).prev = &raw mut (*ih).next;
+    unsafe {
+        let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        let mut ihash: uint32_t = 0;
+        ihash = chunks_inode_hash_fn(inode);
+        ih = *chunks_inode_hash.offset(ihash as isize);
+        while !ih.is_null() && (*ih).inode != inode {
+            ih = (*ih).next as *mut chunks_inode_entry;
         }
-        (*ih).prev = chunks_inode_hash.offset(ihash as isize) as *mut *mut _chunks_inode_entry;
-        *chunks_inode_hash.offset(ihash as isize) = ih;
-    }
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = malloc(::core::mem::size_of::<chunks_data_entry>()) as *mut chunks_data_entry;
-    (*ca).inode = inode;
-    (*ca).chindx = chindx;
-    (*ca).chunkid = 0 as uint64_t;
-    (*ca).version = 0 as uint32_t;
-    (*ca).csdata = ::core::ptr::null_mut::<uint8_t>();
-    (*ca).csdatasize = 0 as uint32_t;
-    (*ca).csdataver = 0 as uint8_t;
-    (*ca).parent = ih as *mut _chunks_inode_entry;
-    (*ca).nextinode = (*ih).data_head;
-    if !(*ca).nextinode.is_null() {
-        (*(*ca).nextinode).previnode = &raw mut (*ca).nextinode;
-    }
-    (*ca).previnode = &raw mut (*ih).data_head;
-    (*ih).data_head = ca as *mut _chunks_data_entry;
-    (*ca).nextdata = *chunks_data_hash.offset(hash as isize) as *mut _chunks_data_entry;
-    if !(*ca).nextdata.is_null() {
-        (*(*ca).nextdata).prevdata = &raw mut (*ca).nextdata;
-    }
-    (*ca).prevdata = chunks_data_hash.offset(hash as isize) as *mut *mut _chunks_data_entry;
-    *chunks_data_hash.offset(hash as isize) = ca;
-    return ca;
-}
-#[no_mangle]
-pub unsafe extern "C" fn chunksdatacache_clear_inode(mut inode: uint32_t, mut chindx: uint32_t) {
-    let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
-    let mut ihn: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut can: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    pthread_mutex_lock(&raw mut lock);
-    ih = *chunks_inode_hash.offset(chunks_inode_hash_fn(inode) as isize);
-    while !ih.is_null() {
-        ihn = (*ih).next as *mut chunks_inode_entry;
-        if (*ih).inode == inode {
-            ca = (*ih).data_head as *mut chunks_data_entry;
-            while !ca.is_null() {
-                can = (*ca).nextinode as *mut chunks_data_entry;
-                if (*ca).chindx >= chindx {
-                    chunks_remove_entry(ca);
-                }
-                ca = can;
+        if ih.is_null() {
+            ih = malloc(::core::mem::size_of::<chunks_inode_entry>()) as *mut chunks_inode_entry;
+            (*ih).inode = inode;
+            (*ih).data_head = ::core::ptr::null_mut::<_chunks_data_entry>();
+            (*ih).next = *chunks_inode_hash.offset(ihash as isize) as *mut _chunks_inode_entry;
+            if !(*ih).next.is_null() {
+                (*(*ih).next).prev = &raw mut (*ih).next;
             }
+            (*ih).prev = chunks_inode_hash.offset(ihash as isize) as *mut *mut _chunks_inode_entry;
+            *chunks_inode_hash.offset(ihash as isize) = ih;
         }
-        ih = ihn;
+        hash = chunks_data_hash_fn(inode, chindx);
+        ca = malloc(::core::mem::size_of::<chunks_data_entry>()) as *mut chunks_data_entry;
+        (*ca).inode = inode;
+        (*ca).chindx = chindx;
+        (*ca).chunkid = 0 as uint64_t;
+        (*ca).version = 0 as uint32_t;
+        (*ca).csdata = ::core::ptr::null_mut::<uint8_t>();
+        (*ca).csdatasize = 0 as uint32_t;
+        (*ca).csdataver = 0 as uint8_t;
+        (*ca).parent = ih as *mut _chunks_inode_entry;
+        (*ca).nextinode = (*ih).data_head;
+        if !(*ca).nextinode.is_null() {
+            (*(*ca).nextinode).previnode = &raw mut (*ca).nextinode;
+        }
+        (*ca).previnode = &raw mut (*ih).data_head;
+        (*ih).data_head = ca as *mut _chunks_data_entry;
+        (*ca).nextdata = *chunks_data_hash.offset(hash as isize) as *mut _chunks_data_entry;
+        if !(*ca).nextdata.is_null() {
+            (*(*ca).nextdata).prevdata = &raw mut (*ca).nextdata;
+        }
+        (*ca).prevdata = chunks_data_hash.offset(hash as isize) as *mut *mut _chunks_data_entry;
+        *chunks_data_hash.offset(hash as isize) = ca;
+        return ca;
     }
-    pthread_mutex_unlock(&raw mut lock);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn chunksdatacache_clear_inode(mut inode: uint32_t, mut chindx: uint32_t) {
+    unsafe {
+        let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
+        let mut ihn: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut can: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        pthread_mutex_lock(&raw mut lock);
+        ih = *chunks_inode_hash.offset(chunks_inode_hash_fn(inode) as isize);
+        while !ih.is_null() {
+            ihn = (*ih).next as *mut chunks_inode_entry;
+            if (*ih).inode == inode {
+                ca = (*ih).data_head as *mut chunks_data_entry;
+                while !ca.is_null() {
+                    can = (*ca).nextinode as *mut chunks_data_entry;
+                    if (*ca).chindx >= chindx {
+                        chunks_remove_entry(ca);
+                    }
+                    ca = can;
+                }
+            }
+            ih = ihn;
+        }
+        pthread_mutex_unlock(&raw mut lock);
+    }
+}
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_invalidate(mut inode: uint32_t, mut chindx: uint32_t) {
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = *chunks_data_hash.offset(hash as isize);
-    while !ca.is_null() {
-        if (*ca).inode == inode && (*ca).chindx == chindx {
-            chunks_remove_entry(ca);
-            pthread_mutex_unlock(&raw mut lock);
-            return;
+    unsafe {
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = chunks_data_hash_fn(inode, chindx);
+        ca = *chunks_data_hash.offset(hash as isize);
+        while !ca.is_null() {
+            if (*ca).inode == inode && (*ca).chindx == chindx {
+                chunks_remove_entry(ca);
+                pthread_mutex_unlock(&raw mut lock);
+                return;
+            }
+            ca = (*ca).nextdata as *mut chunks_data_entry;
         }
-        ca = (*ca).nextdata as *mut chunks_data_entry;
+        pthread_mutex_unlock(&raw mut lock);
     }
-    pthread_mutex_unlock(&raw mut lock);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_check(
     mut inode: uint32_t,
     mut chindx: uint32_t,
     mut chunkid: uint64_t,
     mut version: uint32_t,
 ) -> uint8_t {
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = *chunks_data_hash.offset(hash as isize);
-    while !ca.is_null() {
-        if (*ca).inode == inode && (*ca).chindx == chindx {
-            if (*ca).chunkid == chunkid && (*ca).version == version {
-                pthread_mutex_unlock(&raw mut lock);
-                return 1 as uint8_t;
-            } else {
-                pthread_mutex_unlock(&raw mut lock);
-                return 0 as uint8_t;
+    unsafe {
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = chunks_data_hash_fn(inode, chindx);
+        ca = *chunks_data_hash.offset(hash as isize);
+        while !ca.is_null() {
+            if (*ca).inode == inode && (*ca).chindx == chindx {
+                if (*ca).chunkid == chunkid && (*ca).version == version {
+                    pthread_mutex_unlock(&raw mut lock);
+                    return 1 as uint8_t;
+                } else {
+                    pthread_mutex_unlock(&raw mut lock);
+                    return 0 as uint8_t;
+                }
             }
+            ca = (*ca).nextdata as *mut chunks_data_entry;
         }
-        ca = (*ca).nextdata as *mut chunks_data_entry;
+        pthread_mutex_unlock(&raw mut lock);
+        return 0 as uint8_t;
     }
-    pthread_mutex_unlock(&raw mut lock);
-    return 0 as uint8_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_change(
     mut inode: uint32_t,
     mut chindx: uint32_t,
     mut chunkid: uint64_t,
     mut version: uint32_t,
 ) {
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = *chunks_data_hash.offset(hash as isize);
-    while !ca.is_null() {
-        if (*ca).inode == inode && (*ca).chindx == chindx {
-            (*ca).chunkid = chunkid;
-            (*ca).version = version;
-            pthread_mutex_unlock(&raw mut lock);
-            return;
+    unsafe {
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = chunks_data_hash_fn(inode, chindx);
+        ca = *chunks_data_hash.offset(hash as isize);
+        while !ca.is_null() {
+            if (*ca).inode == inode && (*ca).chindx == chindx {
+                (*ca).chunkid = chunkid;
+                (*ca).version = version;
+                pthread_mutex_unlock(&raw mut lock);
+                return;
+            }
+            ca = (*ca).nextdata as *mut chunks_data_entry;
         }
-        ca = (*ca).nextdata as *mut chunks_data_entry;
+        pthread_mutex_unlock(&raw mut lock);
     }
-    pthread_mutex_unlock(&raw mut lock);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_insert(
     mut inode: uint32_t,
     mut chindx: uint32_t,
@@ -350,50 +368,52 @@ pub unsafe extern "C" fn chunksdatacache_insert(
     mut csdata: *const uint8_t,
     mut csdatasize: uint32_t,
 ) {
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = *chunks_data_hash.offset(hash as isize);
-    while !ca.is_null() {
-        if (*ca).inode == inode && (*ca).chindx == chindx {
-            break;
+    unsafe {
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = chunks_data_hash_fn(inode, chindx);
+        ca = *chunks_data_hash.offset(hash as isize);
+        while !ca.is_null() {
+            if (*ca).inode == inode && (*ca).chindx == chindx {
+                break;
+            }
+            ca = (*ca).nextdata as *mut chunks_data_entry;
         }
-        ca = (*ca).nextdata as *mut chunks_data_entry;
-    }
-    if ca.is_null() {
-        ca = chunks_new_entry(inode, chindx);
-    }
-    (*ca).chunkid = chunkid;
-    (*ca).version = version;
-    (*ca).csdataver = csdataver;
-    if (*ca).csdatasize == csdatasize {
-        if csdatasize > 0 as uint32_t {
-            memcpy(
-                (*ca).csdata as *mut ::core::ffi::c_void,
-                csdata as *const ::core::ffi::c_void,
-                csdatasize as size_t,
-            );
+        if ca.is_null() {
+            ca = chunks_new_entry(inode, chindx);
         }
-    } else {
-        if !(*ca).csdata.is_null() {
-            free((*ca).csdata as *mut ::core::ffi::c_void);
-        }
-        if csdatasize > 0 as uint32_t {
-            (*ca).csdata = malloc(csdatasize as size_t) as *mut uint8_t;
-            memcpy(
-                (*ca).csdata as *mut ::core::ffi::c_void,
-                csdata as *const ::core::ffi::c_void,
-                csdatasize as size_t,
-            );
+        (*ca).chunkid = chunkid;
+        (*ca).version = version;
+        (*ca).csdataver = csdataver;
+        if (*ca).csdatasize == csdatasize {
+            if csdatasize > 0 as uint32_t {
+                memcpy(
+                    (*ca).csdata as *mut ::core::ffi::c_void,
+                    csdata as *const ::core::ffi::c_void,
+                    csdatasize as size_t,
+                );
+            }
         } else {
-            (*ca).csdata = ::core::ptr::null_mut::<uint8_t>();
+            if !(*ca).csdata.is_null() {
+                free((*ca).csdata as *mut ::core::ffi::c_void);
+            }
+            if csdatasize > 0 as uint32_t {
+                (*ca).csdata = malloc(csdatasize as size_t) as *mut uint8_t;
+                memcpy(
+                    (*ca).csdata as *mut ::core::ffi::c_void,
+                    csdata as *const ::core::ffi::c_void,
+                    csdatasize as size_t,
+                );
+            } else {
+                (*ca).csdata = ::core::ptr::null_mut::<uint8_t>();
+            }
+            (*ca).csdatasize = csdatasize;
         }
-        (*ca).csdatasize = csdatasize;
+        pthread_mutex_unlock(&raw mut lock);
     }
-    pthread_mutex_unlock(&raw mut lock);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_find(
     mut inode: uint32_t,
     mut chindx: uint32_t,
@@ -403,188 +423,198 @@ pub unsafe extern "C" fn chunksdatacache_find(
     mut csdata: *mut uint8_t,
     mut csdatasize: *mut uint32_t,
 ) -> uint8_t {
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = chunks_data_hash_fn(inode, chindx);
-    ca = *chunks_data_hash.offset(hash as isize);
-    while !ca.is_null() {
-        if (*ca).inode == inode && (*ca).chindx == chindx {
-            if *csdatasize < (*ca).csdatasize {
-                pthread_mutex_unlock(&raw mut lock);
-                return 0 as uint8_t;
-            }
-            *chunkid = (*ca).chunkid;
-            *version = (*ca).version;
-            *csdataver = (*ca).csdataver;
-            memcpy(
-                csdata as *mut ::core::ffi::c_void,
-                (*ca).csdata as *const ::core::ffi::c_void,
-                (*ca).csdatasize as size_t,
-            );
-            *csdatasize = (*ca).csdatasize;
-            pthread_mutex_unlock(&raw mut lock);
-            return 1 as uint8_t;
-        }
-        ca = (*ca).nextdata as *mut chunks_data_entry;
-    }
-    pthread_mutex_unlock(&raw mut lock);
-    return 0 as uint8_t;
-}
-#[no_mangle]
-pub unsafe extern "C" fn chunksdatacache_cleanup() {
-    let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
-    let mut ihn: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
-    let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut can: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
-    let mut hash: uint32_t = 0;
-    pthread_mutex_lock(&raw mut lock);
-    hash = 0 as uint32_t;
-    while hash < CHUNKS_INODE_HASH_SIZE as uint32_t {
-        ih = *chunks_inode_hash.offset(hash as isize);
-        while !ih.is_null() {
-            ihn = (*ih).next as *mut chunks_inode_entry;
-            free(ih as *mut ::core::ffi::c_void);
-            ih = ihn;
-        }
-        *chunks_inode_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_inode_entry>();
-        hash = hash.wrapping_add(1);
-    }
-    hash = 0 as uint32_t;
-    while hash < CHUNKS_DATA_HASH_SIZE as uint32_t {
+    unsafe {
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = chunks_data_hash_fn(inode, chindx);
         ca = *chunks_data_hash.offset(hash as isize);
         while !ca.is_null() {
-            can = (*ca).nextdata as *mut chunks_data_entry;
-            if !(*ca).csdata.is_null() {
-                free((*ca).csdata as *mut ::core::ffi::c_void);
+            if (*ca).inode == inode && (*ca).chindx == chindx {
+                if *csdatasize < (*ca).csdatasize {
+                    pthread_mutex_unlock(&raw mut lock);
+                    return 0 as uint8_t;
+                }
+                *chunkid = (*ca).chunkid;
+                *version = (*ca).version;
+                *csdataver = (*ca).csdataver;
+                memcpy(
+                    csdata as *mut ::core::ffi::c_void,
+                    (*ca).csdata as *const ::core::ffi::c_void,
+                    (*ca).csdatasize as size_t,
+                );
+                *csdatasize = (*ca).csdatasize;
+                pthread_mutex_unlock(&raw mut lock);
+                return 1 as uint8_t;
             }
-            free(ca as *mut ::core::ffi::c_void);
-            ca = can;
+            ca = (*ca).nextdata as *mut chunks_data_entry;
         }
-        *chunks_data_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_data_entry>();
-        hash = hash.wrapping_add(1);
+        pthread_mutex_unlock(&raw mut lock);
+        return 0 as uint8_t;
     }
-    pthread_mutex_unlock(&raw mut lock);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn chunksdatacache_cleanup() {
+    unsafe {
+        let mut ih: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
+        let mut ihn: *mut chunks_inode_entry = ::core::ptr::null_mut::<chunks_inode_entry>();
+        let mut ca: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut can: *mut chunks_data_entry = ::core::ptr::null_mut::<chunks_data_entry>();
+        let mut hash: uint32_t = 0;
+        pthread_mutex_lock(&raw mut lock);
+        hash = 0 as uint32_t;
+        while hash < CHUNKS_INODE_HASH_SIZE as uint32_t {
+            ih = *chunks_inode_hash.offset(hash as isize);
+            while !ih.is_null() {
+                ihn = (*ih).next as *mut chunks_inode_entry;
+                free(ih as *mut ::core::ffi::c_void);
+                ih = ihn;
+            }
+            *chunks_inode_hash.offset(hash as isize) =
+                ::core::ptr::null_mut::<chunks_inode_entry>();
+            hash = hash.wrapping_add(1);
+        }
+        hash = 0 as uint32_t;
+        while hash < CHUNKS_DATA_HASH_SIZE as uint32_t {
+            ca = *chunks_data_hash.offset(hash as isize);
+            while !ca.is_null() {
+                can = (*ca).nextdata as *mut chunks_data_entry;
+                if !(*ca).csdata.is_null() {
+                    free((*ca).csdata as *mut ::core::ffi::c_void);
+                }
+                free(ca as *mut ::core::ffi::c_void);
+                ca = can;
+            }
+            *chunks_data_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_data_entry>();
+            hash = hash.wrapping_add(1);
+        }
+        pthread_mutex_unlock(&raw mut lock);
+    }
+}
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_term() {
-    chunksdatacache_cleanup();
-    free(chunks_inode_hash as *mut ::core::ffi::c_void);
-    free(chunks_data_hash as *mut ::core::ffi::c_void);
-    pthread_mutex_destroy(&raw mut lock);
+    unsafe {
+        chunksdatacache_cleanup();
+        free(chunks_inode_hash as *mut ::core::ffi::c_void);
+        free(chunks_data_hash as *mut ::core::ffi::c_void);
+        pthread_mutex_destroy(&raw mut lock);
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunksdatacache_init() {
-    let mut hash: uint32_t = 0;
-    chunks_inode_hash = malloc(
-        ::core::mem::size_of::<*mut chunks_inode_entry>()
-            .wrapping_mul(CHUNKS_INODE_HASH_SIZE as size_t),
-    ) as *mut *mut chunks_inode_entry;
-    if chunks_inode_hash.is_null() {
-        fprintf(
-            stderr,
-            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            354 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            354 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        abort();
-    } else if chunks_inode_hash
-        == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-            -1 as ::core::ffi::c_int as usize,
-        ) as *mut *mut chunks_inode_entry
-    {
-        let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            354 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring,
-        );
-        fprintf(
-            stderr,
-            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            354 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring,
-        );
-        abort();
+    unsafe {
+        let mut hash: uint32_t = 0;
+        chunks_inode_hash = malloc(
+            ::core::mem::size_of::<*mut chunks_inode_entry>()
+                .wrapping_mul(CHUNKS_INODE_HASH_SIZE as size_t),
+        ) as *mut *mut chunks_inode_entry;
+        if chunks_inode_hash.is_null() {
+            fprintf(
+                stderr,
+                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                354 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                354 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            abort();
+        } else if chunks_inode_hash
+            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                -1 as ::core::ffi::c_int as usize,
+            ) as *mut *mut chunks_inode_entry
+        {
+            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                354 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring,
+            );
+            fprintf(
+                stderr,
+                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                354 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_inode_hash\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring,
+            );
+            abort();
+        }
+        chunks_data_hash = malloc(
+            ::core::mem::size_of::<*mut chunks_data_entry>()
+                .wrapping_mul(CHUNKS_DATA_HASH_SIZE as size_t),
+        ) as *mut *mut chunks_data_entry;
+        if chunks_data_hash.is_null() {
+            fprintf(
+                stderr,
+                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                357 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                357 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            abort();
+        } else if chunks_data_hash
+            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
+                -1 as ::core::ffi::c_int as usize,
+            ) as *mut *mut chunks_data_entry
+        {
+            let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(*__errno_location());
+            mfs_log(
+                MFSLOG_SYSLOG,
+                MFSLOG_ERR,
+                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                357 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring_0,
+            );
+            fprintf(
+                stderr,
+                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+                357 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
+                _mfs_errorstring_0,
+            );
+            abort();
+        }
+        hash = 0 as uint32_t;
+        while hash < CHUNKS_INODE_HASH_SIZE as uint32_t {
+            *chunks_inode_hash.offset(hash as isize) =
+                ::core::ptr::null_mut::<chunks_inode_entry>();
+            hash = hash.wrapping_add(1);
+        }
+        hash = 0 as uint32_t;
+        while hash < CHUNKS_DATA_HASH_SIZE as uint32_t {
+            *chunks_data_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_data_entry>();
+            hash = hash.wrapping_add(1);
+        }
+        pthread_mutex_init(&raw mut lock, ::core::ptr::null::<pthread_mutexattr_t>());
     }
-    chunks_data_hash = malloc(
-        ::core::mem::size_of::<*mut chunks_data_entry>()
-            .wrapping_mul(CHUNKS_DATA_HASH_SIZE as size_t),
-    ) as *mut *mut chunks_data_entry;
-    if chunks_data_hash.is_null() {
-        fprintf(
-            stderr,
-            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            357 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            357 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        abort();
-    } else if chunks_data_hash
-        == ::core::ptr::from_exposed_addr_mut::<::core::ffi::c_void>(
-            -1 as ::core::ffi::c_int as usize,
-        ) as *mut *mut chunks_data_entry
-    {
-        let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(*__errno_location());
-        mfs_log(
-            MFSLOG_SYSLOG,
-            MFSLOG_ERR,
-            b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            357 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring_0,
-        );
-        fprintf(
-            stderr,
-            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/tmp/moosefs-ref/mfsclient/chunksdatacache.c\0".as_ptr()
-                as *const ::core::ffi::c_char,
-            357 as ::core::ffi::c_int as ::core::ffi::c_uint,
-            b"chunks_data_hash\0".as_ptr() as *const ::core::ffi::c_char,
-            _mfs_errorstring_0,
-        );
-        abort();
-    }
-    hash = 0 as uint32_t;
-    while hash < CHUNKS_INODE_HASH_SIZE as uint32_t {
-        *chunks_inode_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_inode_entry>();
-        hash = hash.wrapping_add(1);
-    }
-    hash = 0 as uint32_t;
-    while hash < CHUNKS_DATA_HASH_SIZE as uint32_t {
-        *chunks_data_hash.offset(hash as isize) = ::core::ptr::null_mut::<chunks_data_entry>();
-        hash = hash.wrapping_add(1);
-    }
-    pthread_mutex_init(&raw mut lock, ::core::ptr::null::<pthread_mutexattr_t>());
 }

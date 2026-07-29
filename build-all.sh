@@ -4,12 +4,11 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-TOOLCHAIN=nightly-2023-04-15
+TOOLCHAIN=nightly
 
 if ! rustup toolchain list | grep -q "^$TOOLCHAIN"; then
     echo ">> installing $TOOLCHAIN"
-    rustup toolchain install "$TOOLCHAIN" --profile minimal \
-        --component rustc-dev,rustfmt,rust-src
+    rustup toolchain install "$TOOLCHAIN" --profile minimal
 fi
 
 # crate dir : binary name produced in target/release/

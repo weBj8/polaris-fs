@@ -1,112 +1,119 @@
-extern "C" {
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn memcpy(
+unsafe extern "C" {
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
         __src: *const ::core::ffi::c_void,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn memset(
+    unsafe fn memset(
         __s: *mut ::core::ffi::c_void,
         __c: ::core::ffi::c_int,
         __n: size_t,
     ) -> *mut ::core::ffi::c_void;
-    fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    fn getpid() -> __pid_t;
-    fn geteuid() -> __uid_t;
-    fn getegid() -> __gid_t;
-    fn getgroups(__size: ::core::ffi::c_int, __list: *mut __gid_t) -> ::core::ffi::c_int;
-    fn __errno_location() -> *mut ::core::ffi::c_int;
-    fn mfs_int_mknod(
+    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
+    unsafe fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
+    unsafe fn getpid() -> __pid_t;
+    unsafe fn geteuid() -> __uid_t;
+    unsafe fn getegid() -> __gid_t;
+    unsafe fn getgroups(__size: ::core::ffi::c_int, __list: *mut __gid_t) -> ::core::ffi::c_int;
+    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
+    unsafe fn mfs_int_mknod(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         r#type: uint8_t,
         mode: uint16_t,
         dev: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_unlink(cr: *mut mfs_int_cred, path: *const ::core::ffi::c_char) -> uint8_t;
-    fn mfs_int_mkdir(
+    unsafe fn mfs_int_unlink(cr: *mut mfs_int_cred, path: *const ::core::ffi::c_char) -> uint8_t;
+    unsafe fn mfs_int_mkdir(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         mode: uint16_t,
     ) -> uint8_t;
-    fn mfs_int_rename(
+    unsafe fn mfs_int_rename(
         cr: *mut mfs_int_cred,
         src: *const ::core::ffi::c_char,
         dst: *const ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_rmdir(cr: *mut mfs_int_cred, path: *const ::core::ffi::c_char) -> uint8_t;
-    fn mfs_int_link(
+    unsafe fn mfs_int_rmdir(cr: *mut mfs_int_cred, path: *const ::core::ffi::c_char) -> uint8_t;
+    unsafe fn mfs_int_link(
         cr: *mut mfs_int_cred,
         src: *const ::core::ffi::c_char,
         dst: *const ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_symlink(
+    unsafe fn mfs_int_symlink(
         cr: *mut mfs_int_cred,
         nodepath: *const ::core::ffi::c_char,
         linkpath: *const ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_readlink(
+    unsafe fn mfs_int_readlink(
         cr: *mut mfs_int_cred,
         nodepath: *const ::core::ffi::c_char,
         linkpath: *mut ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_chmod(
+    unsafe fn mfs_int_chmod(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         mode: uint16_t,
     ) -> uint8_t;
-    fn mfs_int_fchmod(cr: *mut mfs_int_cred, fildes: ::core::ffi::c_int, mode: uint16_t)
-        -> uint8_t;
-    fn mfs_int_chown(
+    unsafe fn mfs_int_fchmod(
+        cr: *mut mfs_int_cred,
+        fildes: ::core::ffi::c_int,
+        mode: uint16_t,
+    ) -> uint8_t;
+    unsafe fn mfs_int_chown(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         owner: uint32_t,
         group: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_fchown(
+    unsafe fn mfs_int_fchown(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         owner: uint32_t,
         group: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_utimes(
+    unsafe fn mfs_int_utimes(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         flags: uint8_t,
         atime: uint32_t,
         mtime: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_futimes(
+    unsafe fn mfs_int_futimes(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         flags: uint8_t,
         atime: uint32_t,
         mtime: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_truncate(
+    unsafe fn mfs_int_truncate(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         size: int64_t,
     ) -> uint8_t;
-    fn mfs_int_ftruncate(
+    unsafe fn mfs_int_ftruncate(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         size: int64_t,
     ) -> uint8_t;
-    fn mfs_int_lseek(fildes: ::core::ffi::c_int, offset: *mut int64_t, whence: uint8_t) -> uint8_t;
-    fn mfs_int_stat(
+    unsafe fn mfs_int_lseek(
+        fildes: ::core::ffi::c_int,
+        offset: *mut int64_t,
+        whence: uint8_t,
+    ) -> uint8_t;
+    unsafe fn mfs_int_stat(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         buf: *mut mfs_int_statrec,
     ) -> uint8_t;
-    fn mfs_int_fstat(
+    unsafe fn mfs_int_fstat(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         buf: *mut mfs_int_statrec,
     ) -> uint8_t;
-    fn mfs_int_getxattr(
+    unsafe fn mfs_int_getxattr(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         name: *const ::core::ffi::c_char,
@@ -114,7 +121,7 @@ extern "C" {
         vleng: *mut uint32_t,
         mode: uint8_t,
     ) -> uint8_t;
-    fn mfs_int_fgetxattr(
+    unsafe fn mfs_int_fgetxattr(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         name: *const ::core::ffi::c_char,
@@ -122,7 +129,7 @@ extern "C" {
         vleng: *mut uint32_t,
         mode: uint8_t,
     ) -> uint8_t;
-    fn mfs_int_setxattr(
+    unsafe fn mfs_int_setxattr(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         name: *const ::core::ffi::c_char,
@@ -130,7 +137,7 @@ extern "C" {
         vsize: uint32_t,
         mode: uint8_t,
     ) -> uint8_t;
-    fn mfs_int_fsetxattr(
+    unsafe fn mfs_int_fsetxattr(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         name: *const ::core::ffi::c_char,
@@ -138,31 +145,31 @@ extern "C" {
         vsize: uint32_t,
         mode: uint8_t,
     ) -> uint8_t;
-    fn mfs_int_removexattr(
+    unsafe fn mfs_int_removexattr(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         name: *const ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_fremovexattr(
+    unsafe fn mfs_int_fremovexattr(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         name: *const ::core::ffi::c_char,
     ) -> uint8_t;
-    fn mfs_int_listxattr(
+    unsafe fn mfs_int_listxattr(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         rsize: *mut int32_t,
         list: *mut ::core::ffi::c_char,
         size: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_flistxattr(
+    unsafe fn mfs_int_flistxattr(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         rsize: *mut int32_t,
         list: *mut ::core::ffi::c_char,
         size: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_getfacl(
+    unsafe fn mfs_int_getfacl(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         acltype: uint8_t,
@@ -175,7 +182,7 @@ extern "C" {
         namedacls: *mut *const uint8_t,
         namedaclssize: *mut uint32_t,
     ) -> uint8_t;
-    fn mfs_int_fgetfacl(
+    unsafe fn mfs_int_fgetfacl(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         acltype: uint8_t,
@@ -188,7 +195,7 @@ extern "C" {
         namedacls: *mut *const uint8_t,
         namedaclssize: *mut uint32_t,
     ) -> uint8_t;
-    fn mfs_int_setfacl(
+    unsafe fn mfs_int_setfacl(
         cr: *mut mfs_int_cred,
         path: *const ::core::ffi::c_char,
         acltype: uint8_t,
@@ -201,7 +208,7 @@ extern "C" {
         namedacls: *mut uint8_t,
         namedaclssize: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_fsetfacl(
+    unsafe fn mfs_int_fsetfacl(
         cr: *mut mfs_int_cred,
         fildes: ::core::ffi::c_int,
         acltype: uint8_t,
@@ -214,58 +221,58 @@ extern "C" {
         namedacls: *mut uint8_t,
         namedaclssize: uint32_t,
     ) -> uint8_t;
-    fn mfs_int_statfs(buf: *mut mfs_int_statfsrec) -> uint8_t;
-    fn mfs_int_open(
+    unsafe fn mfs_int_statfs(buf: *mut mfs_int_statfsrec) -> uint8_t;
+    unsafe fn mfs_int_open(
         cr: *mut mfs_int_cred,
         fildes: *mut ::core::ffi::c_int,
         path: *const ::core::ffi::c_char,
         oflag: ::core::ffi::c_int,
         mode: ::core::ffi::c_int,
     ) -> uint8_t;
-    fn mfs_int_pread(
+    unsafe fn mfs_int_pread(
         fildes: ::core::ffi::c_int,
         rsize: *mut int64_t,
         buf: *mut uint8_t,
         nbyte: uint64_t,
         offset: uint64_t,
     ) -> uint8_t;
-    fn mfs_int_read(
+    unsafe fn mfs_int_read(
         fildes: ::core::ffi::c_int,
         rsize: *mut int64_t,
         buf: *mut uint8_t,
         nbyte: uint64_t,
     ) -> uint8_t;
-    fn mfs_int_pwrite(
+    unsafe fn mfs_int_pwrite(
         fildes: ::core::ffi::c_int,
         rsize: *mut int64_t,
         buf: *const uint8_t,
         nbyte: uint64_t,
         offset: uint64_t,
     ) -> uint8_t;
-    fn mfs_int_write(
+    unsafe fn mfs_int_write(
         fildes: ::core::ffi::c_int,
         rsize: *mut int64_t,
         buf: *const uint8_t,
         nbyte: uint64_t,
     ) -> uint8_t;
-    fn mfs_int_fsync(fildes: ::core::ffi::c_int) -> uint8_t;
-    fn mfs_int_close(fildes: ::core::ffi::c_int) -> uint8_t;
-    fn mfs_int_flock(fildes: ::core::ffi::c_int, op: uint8_t) -> uint8_t;
-    fn mfs_int_lockf(
+    unsafe fn mfs_int_fsync(fildes: ::core::ffi::c_int) -> uint8_t;
+    unsafe fn mfs_int_close(fildes: ::core::ffi::c_int) -> uint8_t;
+    unsafe fn mfs_int_flock(fildes: ::core::ffi::c_int, op: uint8_t) -> uint8_t;
+    unsafe fn mfs_int_lockf(
         fildes: ::core::ffi::c_int,
         pid: uint32_t,
         function: uint8_t,
         size: int64_t,
     ) -> uint8_t;
-    fn mfs_int_fcntl_locks(
+    unsafe fn mfs_int_fcntl_locks(
         fildes: ::core::ffi::c_int,
         pid: uint32_t,
         function: uint8_t,
         fl: *mut mfs_int_flockrec,
     ) -> uint8_t;
-    fn mfs_int_init(mcfg: *mut mfs_int_cfg, stage: uint8_t) -> ::core::ffi::c_int;
-    fn mfs_int_term();
-    fn umask(__mask: __mode_t) -> __mode_t;
+    unsafe fn mfs_int_init(mcfg: *mut mfs_int_cfg, stage: uint8_t) -> ::core::ffi::c_int;
+    unsafe fn mfs_int_term();
+    unsafe fn umask(__mask: __mode_t) -> __mode_t;
 }
 pub type __builtin_va_list = [__va_list_tag; 1];
 #[derive(Copy, Clone)]
@@ -617,47 +624,55 @@ pub const VERSMID: ::core::ffi::c_int = 59 as ::core::ffi::c_int;
 pub const VERSMIN: ::core::ffi::c_int = 2 as ::core::ffi::c_int * 2 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn put32bit(mut ptr: *mut *mut uint8_t, mut val: uint32_t) {
-    val = val.swap_bytes() as uint32_t;
-    memcpy(
-        *ptr as *mut ::core::ffi::c_void,
-        &raw mut val as *const ::core::ffi::c_void,
-        4 as size_t,
-    );
-    *ptr = (*ptr).offset(4 as ::core::ffi::c_int as isize);
+    unsafe {
+        val = val.swap_bytes() as uint32_t;
+        memcpy(
+            *ptr as *mut ::core::ffi::c_void,
+            &raw mut val as *const ::core::ffi::c_void,
+            4 as size_t,
+        );
+        *ptr = (*ptr).offset(4 as ::core::ffi::c_int as isize);
+    }
 }
 #[inline]
 unsafe extern "C" fn put16bit(mut ptr: *mut *mut uint8_t, mut val: uint16_t) {
-    val = val.swap_bytes() as uint16_t;
-    memcpy(
-        *ptr as *mut ::core::ffi::c_void,
-        &raw mut val as *const ::core::ffi::c_void,
-        2 as size_t,
-    );
-    *ptr = (*ptr).offset(2 as ::core::ffi::c_int as isize);
+    unsafe {
+        val = val.swap_bytes() as uint16_t;
+        memcpy(
+            *ptr as *mut ::core::ffi::c_void,
+            &raw mut val as *const ::core::ffi::c_void,
+            2 as size_t,
+        );
+        *ptr = (*ptr).offset(2 as ::core::ffi::c_int as isize);
+    }
 }
 #[inline]
 unsafe extern "C" fn get32bit(mut ptr: *mut *const uint8_t) -> uint32_t {
-    let mut t32: uint32_t = 0;
-    memcpy(
-        &raw mut t32 as *mut ::core::ffi::c_void,
-        *ptr as *const ::core::ffi::c_void,
-        4 as size_t,
-    );
-    *ptr = (*ptr).offset(4 as ::core::ffi::c_int as isize);
-    return t32.swap_bytes();
+    unsafe {
+        let mut t32: uint32_t = 0;
+        memcpy(
+            &raw mut t32 as *mut ::core::ffi::c_void,
+            *ptr as *const ::core::ffi::c_void,
+            4 as size_t,
+        );
+        *ptr = (*ptr).offset(4 as ::core::ffi::c_int as isize);
+        return t32.swap_bytes();
+    }
 }
 #[inline]
 unsafe extern "C" fn get16bit(mut ptr: *mut *const uint8_t) -> uint16_t {
-    let mut t16: uint16_t = 0;
-    memcpy(
-        &raw mut t16 as *mut ::core::ffi::c_void,
-        *ptr as *const ::core::ffi::c_void,
-        2 as size_t,
-    );
-    *ptr = (*ptr).offset(2 as ::core::ffi::c_int as isize);
-    return t16.swap_bytes();
+    unsafe {
+        let mut t16: uint16_t = 0;
+        memcpy(
+            &raw mut t16 as *mut ::core::ffi::c_void,
+            *ptr as *const ::core::ffi::c_void,
+            2 as size_t,
+        );
+        *ptr = (*ptr).offset(2 as ::core::ffi::c_int as isize);
+        return t16.swap_bytes();
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut id: [::core::ffi::c_char; 72] = unsafe {
     ::core::mem::transmute::<[u8; 72], [::core::ffi::c_char; 72]>(
         *b"@(#) version: 4.59.2-1, build: 2106, written by Jakub Kruszona-Zawadzki\0",
@@ -704,94 +719,96 @@ pub const XATTR_CREATE: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const XATTR_REPLACE: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const ENOATTR: ::core::ffi::c_int = ENODATA;
 unsafe extern "C" fn mfs_errorconv(mut status: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    match status {
-        MFS_STATUS_OK => {
-            ret = 0 as ::core::ffi::c_int;
+    unsafe {
+        let mut ret: ::core::ffi::c_int = 0;
+        match status {
+            MFS_STATUS_OK => {
+                ret = 0 as ::core::ffi::c_int;
+            }
+            MFS_ERROR_EPERM => {
+                ret = EPERM;
+            }
+            MFS_ERROR_ENOTDIR => {
+                ret = ENOTDIR;
+            }
+            MFS_ERROR_ENOENT => {
+                ret = ENOENT;
+            }
+            MFS_ERROR_EACCES => {
+                ret = EACCES;
+            }
+            MFS_ERROR_EEXIST => {
+                ret = EEXIST;
+            }
+            MFS_ERROR_EINVAL => {
+                ret = EINVAL;
+            }
+            MFS_ERROR_ENOTEMPTY => {
+                ret = ENOTEMPTY;
+            }
+            MFS_ERROR_IO => {
+                ret = EIO;
+            }
+            MFS_ERROR_EROFS => {
+                ret = EROFS;
+            }
+            MFS_ERROR_EINTR => {
+                ret = EINTR;
+            }
+            MFS_ERROR_EAGAIN => {
+                ret = EAGAIN;
+            }
+            MFS_ERROR_ECANCELED => {
+                ret = ECANCELED;
+            }
+            MFS_ERROR_QUOTA => {
+                ret = EDQUOT;
+            }
+            MFS_ERROR_ENOATTR => {
+                ret = ENOATTR;
+            }
+            MFS_ERROR_ENOTSUP => {
+                ret = ENOTSUP;
+            }
+            MFS_ERROR_ERANGE => {
+                ret = ERANGE;
+            }
+            MFS_ERROR_NOSPACE => {
+                ret = ENOSPC;
+            }
+            MFS_ERROR_CHUNKLOST => {
+                ret = ENXIO;
+            }
+            MFS_ERROR_NOCHUNKSERVERS => {
+                ret = ENOSPC;
+            }
+            MFS_ERROR_CSNOTPRESENT => {
+                ret = ENXIO;
+            }
+            MFS_ERROR_NOTOPENED => {
+                ret = EBADF;
+            }
+            MFS_ERROR_ENAMETOOLONG => {
+                ret = ENAMETOOLONG;
+            }
+            MFS_ERROR_EMLINK => {
+                ret = EMLINK;
+            }
+            MFS_ERROR_EBADF => {
+                ret = EBADF;
+            }
+            MFS_ERROR_EFBIG => {
+                ret = EFBIG;
+            }
+            MFS_ERROR_EISDIR => {
+                ret = EISDIR;
+            }
+            _ => {
+                ret = EINVAL;
+            }
         }
-        MFS_ERROR_EPERM => {
-            ret = EPERM;
-        }
-        MFS_ERROR_ENOTDIR => {
-            ret = ENOTDIR;
-        }
-        MFS_ERROR_ENOENT => {
-            ret = ENOENT;
-        }
-        MFS_ERROR_EACCES => {
-            ret = EACCES;
-        }
-        MFS_ERROR_EEXIST => {
-            ret = EEXIST;
-        }
-        MFS_ERROR_EINVAL => {
-            ret = EINVAL;
-        }
-        MFS_ERROR_ENOTEMPTY => {
-            ret = ENOTEMPTY;
-        }
-        MFS_ERROR_IO => {
-            ret = EIO;
-        }
-        MFS_ERROR_EROFS => {
-            ret = EROFS;
-        }
-        MFS_ERROR_EINTR => {
-            ret = EINTR;
-        }
-        MFS_ERROR_EAGAIN => {
-            ret = EAGAIN;
-        }
-        MFS_ERROR_ECANCELED => {
-            ret = ECANCELED;
-        }
-        MFS_ERROR_QUOTA => {
-            ret = EDQUOT;
-        }
-        MFS_ERROR_ENOATTR => {
-            ret = ENOATTR;
-        }
-        MFS_ERROR_ENOTSUP => {
-            ret = ENOTSUP;
-        }
-        MFS_ERROR_ERANGE => {
-            ret = ERANGE;
-        }
-        MFS_ERROR_NOSPACE => {
-            ret = ENOSPC;
-        }
-        MFS_ERROR_CHUNKLOST => {
-            ret = ENXIO;
-        }
-        MFS_ERROR_NOCHUNKSERVERS => {
-            ret = ENOSPC;
-        }
-        MFS_ERROR_CSNOTPRESENT => {
-            ret = ENXIO;
-        }
-        MFS_ERROR_NOTOPENED => {
-            ret = EBADF;
-        }
-        MFS_ERROR_ENAMETOOLONG => {
-            ret = ENAMETOOLONG;
-        }
-        MFS_ERROR_EMLINK => {
-            ret = EMLINK;
-        }
-        MFS_ERROR_EBADF => {
-            ret = EBADF;
-        }
-        MFS_ERROR_EFBIG => {
-            ret = EFBIG;
-        }
-        MFS_ERROR_EISDIR => {
-            ret = EISDIR;
-        }
-        _ => {
-            ret = EINVAL;
-        }
+        return ret;
     }
-    return ret;
 }
 pub const PKGVERSION: ::core::ffi::c_int = VERSMAJ * 1000000 as ::core::ffi::c_int
     + VERSMID * 10000 as ::core::ffi::c_int
@@ -801,1104 +818,1179 @@ unsafe extern "C" fn mfsstatfs_to_statvfs(
     mut mfsstatfs: *mut mfs_int_statfsrec,
     mut stvfsbuf: *mut statvfs,
 ) {
-    let bsize: uint32_t = 0x10000 as uint32_t;
-    (*stvfsbuf).f_bsize = bsize as ::core::ffi::c_ulong;
-    (*stvfsbuf).f_frsize = bsize as ::core::ffi::c_ulong;
-    (*stvfsbuf).f_blocks =
-        (*mfsstatfs).totalspace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
-    (*stvfsbuf).f_bfree = (*mfsstatfs).freespace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
-    (*stvfsbuf).f_bavail =
-        (*mfsstatfs).availspace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
-    (*stvfsbuf).f_files = ((1100000000 as ::core::ffi::c_int + PKGVERSION) as uint32_t)
-        .wrapping_add((*mfsstatfs).inodes) as __fsfilcnt64_t;
-    (*stvfsbuf).f_ffree = (1100000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
-    (*stvfsbuf).f_favail = (1100000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
-    (*stvfsbuf).f_namemax = MFS_NAME_MAX as ::core::ffi::c_ulong;
-    (*stvfsbuf).f_fsid = (*mfsstatfs).sessionid as ::core::ffi::c_ulong;
+    unsafe {
+        let bsize: uint32_t = 0x10000 as uint32_t;
+        (*stvfsbuf).f_bsize = bsize as ::core::ffi::c_ulong;
+        (*stvfsbuf).f_frsize = bsize as ::core::ffi::c_ulong;
+        (*stvfsbuf).f_blocks =
+            (*mfsstatfs).totalspace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
+        (*stvfsbuf).f_bfree =
+            (*mfsstatfs).freespace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
+        (*stvfsbuf).f_bavail =
+            (*mfsstatfs).availspace.wrapping_div(bsize as uint64_t) as __fsblkcnt64_t;
+        (*stvfsbuf).f_files = ((1100000000 as ::core::ffi::c_int + PKGVERSION) as uint32_t)
+            .wrapping_add((*mfsstatfs).inodes) as __fsfilcnt64_t;
+        (*stvfsbuf).f_ffree = (1100000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
+        (*stvfsbuf).f_favail = (1100000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
+        (*stvfsbuf).f_namemax = MFS_NAME_MAX as ::core::ffi::c_ulong;
+        (*stvfsbuf).f_fsid = (*mfsstatfs).sessionid as ::core::ffi::c_ulong;
+    }
 }
 unsafe extern "C" fn mfsstat_to_stat(mut mfsstat: *mut mfs_int_statrec, mut stbuf: *mut stat) {
-    (*stbuf).st_ino = (*mfsstat).inode as __ino_t;
-    (*stbuf).st_blksize = MFSBLOCKSIZE as __blksize_t;
-    match (*mfsstat).r#type as ::core::ffi::c_int & 0x7f as ::core::ffi::c_int {
-        TYPE_DIRECTORY => {
-            (*stbuf).st_mode = (S_IFDIR | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+    unsafe {
+        (*stbuf).st_ino = (*mfsstat).inode as __ino_t;
+        (*stbuf).st_blksize = MFSBLOCKSIZE as __blksize_t;
+        match (*mfsstat).r#type as ::core::ffi::c_int & 0x7f as ::core::ffi::c_int {
+            TYPE_DIRECTORY => {
+                (*stbuf).st_mode = (S_IFDIR | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_SYMLINK => {
+                (*stbuf).st_mode = (S_IFLNK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_FILE => {
+                (*stbuf).st_mode = (S_IFREG | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_FIFO => {
+                (*stbuf).st_mode = (S_IFIFO | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_SOCKET => {
+                (*stbuf).st_mode = (S_IFSOCK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_BLOCKDEV => {
+                (*stbuf).st_mode = (S_IFBLK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            TYPE_CHARDEV => {
+                (*stbuf).st_mode = (S_IFCHR | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
+            }
+            _ => {
+                (*stbuf).st_mode = 0 as __mode_t;
+            }
         }
-        TYPE_SYMLINK => {
-            (*stbuf).st_mode = (S_IFLNK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        TYPE_FILE => {
-            (*stbuf).st_mode = (S_IFREG | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        TYPE_FIFO => {
-            (*stbuf).st_mode = (S_IFIFO | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        TYPE_SOCKET => {
-            (*stbuf).st_mode = (S_IFSOCK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        TYPE_BLOCKDEV => {
-            (*stbuf).st_mode = (S_IFBLK | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        TYPE_CHARDEV => {
-            (*stbuf).st_mode = (S_IFCHR | (*mfsstat).mode as ::core::ffi::c_int) as __mode_t;
-        }
-        _ => {
-            (*stbuf).st_mode = 0 as __mode_t;
-        }
+        (*stbuf).st_uid = (*mfsstat).uid as __uid_t;
+        (*stbuf).st_gid = (*mfsstat).gid as __gid_t;
+        (*stbuf).st_atim.tv_sec = (*mfsstat).atime as __time_t;
+        (*stbuf).st_mtim.tv_sec = (*mfsstat).mtime as __time_t;
+        (*stbuf).st_ctim.tv_sec = (*mfsstat).ctime as __time_t;
+        (*stbuf).st_nlink = (*mfsstat).nlink as __nlink_t;
+        (*stbuf).st_size = (*mfsstat).length as __off_t;
+        (*stbuf).st_blocks = (*mfsstat)
+            .length
+            .wrapping_add(511 as uint64_t)
+            .wrapping_div(512 as uint64_t) as __blkcnt_t;
+        (*stbuf).st_rdev = (*mfsstat).dev as __dev_t;
     }
-    (*stbuf).st_uid = (*mfsstat).uid as __uid_t;
-    (*stbuf).st_gid = (*mfsstat).gid as __gid_t;
-    (*stbuf).st_atim.tv_sec = (*mfsstat).atime as __time_t;
-    (*stbuf).st_mtim.tv_sec = (*mfsstat).mtime as __time_t;
-    (*stbuf).st_ctim.tv_sec = (*mfsstat).ctime as __time_t;
-    (*stbuf).st_nlink = (*mfsstat).nlink as __nlink_t;
-    (*stbuf).st_size = (*mfsstat).length as __off_t;
-    (*stbuf).st_blocks = (*mfsstat)
-        .length
-        .wrapping_add(511 as uint64_t)
-        .wrapping_div(512 as uint64_t) as __blkcnt_t;
-    (*stbuf).st_rdev = (*mfsstat).dev as __dev_t;
 }
 pub const CRED_BASIC: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const CRED_UMASK: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 unsafe extern "C" fn mfs_get_credentials(mut ctx: *mut mfs_int_cred, mut mode: uint8_t) {
-    static mut last_umask: mode_t = 0 as mode_t;
-    let mut gids: [gid_t; 256] = [0; 256];
-    let mut gid: gid_t = 0;
-    let mut i: uint32_t = 0;
-    let mut j: uint32_t = 0;
-    (*ctx).uid = geteuid() as uint32_t;
-    (*ctx).gidcnt = getgroups(MFS_NGROUPS_MAX, &raw mut gids as *mut __gid_t) as uint32_t;
-    gid = getegid() as gid_t;
-    (*ctx).gidtab[0 as usize] = gid as uint32_t;
-    i = 0 as uint32_t;
-    j = 1 as uint32_t;
-    while i < (*ctx).gidcnt {
-        if gids[i as usize] != gid {
-            let c2rust_fresh0 = j;
-            j = j.wrapping_add(1);
-            (*ctx).gidtab[c2rust_fresh0 as usize] = gids[i as usize] as uint32_t;
+    unsafe {
+        static mut last_umask: mode_t = 0 as mode_t;
+        let mut gids: [gid_t; 256] = [0; 256];
+        let mut gid: gid_t = 0;
+        let mut i: uint32_t = 0;
+        let mut j: uint32_t = 0;
+        (*ctx).uid = geteuid() as uint32_t;
+        (*ctx).gidcnt = getgroups(MFS_NGROUPS_MAX, &raw mut gids as *mut __gid_t) as uint32_t;
+        gid = getegid() as gid_t;
+        (*ctx).gidtab[0 as usize] = gid as uint32_t;
+        i = 0 as uint32_t;
+        j = 1 as uint32_t;
+        while i < (*ctx).gidcnt {
+            if gids[i as usize] != gid {
+                let c2rust_fresh0 = j;
+                j = j.wrapping_add(1);
+                (*ctx).gidtab[c2rust_fresh0 as usize] = gids[i as usize] as uint32_t;
+            }
+            i = i.wrapping_add(1);
         }
-        i = i.wrapping_add(1);
-    }
-    (*ctx).gidcnt = j;
-    if mode as ::core::ffi::c_int == CRED_UMASK {
-        last_umask = umask(last_umask as __mode_t) as mode_t;
-        umask(last_umask as __mode_t);
-        (*ctx).umask = last_umask as uint16_t;
+        (*ctx).gidcnt = j;
+        if mode as ::core::ffi::c_int == CRED_UMASK {
+            last_umask = umask(last_umask as __mode_t) as mode_t;
+            umask(last_umask as __mode_t);
+            (*ctx).umask = last_umask as uint16_t;
+        }
     }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_mknod(
     mut path: *const ::core::ffi::c_char,
     mut mode: mode_t,
     mut dev: dev_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut r#type: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
-    if mode & __S_IFMT as mode_t == 0o10000 as mode_t {
-        r#type = TYPE_FIFO as uint8_t;
-    } else if mode & __S_IFMT as mode_t == 0o20000 as mode_t {
-        r#type = TYPE_CHARDEV as uint8_t;
-    } else if mode & __S_IFMT as mode_t == 0o60000 as mode_t {
-        r#type = TYPE_BLOCKDEV as uint8_t;
-    } else if mode & __S_IFMT as mode_t == 0o140000 as mode_t {
-        r#type = TYPE_SOCKET as uint8_t;
-    } else if mode & __S_IFMT as mode_t == 0o100000 as mode_t
-        || mode & 0o170000 as mode_t == 0 as mode_t
-    {
-        r#type = TYPE_FILE as uint8_t;
-    } else {
-        *__errno_location() = EPERM;
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut r#type: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
+        if mode & __S_IFMT as mode_t == 0o10000 as mode_t {
+            r#type = TYPE_FIFO as uint8_t;
+        } else if mode & __S_IFMT as mode_t == 0o20000 as mode_t {
+            r#type = TYPE_CHARDEV as uint8_t;
+        } else if mode & __S_IFMT as mode_t == 0o60000 as mode_t {
+            r#type = TYPE_BLOCKDEV as uint8_t;
+        } else if mode & __S_IFMT as mode_t == 0o140000 as mode_t {
+            r#type = TYPE_SOCKET as uint8_t;
+        } else if mode & __S_IFMT as mode_t == 0o100000 as mode_t
+            || mode & 0o170000 as mode_t == 0 as mode_t
+        {
+            r#type = TYPE_FILE as uint8_t;
+        } else {
+            *__errno_location() = EPERM;
+            return -1 as ::core::ffi::c_int;
+        }
+        status = mfs_int_mknod(&raw mut cr, path, r#type, mode as uint16_t, dev as uint32_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_mknod(&raw mut cr, path, r#type, mode as uint16_t, dev as uint32_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_unlink(mut path: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_unlink(&raw mut cr, path);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_unlink(&raw mut cr, path);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_mkdir(
     mut path: *const ::core::ffi::c_char,
     mut mode: mode_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
-    status = mfs_int_mkdir(&raw mut cr, path, mode as uint16_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
+        status = mfs_int_mkdir(&raw mut cr, path, mode as uint16_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_rmdir(mut path: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_rmdir(&raw mut cr, path);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_rmdir(&raw mut cr, path);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_rename(
     mut src: *const ::core::ffi::c_char,
     mut dst: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_rename(&raw mut cr, src, dst);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_rename(&raw mut cr, src, dst);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_link(
     mut src: *const ::core::ffi::c_char,
     mut dst: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_link(&raw mut cr, src, dst);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_link(&raw mut cr, src, dst);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_symlink(
     mut path1: *const ::core::ffi::c_char,
     mut path2: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_symlink(&raw mut cr, path1, path2);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_symlink(&raw mut cr, path1, path2);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_readlink(
     mut path: *const ::core::ffi::c_char,
     mut buf: *mut ::core::ffi::c_char,
     mut bufsize: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut lnkbuff: [::core::ffi::c_char; 4096] = [0; 4096];
-    let mut leng: ssize_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_readlink(
-        &raw mut cr,
-        path,
-        &raw mut lnkbuff as *mut ::core::ffi::c_char,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut lnkbuff: [::core::ffi::c_char; 4096] = [0; 4096];
+        let mut leng: ssize_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_readlink(
+            &raw mut cr,
+            path,
+            &raw mut lnkbuff as *mut ::core::ffi::c_char,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        lnkbuff[(MFS_SYMLINK_MAX - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
+        leng = strlen(&raw mut lnkbuff as *mut ::core::ffi::c_char) as ssize_t;
+        if leng as size_t > bufsize {
+            leng = bufsize as ssize_t;
+        }
+        memcpy(
+            buf as *mut ::core::ffi::c_void,
+            &raw mut lnkbuff as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
+            leng as size_t,
+        );
+        return leng;
     }
-    lnkbuff[(MFS_SYMLINK_MAX - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
-    leng = strlen(&raw mut lnkbuff as *mut ::core::ffi::c_char) as ssize_t;
-    if leng as size_t > bufsize {
-        leng = bufsize as ssize_t;
-    }
-    memcpy(
-        buf as *mut ::core::ffi::c_void,
-        &raw mut lnkbuff as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
-        leng as size_t,
-    );
-    return leng;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_chmod(
     mut path: *const ::core::ffi::c_char,
     mut mode: mode_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_chmod(&raw mut cr, path, mode as uint16_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_chmod(&raw mut cr, path, mode as uint16_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fchmod(
     mut fildes: ::core::ffi::c_int,
     mut mode: mode_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fchmod(&raw mut cr, fildes, mode as uint16_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fchmod(&raw mut cr, fildes, mode as uint16_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_chown(
     mut path: *const ::core::ffi::c_char,
     mut owner: uid_t,
     mut group: gid_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_chown(
-        &raw mut cr,
-        path,
-        if owner != -1 as ::core::ffi::c_int as uid_t {
-            owner as uint32_t
-        } else {
-            0xffffffff as uint32_t
-        },
-        if group != -1 as ::core::ffi::c_int as gid_t {
-            group as uint32_t
-        } else {
-            0xffffffff as uint32_t
-        },
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_chown(
+            &raw mut cr,
+            path,
+            if owner != -1 as ::core::ffi::c_int as uid_t {
+                owner as uint32_t
+            } else {
+                0xffffffff as uint32_t
+            },
+            if group != -1 as ::core::ffi::c_int as gid_t {
+                group as uint32_t
+            } else {
+                0xffffffff as uint32_t
+            },
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fchown(
     mut fildes: ::core::ffi::c_int,
     mut owner: uid_t,
     mut group: gid_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fchown(
-        &raw mut cr,
-        fildes,
-        if owner != -1 as ::core::ffi::c_int as uid_t {
-            owner as uint32_t
-        } else {
-            0xffffffff as uint32_t
-        },
-        if group != -1 as ::core::ffi::c_int as gid_t {
-            group as uint32_t
-        } else {
-            0xffffffff as uint32_t
-        },
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fchown(
+            &raw mut cr,
+            fildes,
+            if owner != -1 as ::core::ffi::c_int as uid_t {
+                owner as uint32_t
+            } else {
+                0xffffffff as uint32_t
+            },
+            if group != -1 as ::core::ffi::c_int as gid_t {
+                group as uint32_t
+            } else {
+                0xffffffff as uint32_t
+            },
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_utimes(
     mut path: *const ::core::ffi::c_char,
     mut times: *const timeval,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut flags: uint8_t = 0;
-    let mut atime: uint32_t = 0;
-    let mut mtime: uint32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    if times.is_null() {
-        flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
-        atime = 0 as uint32_t;
-        mtime = 0 as uint32_t;
-    } else {
-        flags = 0 as uint8_t;
-        atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
-        mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut flags: uint8_t = 0;
+        let mut atime: uint32_t = 0;
+        let mut mtime: uint32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        if times.is_null() {
+            flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
+            atime = 0 as uint32_t;
+            mtime = 0 as uint32_t;
+        } else {
+            flags = 0 as uint8_t;
+            atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
+            mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+        }
+        status = mfs_int_utimes(&raw mut cr, path, flags, atime, mtime);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_utimes(&raw mut cr, path, flags, atime, mtime);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_futimes(
     mut fildes: ::core::ffi::c_int,
     mut times: *const timeval,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut flags: uint8_t = 0;
-    let mut atime: uint32_t = 0;
-    let mut mtime: uint32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    if times.is_null() {
-        flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
-        atime = 0 as uint32_t;
-        mtime = 0 as uint32_t;
-    } else {
-        flags = 0 as uint8_t;
-        atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
-        mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut flags: uint8_t = 0;
+        let mut atime: uint32_t = 0;
+        let mut mtime: uint32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        if times.is_null() {
+            flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
+            atime = 0 as uint32_t;
+            mtime = 0 as uint32_t;
+        } else {
+            flags = 0 as uint8_t;
+            atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
+            mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+        }
+        status = mfs_int_futimes(&raw mut cr, fildes, flags, atime, mtime);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_futimes(&raw mut cr, fildes, flags, atime, mtime);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_futimens(
     mut fildes: ::core::ffi::c_int,
     mut times: *const timespec,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut flags: uint8_t = 0;
-    let mut atime: uint32_t = 0;
-    let mut mtime: uint32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    atime = 0 as uint32_t;
-    mtime = 0 as uint32_t;
-    flags = 0 as uint8_t;
-    if times.is_null() {
-        flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
-    } else {
-        if (*times.offset(0 as isize)).tv_nsec == UTIME_NOW {
-            flags = (flags as ::core::ffi::c_int | MFS_TIMES_ATIME_NOW) as uint8_t;
-        } else if (*times.offset(0 as isize)).tv_nsec == UTIME_OMIT {
-            flags = (flags as ::core::ffi::c_int | MFS_TIMES_ATIME_OMIT) as uint8_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut flags: uint8_t = 0;
+        let mut atime: uint32_t = 0;
+        let mut mtime: uint32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        atime = 0 as uint32_t;
+        mtime = 0 as uint32_t;
+        flags = 0 as uint8_t;
+        if times.is_null() {
+            flags = (MFS_TIMES_ATIME_NOW | MFS_TIMES_MTIME_NOW) as uint8_t;
         } else {
-            atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
+            if (*times.offset(0 as isize)).tv_nsec == UTIME_NOW {
+                flags = (flags as ::core::ffi::c_int | MFS_TIMES_ATIME_NOW) as uint8_t;
+            } else if (*times.offset(0 as isize)).tv_nsec == UTIME_OMIT {
+                flags = (flags as ::core::ffi::c_int | MFS_TIMES_ATIME_OMIT) as uint8_t;
+            } else {
+                atime = (*times.offset(0 as isize)).tv_sec as uint32_t;
+            }
+            if (*times.offset(1 as isize)).tv_nsec == UTIME_NOW {
+                flags = (flags as ::core::ffi::c_int | MFS_TIMES_MTIME_NOW) as uint8_t;
+            } else if (*times.offset(1 as isize)).tv_nsec == UTIME_OMIT {
+                flags = (flags as ::core::ffi::c_int | MFS_TIMES_MTIME_OMIT) as uint8_t;
+            } else {
+                mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+            }
         }
-        if (*times.offset(1 as isize)).tv_nsec == UTIME_NOW {
-            flags = (flags as ::core::ffi::c_int | MFS_TIMES_MTIME_NOW) as uint8_t;
-        } else if (*times.offset(1 as isize)).tv_nsec == UTIME_OMIT {
-            flags = (flags as ::core::ffi::c_int | MFS_TIMES_MTIME_OMIT) as uint8_t;
-        } else {
-            mtime = (*times.offset(1 as isize)).tv_sec as uint32_t;
+        status = mfs_int_futimes(&raw mut cr, fildes, flags, atime, mtime);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
         }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_futimes(&raw mut cr, fildes, flags, atime, mtime);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_truncate(
     mut path: *const ::core::ffi::c_char,
     mut size: off_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_truncate(&raw mut cr, path, size as int64_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_truncate(&raw mut cr, path, size as int64_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_ftruncate(
     mut fildes: ::core::ffi::c_int,
     mut size: off_t,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_ftruncate(&raw mut cr, fildes, size as int64_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_ftruncate(&raw mut cr, fildes, size as int64_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_lseek(
     mut fildes: ::core::ffi::c_int,
     mut offset: off_t,
     mut whence: ::core::ffi::c_int,
 ) -> off_t {
-    let mut ioffset: int64_t = 0;
-    let mut iwhence: uint8_t = 0;
-    let mut status: uint8_t = 0;
-    ioffset = offset as int64_t;
-    match whence {
-        SEEK_SET => {
-            iwhence = MFS_SEEK_SET as uint8_t;
+    unsafe {
+        let mut ioffset: int64_t = 0;
+        let mut iwhence: uint8_t = 0;
+        let mut status: uint8_t = 0;
+        ioffset = offset as int64_t;
+        match whence {
+            SEEK_SET => {
+                iwhence = MFS_SEEK_SET as uint8_t;
+            }
+            SEEK_CUR => {
+                iwhence = MFS_SEEK_CUR as uint8_t;
+            }
+            SEEK_END => {
+                iwhence = MFS_SEEK_END as uint8_t;
+            }
+            _ => {
+                *__errno_location() = EINVAL;
+                return -1 as off_t;
+            }
         }
-        SEEK_CUR => {
-            iwhence = MFS_SEEK_CUR as uint8_t;
-        }
-        SEEK_END => {
-            iwhence = MFS_SEEK_END as uint8_t;
-        }
-        _ => {
-            *__errno_location() = EINVAL;
+        status = mfs_int_lseek(fildes, &raw mut ioffset, iwhence);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as off_t;
         }
+        return ioffset as off_t;
     }
-    status = mfs_int_lseek(fildes, &raw mut ioffset, iwhence);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as off_t;
-    }
-    return ioffset as off_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_statvfs(
     mut path: *const ::core::ffi::c_char,
     mut buf: *mut statvfs,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut stvfs: mfs_int_statfsrec = mfs_int_statfsrec {
-        totalspace: 0,
-        availspace: 0,
-        freespace: 0,
-        trashspace: 0,
-        sustainedspace: 0,
-        inodes: 0,
-        masterip: 0,
-        masterport: 0,
-        sessionid: 0,
-        masterprocessid: 0,
-        masterversion: 0,
-    };
-    status = mfs_int_statfs(&raw mut stvfs);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut stvfs: mfs_int_statfsrec = mfs_int_statfsrec {
+            totalspace: 0,
+            availspace: 0,
+            freespace: 0,
+            trashspace: 0,
+            sustainedspace: 0,
+            inodes: 0,
+            masterip: 0,
+            masterport: 0,
+            sessionid: 0,
+            masterprocessid: 0,
+            masterversion: 0,
+        };
+        status = mfs_int_statfs(&raw mut stvfs);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        memset(
+            buf as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<statvfs>(),
+        );
+        mfsstatfs_to_statvfs(&raw mut stvfs, buf);
+        return 0 as ::core::ffi::c_int;
     }
-    memset(
-        buf as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<statvfs>(),
-    );
-    mfsstatfs_to_statvfs(&raw mut stvfs, buf);
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fstatvfs(
     mut fildes: ::core::ffi::c_int,
     mut buf: *mut statvfs,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut stvfs: mfs_int_statfsrec = mfs_int_statfsrec {
-        totalspace: 0,
-        availspace: 0,
-        freespace: 0,
-        trashspace: 0,
-        sustainedspace: 0,
-        inodes: 0,
-        masterip: 0,
-        masterport: 0,
-        sessionid: 0,
-        masterprocessid: 0,
-        masterversion: 0,
-    };
-    status = mfs_int_statfs(&raw mut stvfs);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut stvfs: mfs_int_statfsrec = mfs_int_statfsrec {
+            totalspace: 0,
+            availspace: 0,
+            freespace: 0,
+            trashspace: 0,
+            sustainedspace: 0,
+            inodes: 0,
+            masterip: 0,
+            masterport: 0,
+            sessionid: 0,
+            masterprocessid: 0,
+            masterversion: 0,
+        };
+        status = mfs_int_statfs(&raw mut stvfs);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        memset(
+            buf as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<statvfs>(),
+        );
+        mfsstatfs_to_statvfs(&raw mut stvfs, buf);
+        return 0 as ::core::ffi::c_int;
     }
-    memset(
-        buf as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<statvfs>(),
-    );
-    mfsstatfs_to_statvfs(&raw mut stvfs, buf);
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_stat(
     mut path: *const ::core::ffi::c_char,
     mut buf: *mut stat,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut st: mfs_int_statrec = mfs_int_statrec {
-        inode: 0,
-        r#type: 0,
-        winattr: 0,
-        mode: 0,
-        uid: 0,
-        gid: 0,
-        atime: 0,
-        mtime: 0,
-        ctime: 0,
-        nlink: 0,
-        dev: 0,
-        length: 0,
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_stat(&raw mut cr, path, &raw mut st);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut st: mfs_int_statrec = mfs_int_statrec {
+            inode: 0,
+            r#type: 0,
+            winattr: 0,
+            mode: 0,
+            uid: 0,
+            gid: 0,
+            atime: 0,
+            mtime: 0,
+            ctime: 0,
+            nlink: 0,
+            dev: 0,
+            length: 0,
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_stat(&raw mut cr, path, &raw mut st);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        memset(
+            buf as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<stat>(),
+        );
+        mfsstat_to_stat(&raw mut st, buf);
+        return 0 as ::core::ffi::c_int;
     }
-    memset(
-        buf as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<stat>(),
-    );
-    mfsstat_to_stat(&raw mut st, buf);
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fstat(
     mut fildes: ::core::ffi::c_int,
     mut buf: *mut stat,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut st: mfs_int_statrec = mfs_int_statrec {
-        inode: 0,
-        r#type: 0,
-        winattr: 0,
-        mode: 0,
-        uid: 0,
-        gid: 0,
-        atime: 0,
-        mtime: 0,
-        ctime: 0,
-        nlink: 0,
-        dev: 0,
-        length: 0,
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fstat(&raw mut cr, fildes, &raw mut st);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut st: mfs_int_statrec = mfs_int_statrec {
+            inode: 0,
+            r#type: 0,
+            winattr: 0,
+            mode: 0,
+            uid: 0,
+            gid: 0,
+            atime: 0,
+            mtime: 0,
+            ctime: 0,
+            nlink: 0,
+            dev: 0,
+            length: 0,
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fstat(&raw mut cr, fildes, &raw mut st);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        memset(
+            buf as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<stat>(),
+        );
+        mfsstat_to_stat(&raw mut st, buf);
+        return 0 as ::core::ffi::c_int;
     }
-    memset(
-        buf as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<stat>(),
-    );
-    mfsstat_to_stat(&raw mut st, buf);
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_open(
     mut path: *const ::core::ffi::c_char,
     mut oflag: ::core::ffi::c_int,
     mut c2rust_args: ...
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut ap: ::core::ffi::VaListImpl;
-    let mut mfsoflag: ::core::ffi::c_int = 0;
-    let mut mode: ::core::ffi::c_int = 0;
-    let mut fildes: ::core::ffi::c_int = 0;
-    if oflag & O_CREAT != 0 {
-        ap = c2rust_args.clone();
-        mode = ap.arg::<::core::ffi::c_int>();
-        mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
-    } else {
-        mode = 0 as ::core::ffi::c_int;
-        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    }
-    mfsoflag = MFS_O_ACCMODE;
-    match oflag & O_ACCMODE {
-        O_RDONLY => {
-            mfsoflag = MFS_O_RDONLY;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut ap: ::core::ffi::VaList;
+        let mut mfsoflag: ::core::ffi::c_int = 0;
+        let mut mode: ::core::ffi::c_int = 0;
+        let mut fildes: ::core::ffi::c_int = 0;
+        if oflag & O_CREAT != 0 {
+            ap = c2rust_args.clone();
+            mode = ap.next_arg::<::core::ffi::c_int>();
+            mfs_get_credentials(&raw mut cr, CRED_UMASK as uint8_t);
+        } else {
+            mode = 0 as ::core::ffi::c_int;
+            mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
         }
-        O_WRONLY => {
-            mfsoflag = MFS_O_WRONLY;
+        mfsoflag = MFS_O_ACCMODE;
+        match oflag & O_ACCMODE {
+            O_RDONLY => {
+                mfsoflag = MFS_O_RDONLY;
+            }
+            O_WRONLY => {
+                mfsoflag = MFS_O_WRONLY;
+            }
+            O_RDWR => {
+                mfsoflag = MFS_O_RDWR;
+            }
+            _ => {}
         }
-        O_RDWR => {
-            mfsoflag = MFS_O_RDWR;
+        if oflag & O_CREAT != 0 {
+            mfsoflag |= MFS_O_CREAT;
         }
-        _ => {}
+        if oflag & O_TRUNC != 0 {
+            mfsoflag |= MFS_O_TRUNC;
+        }
+        if oflag & O_EXCL != 0 {
+            mfsoflag |= MFS_O_EXCL;
+        }
+        if oflag & O_APPEND != 0 {
+            mfsoflag |= MFS_O_APPEND;
+        }
+        status = mfs_int_open(&raw mut cr, &raw mut fildes, path, mfsoflag, mode);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return fildes;
     }
-    if oflag & O_CREAT != 0 {
-        mfsoflag |= MFS_O_CREAT;
-    }
-    if oflag & O_TRUNC != 0 {
-        mfsoflag |= MFS_O_TRUNC;
-    }
-    if oflag & O_EXCL != 0 {
-        mfsoflag |= MFS_O_EXCL;
-    }
-    if oflag & O_APPEND != 0 {
-        mfsoflag |= MFS_O_APPEND;
-    }
-    status = mfs_int_open(&raw mut cr, &raw mut fildes, path, mfsoflag, mode);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return fildes;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_pread(
     mut fildes: ::core::ffi::c_int,
     mut buf: *mut ::core::ffi::c_void,
     mut nbyte: size_t,
     mut offset: off_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int64_t = 0;
-    status = mfs_int_pread(
-        fildes,
-        &raw mut rsize,
-        buf as *mut uint8_t,
-        nbyte as uint64_t,
-        offset as uint64_t,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int64_t = 0;
+        status = mfs_int_pread(
+            fildes,
+            &raw mut rsize,
+            buf as *mut uint8_t,
+            nbyte as uint64_t,
+            offset as uint64_t,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_read(
     mut fildes: ::core::ffi::c_int,
     mut buf: *mut ::core::ffi::c_void,
     mut nbyte: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int64_t = 0;
-    status = mfs_int_read(
-        fildes,
-        &raw mut rsize,
-        buf as *mut uint8_t,
-        nbyte as uint64_t,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int64_t = 0;
+        status = mfs_int_read(
+            fildes,
+            &raw mut rsize,
+            buf as *mut uint8_t,
+            nbyte as uint64_t,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_pwrite(
     mut fildes: ::core::ffi::c_int,
     mut buf: *const ::core::ffi::c_void,
     mut nbyte: size_t,
     mut offset: off_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int64_t = 0;
-    status = mfs_int_pwrite(
-        fildes,
-        &raw mut rsize,
-        buf as *const uint8_t,
-        nbyte as uint64_t,
-        offset as uint64_t,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int64_t = 0;
+        status = mfs_int_pwrite(
+            fildes,
+            &raw mut rsize,
+            buf as *const uint8_t,
+            nbyte as uint64_t,
+            offset as uint64_t,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_write(
     mut fildes: ::core::ffi::c_int,
     mut buf: *const ::core::ffi::c_void,
     mut nbyte: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int64_t = 0;
-    status = mfs_int_write(
-        fildes,
-        &raw mut rsize,
-        buf as *const uint8_t,
-        nbyte as uint64_t,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int64_t = 0;
+        status = mfs_int_write(
+            fildes,
+            &raw mut rsize,
+            buf as *const uint8_t,
+            nbyte as uint64_t,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fsync(mut fildes: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    status = mfs_int_fsync(fildes);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        status = mfs_int_fsync(fildes);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_close(mut fildes: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    status = mfs_int_close(fildes);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        status = mfs_int_close(fildes);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_flock(
     mut fildes: ::core::ffi::c_int,
     mut op: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut mfsop: uint8_t = 0;
-    mfsop = 0 as uint8_t;
-    if op & LOCK_SH != 0 {
-        mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_SH) as uint8_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mfsop: uint8_t = 0;
+        mfsop = 0 as uint8_t;
+        if op & LOCK_SH != 0 {
+            mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_SH) as uint8_t;
+        }
+        if op & LOCK_EX != 0 {
+            mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_EX) as uint8_t;
+        }
+        if op & LOCK_NB != 0 {
+            mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_NB) as uint8_t;
+        }
+        if op & LOCK_UN != 0 {
+            mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_UN) as uint8_t;
+        }
+        status = mfs_int_flock(fildes, mfsop);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    if op & LOCK_EX != 0 {
-        mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_EX) as uint8_t;
-    }
-    if op & LOCK_NB != 0 {
-        mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_NB) as uint8_t;
-    }
-    if op & LOCK_UN != 0 {
-        mfsop = (mfsop as ::core::ffi::c_int | MFS_LOCK_UN) as uint8_t;
-    }
-    status = mfs_int_flock(fildes, mfsop);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_lockf(
     mut fildes: ::core::ffi::c_int,
     mut function: ::core::ffi::c_int,
     mut size: off_t,
 ) -> ::core::ffi::c_int {
-    let mut mfsfunction: uint8_t = 0;
-    let mut status: uint8_t = 0;
-    match function {
-        F_ULOCK => {
-            mfsfunction = MFS_F_ULOCK as uint8_t;
+    unsafe {
+        let mut mfsfunction: uint8_t = 0;
+        let mut status: uint8_t = 0;
+        match function {
+            F_ULOCK => {
+                mfsfunction = MFS_F_ULOCK as uint8_t;
+            }
+            F_LOCK => {
+                mfsfunction = MFS_F_LOCK as uint8_t;
+            }
+            F_TLOCK => {
+                mfsfunction = MFS_F_TLOCK as uint8_t;
+            }
+            F_TEST => {
+                mfsfunction = MFS_F_TEST as uint8_t;
+            }
+            _ => {
+                *__errno_location() = EINVAL;
+                return -1 as ::core::ffi::c_int;
+            }
         }
-        F_LOCK => {
-            mfsfunction = MFS_F_LOCK as uint8_t;
-        }
-        F_TLOCK => {
-            mfsfunction = MFS_F_TLOCK as uint8_t;
-        }
-        F_TEST => {
-            mfsfunction = MFS_F_TEST as uint8_t;
-        }
-        _ => {
-            *__errno_location() = EINVAL;
+        status = mfs_int_lockf(fildes, getpid() as uint32_t, mfsfunction, size as int64_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as ::core::ffi::c_int;
         }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_lockf(fildes, getpid() as uint32_t, mfsfunction, size as int64_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fcntl_locks(
     mut fildes: ::core::ffi::c_int,
     mut function: ::core::ffi::c_int,
     mut fl: *mut flock,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut mfsfl: mfs_int_flockrec = mfs_int_flockrec {
-        r#type: 0,
-        whence: 0,
-        start: 0,
-        len: 0,
-        pid: 0,
-    };
-    let mut mfsfunction: uint8_t = 0;
-    memset(
-        &raw mut mfsfl as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<mfs_int_flockrec>(),
-    );
-    if (*fl).l_whence as ::core::ffi::c_int == SEEK_CUR {
-        mfsfl.whence = MFS_SEEK_CUR as uint8_t;
-    } else if (*fl).l_whence as ::core::ffi::c_int == SEEK_SET {
-        mfsfl.whence = MFS_SEEK_SET as uint8_t;
-    } else if (*fl).l_whence as ::core::ffi::c_int == SEEK_END {
-        mfsfl.whence = MFS_SEEK_END as uint8_t;
-    } else {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-    mfsfl.start = (*fl).l_start as int64_t;
-    mfsfl.len = (*fl).l_len as int64_t;
-    if (*fl).l_type as ::core::ffi::c_int == F_UNLCK {
-        mfsfl.r#type = MFS_F_UNLCK as uint8_t;
-    } else if (*fl).l_type as ::core::ffi::c_int == F_RDLCK {
-        mfsfl.r#type = MFS_F_RDLCK as uint8_t;
-    } else if (*fl).l_type as ::core::ffi::c_int == F_WRLCK {
-        mfsfl.r#type = MFS_F_WRLCK as uint8_t;
-    } else {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-    if function == F_GETLK {
-        mfsfunction = MFS_F_GETLK as uint8_t;
-    } else if function == F_SETLK {
-        mfsfunction = MFS_F_SETLK as uint8_t;
-    } else if function == F_SETLKW {
-        mfsfunction = MFS_F_SETLKW as uint8_t;
-    } else {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-    status = mfs_int_fcntl_locks(fildes, getpid() as uint32_t, mfsfunction, &raw mut mfsfl);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    if function == F_GETLK {
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mfsfl: mfs_int_flockrec = mfs_int_flockrec {
+            r#type: 0,
+            whence: 0,
+            start: 0,
+            len: 0,
+            pid: 0,
+        };
+        let mut mfsfunction: uint8_t = 0;
         memset(
-            fl as *mut ::core::ffi::c_void,
+            &raw mut mfsfl as *mut ::core::ffi::c_void,
             0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<flock>(),
+            ::core::mem::size_of::<mfs_int_flockrec>(),
         );
-        if mfsfl.r#type as ::core::ffi::c_int == MFS_F_RDLCK {
-            (*fl).l_type = F_RDLCK as ::core::ffi::c_short;
-        } else if mfsfl.r#type as ::core::ffi::c_int == MFS_F_WRLCK {
-            (*fl).l_type = F_WRLCK as ::core::ffi::c_short;
+        if (*fl).l_whence as ::core::ffi::c_int == SEEK_CUR {
+            mfsfl.whence = MFS_SEEK_CUR as uint8_t;
+        } else if (*fl).l_whence as ::core::ffi::c_int == SEEK_SET {
+            mfsfl.whence = MFS_SEEK_SET as uint8_t;
+        } else if (*fl).l_whence as ::core::ffi::c_int == SEEK_END {
+            mfsfl.whence = MFS_SEEK_END as uint8_t;
         } else {
-            (*fl).l_type = F_UNLCK as ::core::ffi::c_short;
+            *__errno_location() = EINVAL;
+            return -1 as ::core::ffi::c_int;
         }
-        (*fl).l_whence = SEEK_SET as ::core::ffi::c_short;
-        (*fl).l_start = mfsfl.start as __off64_t;
-        (*fl).l_len = mfsfl.len as __off64_t;
-        (*fl).l_pid = mfsfl.pid as __pid_t;
+        mfsfl.start = (*fl).l_start as int64_t;
+        mfsfl.len = (*fl).l_len as int64_t;
+        if (*fl).l_type as ::core::ffi::c_int == F_UNLCK {
+            mfsfl.r#type = MFS_F_UNLCK as uint8_t;
+        } else if (*fl).l_type as ::core::ffi::c_int == F_RDLCK {
+            mfsfl.r#type = MFS_F_RDLCK as uint8_t;
+        } else if (*fl).l_type as ::core::ffi::c_int == F_WRLCK {
+            mfsfl.r#type = MFS_F_WRLCK as uint8_t;
+        } else {
+            *__errno_location() = EINVAL;
+            return -1 as ::core::ffi::c_int;
+        }
+        if function == F_GETLK {
+            mfsfunction = MFS_F_GETLK as uint8_t;
+        } else if function == F_SETLK {
+            mfsfunction = MFS_F_SETLK as uint8_t;
+        } else if function == F_SETLKW {
+            mfsfunction = MFS_F_SETLKW as uint8_t;
+        } else {
+            *__errno_location() = EINVAL;
+            return -1 as ::core::ffi::c_int;
+        }
+        status = mfs_int_fcntl_locks(fildes, getpid() as uint32_t, mfsfunction, &raw mut mfsfl);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        if function == F_GETLK {
+            memset(
+                fl as *mut ::core::ffi::c_void,
+                0 as ::core::ffi::c_int,
+                ::core::mem::size_of::<flock>(),
+            );
+            if mfsfl.r#type as ::core::ffi::c_int == MFS_F_RDLCK {
+                (*fl).l_type = F_RDLCK as ::core::ffi::c_short;
+            } else if mfsfl.r#type as ::core::ffi::c_int == MFS_F_WRLCK {
+                (*fl).l_type = F_WRLCK as ::core::ffi::c_short;
+            } else {
+                (*fl).l_type = F_UNLCK as ::core::ffi::c_short;
+            }
+            (*fl).l_whence = SEEK_SET as ::core::ffi::c_short;
+            (*fl).l_start = mfsfl.start as __off64_t;
+            (*fl).l_len = mfsfl.len as __off64_t;
+            (*fl).l_pid = mfsfl.pid as __pid_t;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_getxattr(
     mut path: *const ::core::ffi::c_char,
     mut name: *const ::core::ffi::c_char,
     mut value: *mut ::core::ffi::c_void,
     mut size: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut mode: uint8_t = 0;
-    let mut vbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut vleng: uint32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mode = (if size == 0 as size_t {
-        MFS_XATTR_LENGTH_ONLY
-    } else {
-        MFS_XATTR_GETA_DATA
-    }) as uint8_t;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_getxattr(
-        &raw mut cr,
-        path,
-        name,
-        &raw mut vbuff,
-        &raw mut vleng,
-        mode,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
-    }
-    if size > 0 as size_t {
-        if vleng as size_t > size {
-            *__errno_location() = ERANGE;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mode: uint8_t = 0;
+        let mut vbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut vleng: uint32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mode = (if size == 0 as size_t {
+            MFS_XATTR_LENGTH_ONLY
+        } else {
+            MFS_XATTR_GETA_DATA
+        }) as uint8_t;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_getxattr(
+            &raw mut cr,
+            path,
+            name,
+            &raw mut vbuff,
+            &raw mut vleng,
+            mode,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as ssize_t;
         }
-        if vleng > 0 as uint32_t {
-            memcpy(value, vbuff as *const ::core::ffi::c_void, vleng as size_t);
+        if size > 0 as size_t {
+            if vleng as size_t > size {
+                *__errno_location() = ERANGE;
+                return -1 as ssize_t;
+            }
+            if vleng > 0 as uint32_t {
+                memcpy(value, vbuff as *const ::core::ffi::c_void, vleng as size_t);
+            }
         }
+        return vleng as ssize_t;
     }
-    return vleng as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fgetxattr(
     mut fildes: ::core::ffi::c_int,
     mut name: *const ::core::ffi::c_char,
     mut value: *mut ::core::ffi::c_void,
     mut size: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut mode: uint8_t = 0;
-    let mut vbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut vleng: uint32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mode = (if size == 0 as size_t {
-        MFS_XATTR_LENGTH_ONLY
-    } else {
-        MFS_XATTR_GETA_DATA
-    }) as uint8_t;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fgetxattr(
-        &raw mut cr,
-        fildes,
-        name,
-        &raw mut vbuff,
-        &raw mut vleng,
-        mode,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
-    }
-    if size > 0 as size_t {
-        if vleng as size_t > size {
-            *__errno_location() = ERANGE;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mode: uint8_t = 0;
+        let mut vbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut vleng: uint32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mode = (if size == 0 as size_t {
+            MFS_XATTR_LENGTH_ONLY
+        } else {
+            MFS_XATTR_GETA_DATA
+        }) as uint8_t;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fgetxattr(
+            &raw mut cr,
+            fildes,
+            name,
+            &raw mut vbuff,
+            &raw mut vleng,
+            mode,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as ssize_t;
         }
-        if vleng > 0 as uint32_t {
-            memcpy(value, vbuff as *const ::core::ffi::c_void, vleng as size_t);
+        if size > 0 as size_t {
+            if vleng as size_t > size {
+                *__errno_location() = ERANGE;
+                return -1 as ssize_t;
+            }
+            if vleng > 0 as uint32_t {
+                memcpy(value, vbuff as *const ::core::ffi::c_void, vleng as size_t);
+            }
         }
+        return vleng as ssize_t;
     }
-    return vleng as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_setxattr(
     mut path: *const ::core::ffi::c_char,
     mut name: *const ::core::ffi::c_char,
@@ -1906,41 +1998,43 @@ pub unsafe extern "C" fn mfs_setxattr(
     mut size: size_t,
     mut flags: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut mode: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    if size > MFS_XATTR_SIZE_MAX as size_t {
-        *__errno_location() = ERANGE;
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mode: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        if size > MFS_XATTR_SIZE_MAX as size_t {
+            *__errno_location() = ERANGE;
+            return -1 as ::core::ffi::c_int;
+        }
+        mode = (if flags == XATTR_CREATE {
+            MFS_XATTR_CREATE_ONLY
+        } else if flags == XATTR_REPLACE {
+            MFS_XATTR_REPLACE_ONLY
+        } else {
+            MFS_XATTR_CREATE_OR_REPLACE
+        }) as uint8_t;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_setxattr(
+            &raw mut cr,
+            path,
+            name,
+            value as *const uint8_t,
+            size as uint32_t,
+            mode,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    mode = (if flags == XATTR_CREATE {
-        MFS_XATTR_CREATE_ONLY
-    } else if flags == XATTR_REPLACE {
-        MFS_XATTR_REPLACE_ONLY
-    } else {
-        MFS_XATTR_CREATE_OR_REPLACE
-    }) as uint8_t;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_setxattr(
-        &raw mut cr,
-        path,
-        name,
-        value as *const uint8_t,
-        size as uint32_t,
-        mode,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fsetxattr(
     mut fildes: ::core::ffi::c_int,
     mut name: *const ::core::ffi::c_char,
@@ -1948,474 +2042,504 @@ pub unsafe extern "C" fn mfs_fsetxattr(
     mut size: size_t,
     mut flags: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut mode: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    if size > MFS_XATTR_SIZE_MAX as size_t {
-        *__errno_location() = ERANGE;
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut mode: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        if size > MFS_XATTR_SIZE_MAX as size_t {
+            *__errno_location() = ERANGE;
+            return -1 as ::core::ffi::c_int;
+        }
+        mode = (if flags == XATTR_CREATE {
+            MFS_XATTR_CREATE_ONLY
+        } else if flags == XATTR_REPLACE {
+            MFS_XATTR_REPLACE_ONLY
+        } else {
+            MFS_XATTR_CREATE_OR_REPLACE
+        }) as uint8_t;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fsetxattr(
+            &raw mut cr,
+            fildes,
+            name,
+            value as *const uint8_t,
+            size as uint32_t,
+            mode,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    mode = (if flags == XATTR_CREATE {
-        MFS_XATTR_CREATE_ONLY
-    } else if flags == XATTR_REPLACE {
-        MFS_XATTR_REPLACE_ONLY
-    } else {
-        MFS_XATTR_CREATE_OR_REPLACE
-    }) as uint8_t;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fsetxattr(
-        &raw mut cr,
-        fildes,
-        name,
-        value as *const uint8_t,
-        size as uint32_t,
-        mode,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_listxattr(
     mut path: *const ::core::ffi::c_char,
     mut list: *mut ::core::ffi::c_char,
     mut size: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_listxattr(&raw mut cr, path, &raw mut rsize, list, size as uint32_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_listxattr(&raw mut cr, path, &raw mut rsize, list, size as uint32_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_flistxattr(
     mut fildes: ::core::ffi::c_int,
     mut list: *mut ::core::ffi::c_char,
     mut size: size_t,
 ) -> ssize_t {
-    let mut status: uint8_t = 0;
-    let mut rsize: int32_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_flistxattr(&raw mut cr, fildes, &raw mut rsize, list, size as uint32_t);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ssize_t;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut rsize: int32_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_flistxattr(&raw mut cr, fildes, &raw mut rsize, list, size as uint32_t);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ssize_t;
+        }
+        return rsize as ssize_t;
     }
-    return rsize as ssize_t;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_removexattr(
     mut path: *const ::core::ffi::c_char,
     mut name: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_removexattr(&raw mut cr, path, name);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_removexattr(&raw mut cr, path, name);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fremovexattr(
     mut fildes: ::core::ffi::c_int,
     mut name: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fremovexattr(&raw mut cr, fildes, name);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fremovexattr(&raw mut cr, fildes, name);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_acl_alloc(mut namedaclscnt: uint32_t) -> *mut mfsacl {
-    if namedaclscnt == 0 as uint32_t {
-        return malloc(::core::mem::size_of::<mfsacl>()) as *mut mfsacl;
-    } else {
-        return malloc(
-            ::core::mem::size_of::<mfsacl>().wrapping_add(
-                ::core::mem::size_of::<mfsaclid>()
-                    .wrapping_mul(namedaclscnt.wrapping_sub(1 as uint32_t) as size_t),
-            ),
-        ) as *mut mfsacl;
-    };
+    unsafe {
+        if namedaclscnt == 0 as uint32_t {
+            return malloc(::core::mem::size_of::<mfsacl>()) as *mut mfsacl;
+        } else {
+            return malloc(
+                ::core::mem::size_of::<mfsacl>().wrapping_add(
+                    ::core::mem::size_of::<mfsaclid>()
+                        .wrapping_mul(namedaclscnt.wrapping_sub(1 as uint32_t) as size_t),
+                ),
+            ) as *mut mfsacl;
+        };
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_acl_free(mut aclrec: *mut mfsacl) {
-    free(aclrec as *mut ::core::ffi::c_void);
+    unsafe {
+        free(aclrec as *mut ::core::ffi::c_void);
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_getfacl(
     mut path: *const ::core::ffi::c_char,
     mut acltype: uint8_t,
     mut aclrec: *mut *mut mfsacl,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut namedacls: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut namedaclsize: uint32_t = 0;
-    let mut i: uint32_t = 0;
-    let mut namedaclscnt: uint32_t = 0;
-    let mut userperm: uint16_t = 0;
-    let mut groupperm: uint16_t = 0;
-    let mut otherperm: uint16_t = 0;
-    let mut maskperm: uint16_t = 0;
-    let mut nuserscnt: uint16_t = 0;
-    let mut ngroupscnt: uint16_t = 0;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_getfacl(
-        &raw mut cr,
-        path,
-        acltype,
-        &raw mut userperm,
-        &raw mut groupperm,
-        &raw mut otherperm,
-        &raw mut maskperm,
-        &raw mut nuserscnt,
-        &raw mut ngroupscnt,
-        &raw mut namedacls,
-        &raw mut namedaclsize,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut namedacls: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut namedaclsize: uint32_t = 0;
+        let mut i: uint32_t = 0;
+        let mut namedaclscnt: uint32_t = 0;
+        let mut userperm: uint16_t = 0;
+        let mut groupperm: uint16_t = 0;
+        let mut otherperm: uint16_t = 0;
+        let mut maskperm: uint16_t = 0;
+        let mut nuserscnt: uint16_t = 0;
+        let mut ngroupscnt: uint16_t = 0;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_getfacl(
+            &raw mut cr,
+            path,
+            acltype,
+            &raw mut userperm,
+            &raw mut groupperm,
+            &raw mut otherperm,
+            &raw mut maskperm,
+            &raw mut nuserscnt,
+            &raw mut ngroupscnt,
+            &raw mut namedacls,
+            &raw mut namedaclsize,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        namedaclscnt =
+            (nuserscnt as ::core::ffi::c_int + ngroupscnt as ::core::ffi::c_int) as uint32_t;
+        if namedaclscnt.wrapping_mul(6 as uint32_t) != namedaclsize {
+            *__errno_location() = EINVAL;
+            return -1 as ::core::ffi::c_int;
+        }
+        *aclrec = mfs_acl_alloc(namedaclscnt);
+        if (*aclrec).is_null() {
+            return -1 as ::core::ffi::c_int;
+        }
+        (**aclrec).userperm = userperm;
+        (**aclrec).groupperm = groupperm;
+        (**aclrec).otherperm = otherperm;
+        (**aclrec).maskperm = maskperm;
+        (**aclrec).nuserscnt = nuserscnt;
+        (**aclrec).ngroupscnt = ngroupscnt;
+        i = 0 as uint32_t;
+        while i < namedaclscnt {
+            (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id =
+                get32bit(&raw mut namedacls);
+            (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm =
+                get16bit(&raw mut namedacls);
+            i = i.wrapping_add(1);
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    namedaclscnt = (nuserscnt as ::core::ffi::c_int + ngroupscnt as ::core::ffi::c_int) as uint32_t;
-    if namedaclscnt.wrapping_mul(6 as uint32_t) != namedaclsize {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-    *aclrec = mfs_acl_alloc(namedaclscnt);
-    if (*aclrec).is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    (**aclrec).userperm = userperm;
-    (**aclrec).groupperm = groupperm;
-    (**aclrec).otherperm = otherperm;
-    (**aclrec).maskperm = maskperm;
-    (**aclrec).nuserscnt = nuserscnt;
-    (**aclrec).ngroupscnt = ngroupscnt;
-    i = 0 as uint32_t;
-    while i < namedaclscnt {
-        (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id =
-            get32bit(&raw mut namedacls);
-        (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm =
-            get16bit(&raw mut namedacls);
-        i = i.wrapping_add(1);
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fgetfacl(
     mut filedes: ::core::ffi::c_int,
     mut acltype: uint8_t,
     mut aclrec: *mut *mut mfsacl,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut namedacls: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut namedaclsize: uint32_t = 0;
-    let mut i: uint32_t = 0;
-    let mut namedaclscnt: uint32_t = 0;
-    let mut userperm: uint16_t = 0;
-    let mut groupperm: uint16_t = 0;
-    let mut otherperm: uint16_t = 0;
-    let mut maskperm: uint16_t = 0;
-    let mut nuserscnt: uint16_t = 0;
-    let mut ngroupscnt: uint16_t = 0;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    status = mfs_int_fgetfacl(
-        &raw mut cr,
-        filedes,
-        acltype,
-        &raw mut userperm,
-        &raw mut groupperm,
-        &raw mut otherperm,
-        &raw mut maskperm,
-        &raw mut nuserscnt,
-        &raw mut ngroupscnt,
-        &raw mut namedacls,
-        &raw mut namedaclsize,
-    );
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut namedacls: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut namedaclsize: uint32_t = 0;
+        let mut i: uint32_t = 0;
+        let mut namedaclscnt: uint32_t = 0;
+        let mut userperm: uint16_t = 0;
+        let mut groupperm: uint16_t = 0;
+        let mut otherperm: uint16_t = 0;
+        let mut maskperm: uint16_t = 0;
+        let mut nuserscnt: uint16_t = 0;
+        let mut ngroupscnt: uint16_t = 0;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        status = mfs_int_fgetfacl(
+            &raw mut cr,
+            filedes,
+            acltype,
+            &raw mut userperm,
+            &raw mut groupperm,
+            &raw mut otherperm,
+            &raw mut maskperm,
+            &raw mut nuserscnt,
+            &raw mut ngroupscnt,
+            &raw mut namedacls,
+            &raw mut namedaclsize,
+        );
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        namedaclscnt =
+            (nuserscnt as ::core::ffi::c_int + ngroupscnt as ::core::ffi::c_int) as uint32_t;
+        if namedaclscnt.wrapping_mul(6 as uint32_t) != namedaclsize {
+            *__errno_location() = EINVAL;
+            return -1 as ::core::ffi::c_int;
+        }
+        *aclrec = mfs_acl_alloc(namedaclscnt);
+        if (*aclrec).is_null() {
+            return -1 as ::core::ffi::c_int;
+        }
+        (**aclrec).userperm = userperm;
+        (**aclrec).groupperm = groupperm;
+        (**aclrec).otherperm = otherperm;
+        (**aclrec).maskperm = maskperm;
+        (**aclrec).nuserscnt = nuserscnt;
+        (**aclrec).ngroupscnt = ngroupscnt;
+        i = 0 as uint32_t;
+        while i < namedaclscnt {
+            (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id =
+                get32bit(&raw mut namedacls);
+            (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm =
+                get16bit(&raw mut namedacls);
+            i = i.wrapping_add(1);
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    namedaclscnt = (nuserscnt as ::core::ffi::c_int + ngroupscnt as ::core::ffi::c_int) as uint32_t;
-    if namedaclscnt.wrapping_mul(6 as uint32_t) != namedaclsize {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-    *aclrec = mfs_acl_alloc(namedaclscnt);
-    if (*aclrec).is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    (**aclrec).userperm = userperm;
-    (**aclrec).groupperm = groupperm;
-    (**aclrec).otherperm = otherperm;
-    (**aclrec).maskperm = maskperm;
-    (**aclrec).nuserscnt = nuserscnt;
-    (**aclrec).ngroupscnt = ngroupscnt;
-    i = 0 as uint32_t;
-    while i < namedaclscnt {
-        (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id =
-            get32bit(&raw mut namedacls);
-        (*(&raw mut (**aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm =
-            get16bit(&raw mut namedacls);
-        i = i.wrapping_add(1);
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_setfacl(
     mut path: *const ::core::ffi::c_char,
     mut acltype: uint8_t,
     mut aclrec: *mut mfsacl,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut namedacls: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-    let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-    let mut namedaclsize: uint32_t = 0;
-    let mut i: uint32_t = 0;
-    let mut namedaclscnt: uint32_t = 0;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
-        + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
-    namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
-    namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
-    wptr = namedacls;
-    i = 0 as uint32_t;
-    while i < namedaclscnt {
-        put32bit(
-            &raw mut wptr,
-            (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id,
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut namedacls: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        let mut namedaclsize: uint32_t = 0;
+        let mut i: uint32_t = 0;
+        let mut namedaclscnt: uint32_t = 0;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
+            + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
+        namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
+        namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
+        wptr = namedacls;
+        i = 0 as uint32_t;
+        while i < namedaclscnt {
+            put32bit(
+                &raw mut wptr,
+                (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id,
+            );
+            put16bit(
+                &raw mut wptr,
+                (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm,
+            );
+            i = i.wrapping_add(1);
+        }
+        status = mfs_int_setfacl(
+            &raw mut cr,
+            path,
+            acltype,
+            (*aclrec).userperm,
+            (*aclrec).groupperm,
+            (*aclrec).otherperm,
+            (*aclrec).maskperm,
+            (*aclrec).nuserscnt,
+            (*aclrec).ngroupscnt,
+            namedacls,
+            namedaclsize,
         );
-        put16bit(
-            &raw mut wptr,
-            (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm,
-        );
-        i = i.wrapping_add(1);
+        free(namedacls as *mut ::core::ffi::c_void);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_setfacl(
-        &raw mut cr,
-        path,
-        acltype,
-        (*aclrec).userperm,
-        (*aclrec).groupperm,
-        (*aclrec).otherperm,
-        (*aclrec).maskperm,
-        (*aclrec).nuserscnt,
-        (*aclrec).ngroupscnt,
-        namedacls,
-        namedaclsize,
-    );
-    free(namedacls as *mut ::core::ffi::c_void);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fsetfacl(
     mut filedes: ::core::ffi::c_int,
     mut acltype: uint8_t,
     mut aclrec: *mut mfsacl,
 ) -> ::core::ffi::c_int {
-    let mut status: uint8_t = 0;
-    let mut cr: mfs_int_cred = mfs_int_cred {
-        umask: 0,
-        uid: 0,
-        gidcnt: 0,
-        gidtab: [0; 256],
-    };
-    let mut namedacls: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-    let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-    let mut namedaclsize: uint32_t = 0;
-    let mut i: uint32_t = 0;
-    let mut namedaclscnt: uint32_t = 0;
-    mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
-    namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
-        + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
-    namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
-    namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
-    wptr = namedacls;
-    i = 0 as uint32_t;
-    while i < namedaclscnt {
-        put32bit(
-            &raw mut wptr,
-            (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id,
+    unsafe {
+        let mut status: uint8_t = 0;
+        let mut cr: mfs_int_cred = mfs_int_cred {
+            umask: 0,
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+        };
+        let mut namedacls: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        let mut namedaclsize: uint32_t = 0;
+        let mut i: uint32_t = 0;
+        let mut namedaclscnt: uint32_t = 0;
+        mfs_get_credentials(&raw mut cr, CRED_BASIC as uint8_t);
+        namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
+            + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
+        namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
+        namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
+        wptr = namedacls;
+        i = 0 as uint32_t;
+        while i < namedaclscnt {
+            put32bit(
+                &raw mut wptr,
+                (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).id,
+            );
+            put16bit(
+                &raw mut wptr,
+                (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm,
+            );
+            i = i.wrapping_add(1);
+        }
+        status = mfs_int_fsetfacl(
+            &raw mut cr,
+            filedes,
+            acltype,
+            (*aclrec).userperm,
+            (*aclrec).groupperm,
+            (*aclrec).otherperm,
+            (*aclrec).maskperm,
+            (*aclrec).nuserscnt,
+            (*aclrec).ngroupscnt,
+            namedacls,
+            namedaclsize,
         );
-        put16bit(
-            &raw mut wptr,
-            (*(&raw mut (*aclrec).namedacls as *mut mfsaclid).offset(i as isize)).perm,
-        );
-        i = i.wrapping_add(1);
+        free(namedacls as *mut ::core::ffi::c_void);
+        if status as ::core::ffi::c_int != MFS_STATUS_OK {
+            *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
+            return -1 as ::core::ffi::c_int;
+        }
+        return 0 as ::core::ffi::c_int;
     }
-    status = mfs_int_fsetfacl(
-        &raw mut cr,
-        filedes,
-        acltype,
-        (*aclrec).userperm,
-        (*aclrec).groupperm,
-        (*aclrec).otherperm,
-        (*aclrec).maskperm,
-        (*aclrec).nuserscnt,
-        (*aclrec).ngroupscnt,
-        namedacls,
-        namedaclsize,
-    );
-    free(namedacls as *mut ::core::ffi::c_void);
-    if status as ::core::ffi::c_int != MFS_STATUS_OK {
-        *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
-        return -1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_set_defaults(mut mcfg: *mut mfscfg) {
-    memset(
-        mcfg as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<mfscfg>(),
-    );
-    (*mcfg).masterhost = strdup(DEFAULT_MASTERNAME.as_ptr());
-    (*mcfg).masterport = strdup(DEFAULT_MASTER_CLIENT_PORT.as_ptr());
-    (*mcfg).masterpath = strdup(b"/\0".as_ptr() as *const ::core::ffi::c_char);
-    (*mcfg).masterbind = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*mcfg).masterpassword = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*mcfg).mastermd5pass = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*mcfg).mountpoint = strdup(b"[MFSIO]\0".as_ptr() as *const ::core::ffi::c_char);
-    (*mcfg).preferedlabels = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*mcfg).read_cache_mb = 128 as ::core::ffi::c_int;
-    (*mcfg).write_cache_mb = 128 as ::core::ffi::c_int;
-    (*mcfg).io_try_cnt = 30 as ::core::ffi::c_int;
-    (*mcfg).io_timeout = 0 as ::core::ffi::c_int;
-    (*mcfg).min_log_entry = 5 as ::core::ffi::c_int;
-    (*mcfg).readahead_leng = 0x200000 as ::core::ffi::c_int;
-    (*mcfg).readahead_trigger = 10 as ::core::ffi::c_int * 0x200000 as ::core::ffi::c_int;
-    (*mcfg).lcache_retention = 1.0f64;
-    (*mcfg).logident = strdup(b"libmfsio\0".as_ptr() as *const ::core::ffi::c_char);
-    (*mcfg).logdaemon = 0 as ::core::ffi::c_int;
-    (*mcfg).logminlevel = MFSLOG_INFO;
-    (*mcfg).logelevateto = MFSLOG_NOTICE;
-    (*mcfg).master_min_version_maj = 0 as uint16_t;
-    (*mcfg).master_min_version_mid = 0 as uint16_t;
+    unsafe {
+        memset(
+            mcfg as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<mfscfg>(),
+        );
+        (*mcfg).masterhost = strdup(DEFAULT_MASTERNAME.as_ptr());
+        (*mcfg).masterport = strdup(DEFAULT_MASTER_CLIENT_PORT.as_ptr());
+        (*mcfg).masterpath = strdup(b"/\0".as_ptr() as *const ::core::ffi::c_char);
+        (*mcfg).masterbind = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        (*mcfg).masterpassword = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        (*mcfg).mastermd5pass = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        (*mcfg).mountpoint = strdup(b"[MFSIO]\0".as_ptr() as *const ::core::ffi::c_char);
+        (*mcfg).preferedlabels = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        (*mcfg).read_cache_mb = 128 as ::core::ffi::c_int;
+        (*mcfg).write_cache_mb = 128 as ::core::ffi::c_int;
+        (*mcfg).io_try_cnt = 30 as ::core::ffi::c_int;
+        (*mcfg).io_timeout = 0 as ::core::ffi::c_int;
+        (*mcfg).min_log_entry = 5 as ::core::ffi::c_int;
+        (*mcfg).readahead_leng = 0x200000 as ::core::ffi::c_int;
+        (*mcfg).readahead_trigger = 10 as ::core::ffi::c_int * 0x200000 as ::core::ffi::c_int;
+        (*mcfg).lcache_retention = 1.0f64;
+        (*mcfg).logident = strdup(b"libmfsio\0".as_ptr() as *const ::core::ffi::c_char);
+        (*mcfg).logdaemon = 0 as ::core::ffi::c_int;
+        (*mcfg).logminlevel = MFSLOG_INFO;
+        (*mcfg).logelevateto = MFSLOG_NOTICE;
+        (*mcfg).master_min_version_maj = 0 as uint16_t;
+        (*mcfg).master_min_version_mid = 0 as uint16_t;
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_init(mut mcfg: *mut mfscfg, mut stage: uint8_t) -> ::core::ffi::c_int {
-    let mut mcfgi: mfs_int_cfg = mfs_int_cfg {
-        masterhost: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        masterport: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        masterbind: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        masterpassword: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        mastermd5pass: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        mountpoint: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        masterpath: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        preferedlabels: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        read_cache_mb: 0,
-        write_cache_mb: 0,
-        io_try_cnt: 0,
-        io_timeout: 0,
-        min_log_entry: 0,
-        readahead_leng: 0,
-        readahead_trigger: 0,
-        error_on_lost_chunk: 0,
-        error_on_no_space: 0,
-        sugid_clear_mode: 0,
-        mkdir_copy_sgid: 0,
-        lcache_retention: 0.,
-        logident: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        logdaemon: 0,
-        logminlevel: 0,
-        logelevateto: 0,
-        master_min_version_maj: 0,
-        master_min_version_mid: 0,
-    };
-    mcfgi.masterhost = (*mcfg).masterhost;
-    mcfgi.masterport = (*mcfg).masterport;
-    mcfgi.masterbind = (*mcfg).masterbind;
-    mcfgi.masterpassword = (*mcfg).masterpassword;
-    mcfgi.mastermd5pass = (*mcfg).mastermd5pass;
-    mcfgi.mountpoint = (*mcfg).mountpoint;
-    mcfgi.masterpath = (*mcfg).masterpath;
-    mcfgi.preferedlabels = (*mcfg).preferedlabels;
-    mcfgi.read_cache_mb = (*mcfg).read_cache_mb;
-    mcfgi.write_cache_mb = (*mcfg).write_cache_mb;
-    mcfgi.io_try_cnt = (*mcfg).io_try_cnt;
-    mcfgi.io_timeout = (*mcfg).io_timeout;
-    mcfgi.min_log_entry = (*mcfg).min_log_entry;
-    mcfgi.readahead_leng = (*mcfg).readahead_leng;
-    mcfgi.readahead_trigger = (*mcfg).readahead_trigger;
-    mcfgi.error_on_lost_chunk = (*mcfg).error_on_lost_chunk;
-    mcfgi.error_on_no_space = (*mcfg).error_on_no_space;
-    mcfgi.sugid_clear_mode = (*mcfg).sugid_clear_mode;
-    mcfgi.mkdir_copy_sgid = (*mcfg).mkdir_copy_sgid;
-    mcfgi.lcache_retention = (*mcfg).lcache_retention;
-    mcfgi.logident = (*mcfg).logident;
-    mcfgi.logdaemon = (*mcfg).logdaemon;
-    mcfgi.logminlevel = (*mcfg).logminlevel;
-    mcfgi.logelevateto = (*mcfg).logelevateto;
-    mcfgi.master_min_version_maj = (*mcfg).master_min_version_maj;
-    mcfgi.master_min_version_mid = (*mcfg).master_min_version_mid;
-    return mfs_int_init(&raw mut mcfgi, stage);
+    unsafe {
+        let mut mcfgi: mfs_int_cfg = mfs_int_cfg {
+            masterhost: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            masterport: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            masterbind: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            masterpassword: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            mastermd5pass: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            mountpoint: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            masterpath: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            preferedlabels: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            read_cache_mb: 0,
+            write_cache_mb: 0,
+            io_try_cnt: 0,
+            io_timeout: 0,
+            min_log_entry: 0,
+            readahead_leng: 0,
+            readahead_trigger: 0,
+            error_on_lost_chunk: 0,
+            error_on_no_space: 0,
+            sugid_clear_mode: 0,
+            mkdir_copy_sgid: 0,
+            lcache_retention: 0.,
+            logident: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            logdaemon: 0,
+            logminlevel: 0,
+            logelevateto: 0,
+            master_min_version_maj: 0,
+            master_min_version_mid: 0,
+        };
+        mcfgi.masterhost = (*mcfg).masterhost;
+        mcfgi.masterport = (*mcfg).masterport;
+        mcfgi.masterbind = (*mcfg).masterbind;
+        mcfgi.masterpassword = (*mcfg).masterpassword;
+        mcfgi.mastermd5pass = (*mcfg).mastermd5pass;
+        mcfgi.mountpoint = (*mcfg).mountpoint;
+        mcfgi.masterpath = (*mcfg).masterpath;
+        mcfgi.preferedlabels = (*mcfg).preferedlabels;
+        mcfgi.read_cache_mb = (*mcfg).read_cache_mb;
+        mcfgi.write_cache_mb = (*mcfg).write_cache_mb;
+        mcfgi.io_try_cnt = (*mcfg).io_try_cnt;
+        mcfgi.io_timeout = (*mcfg).io_timeout;
+        mcfgi.min_log_entry = (*mcfg).min_log_entry;
+        mcfgi.readahead_leng = (*mcfg).readahead_leng;
+        mcfgi.readahead_trigger = (*mcfg).readahead_trigger;
+        mcfgi.error_on_lost_chunk = (*mcfg).error_on_lost_chunk;
+        mcfgi.error_on_no_space = (*mcfg).error_on_no_space;
+        mcfgi.sugid_clear_mode = (*mcfg).sugid_clear_mode;
+        mcfgi.mkdir_copy_sgid = (*mcfg).mkdir_copy_sgid;
+        mcfgi.lcache_retention = (*mcfg).lcache_retention;
+        mcfgi.logident = (*mcfg).logident;
+        mcfgi.logdaemon = (*mcfg).logdaemon;
+        mcfgi.logminlevel = (*mcfg).logminlevel;
+        mcfgi.logelevateto = (*mcfg).logelevateto;
+        mcfgi.master_min_version_maj = (*mcfg).master_min_version_maj;
+        mcfgi.master_min_version_mid = (*mcfg).master_min_version_mid;
+        return mfs_int_init(&raw mut mcfgi, stage);
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_term() {
-    mfs_int_term();
+    unsafe {
+        mfs_int_term();
+    }
 }

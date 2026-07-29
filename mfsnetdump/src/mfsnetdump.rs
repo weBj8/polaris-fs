@@ -1,3 +1,4 @@
+#![feature(core_intrinsics)]
 #![allow(
     clippy::missing_safety_doc,
     dead_code,
@@ -7,92 +8,96 @@
     unused_assignments,
     unused_mut
 )]
-#![feature(extern_types, raw_ref_op)]
+pub enum _IO_wide_data {}
+pub enum _IO_codecvt {}
+pub enum _IO_marker {}
+pub enum pcap {}
 #[macro_use]
 extern crate c2rust_bitfields;
 #[allow(unused_imports)]
 use ::mfsnetdump;
-extern "C" {
-    pub type _IO_wide_data;
-    pub type _IO_codecvt;
-    pub type _IO_marker;
-    pub type pcap;
+unsafe extern "C" {
     static mut stderr: *mut FILE;
-    fn fprintf(
+    unsafe fn fprintf(
         __stream: *mut FILE,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
+    unsafe fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
     static mut optarg: *mut ::core::ffi::c_char;
-    fn getopt(
+    unsafe fn getopt(
         ___argc: ::core::ffi::c_int,
         ___argv: *const *mut ::core::ffi::c_char,
         __shortopts: *const ::core::ffi::c_char,
     ) -> ::core::ffi::c_int;
-    fn strtol(
+    unsafe fn strtol(
         __nptr: *const ::core::ffi::c_char,
         __endptr: *mut *mut ::core::ffi::c_char,
         __base: ::core::ffi::c_int,
     ) -> ::core::ffi::c_long;
-    fn strtoul(
+    unsafe fn strtoul(
         __nptr: *const ::core::ffi::c_char,
         __endptr: *mut *mut ::core::ffi::c_char,
         __base: ::core::ffi::c_int,
     ) -> ::core::ffi::c_ulong;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn qsort(
+    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
+    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
+    unsafe fn qsort(
         __base: *mut ::core::ffi::c_void,
         __nmemb: size_t,
         __size: size_t,
         __compar: __compar_fn_t,
     );
-    fn strcmp(
+    unsafe fn strcmp(
         __s1: *const ::core::ffi::c_char,
         __s2: *const ::core::ffi::c_char,
     ) -> ::core::ffi::c_int;
-    fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn strtok(
+    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
+    unsafe fn strtok(
         __s: *mut ::core::ffi::c_char,
         __delim: *const ::core::ffi::c_char,
     ) -> *mut ::core::ffi::c_char;
-    fn pcap_lookupnet(
+    unsafe fn pcap_lookupnet(
         _: *const ::core::ffi::c_char,
         _: *mut bpf_u_int32,
         _: *mut bpf_u_int32,
         _: *mut ::core::ffi::c_char,
     ) -> ::core::ffi::c_int;
-    fn pcap_open_live(
+    unsafe fn pcap_open_live(
         _: *const ::core::ffi::c_char,
         _: ::core::ffi::c_int,
         _: ::core::ffi::c_int,
         _: ::core::ffi::c_int,
         _: *mut ::core::ffi::c_char,
     ) -> *mut pcap_t;
-    fn pcap_open_offline(_: *const ::core::ffi::c_char, _: *mut ::core::ffi::c_char)
-        -> *mut pcap_t;
-    fn pcap_close(_: *mut pcap_t);
-    fn pcap_loop(
+    unsafe fn pcap_open_offline(
+        _: *const ::core::ffi::c_char,
+        _: *mut ::core::ffi::c_char,
+    ) -> *mut pcap_t;
+    unsafe fn pcap_close(_: *mut pcap_t);
+    unsafe fn pcap_loop(
         _: *mut pcap_t,
         _: ::core::ffi::c_int,
         _: pcap_handler,
         _: *mut u_char,
     ) -> ::core::ffi::c_int;
-    fn pcap_setfilter(_: *mut pcap_t, _: *mut bpf_program) -> ::core::ffi::c_int;
-    fn pcap_geterr(_: *mut pcap_t) -> *mut ::core::ffi::c_char;
-    fn pcap_compile(
+    unsafe fn pcap_setfilter(_: *mut pcap_t, _: *mut bpf_program) -> ::core::ffi::c_int;
+    unsafe fn pcap_geterr(_: *mut pcap_t) -> *mut ::core::ffi::c_char;
+    unsafe fn pcap_compile(
         _: *mut pcap_t,
         _: *mut bpf_program,
         _: *const ::core::ffi::c_char,
         _: ::core::ffi::c_int,
         _: bpf_u_int32,
     ) -> ::core::ffi::c_int;
-    fn pcap_freecode(_: *mut bpf_program);
-    fn pcap_datalink(_: *mut pcap_t) -> ::core::ffi::c_int;
-    fn pcap_datalink_val_to_name(_: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
-    fn pcap_findalldevs(_: *mut *mut pcap_if_t, _: *mut ::core::ffi::c_char) -> ::core::ffi::c_int;
-    fn pcap_freealldevs(_: *mut pcap_if_t);
+    unsafe fn pcap_freecode(_: *mut bpf_program);
+    unsafe fn pcap_datalink(_: *mut pcap_t) -> ::core::ffi::c_int;
+    unsafe fn pcap_datalink_val_to_name(_: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
+    unsafe fn pcap_findalldevs(
+        _: *mut *mut pcap_if_t,
+        _: *mut ::core::ffi::c_char,
+    ) -> ::core::ffi::c_int;
+    unsafe fn pcap_freealldevs(_: *mut pcap_if_t);
 }
 pub type size_t = usize;
 pub type __u_char = ::core::ffi::c_uchar;
@@ -542,13 +547,13 @@ pub const PCAP_IF_UP: ::core::ffi::c_int = 0x2 as ::core::ffi::c_int;
 pub const PCAP_IF_RUNNING: ::core::ffi::c_int = 0x4 as ::core::ffi::c_int;
 pub const PCAP_NETMASK_UNKNOWN: ::core::ffi::c_uint = 0xffffffff as ::core::ffi::c_uint;
 pub const PROTO_BASE: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut id: [::core::ffi::c_char; 72] = unsafe {
     ::core::mem::transmute::<[u8; 72], [::core::ffi::c_char; 72]>(
         *b"@(#) version: 4.59.2-1, build: 2106, written by Jakub Kruszona-Zawadzki\0",
     )
 };
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut cmdtab: [_mfscmd; 273] = [
     _mfscmd {
         command: ANTOAN_NOP as uint32_t,
@@ -1646,216 +1651,238 @@ pub static mut cmdtab: [_mfscmd; 273] = [
 ];
 static mut mfscmdtab: *mut mfscommand = ::core::ptr::null_mut::<mfscommand>();
 static mut mfscmdtableng: uint32_t = 0 as uint32_t;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn commands_cmp(
     mut a: *const ::core::ffi::c_void,
     mut b: *const ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    let mut aa: *const mfscommand = a as *const mfscommand;
-    let mut bb: *const mfscommand = b as *const mfscommand;
-    return if (*aa).command > (*bb).command {
-        1 as ::core::ffi::c_int
-    } else if (*aa).command < (*bb).command {
-        -1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
+    unsafe {
+        let mut aa: *const mfscommand = a as *const mfscommand;
+        let mut bb: *const mfscommand = b as *const mfscommand;
+        return if (*aa).command > (*bb).command {
+            1 as ::core::ffi::c_int
+        } else if (*aa).command < (*bb).command {
+            -1 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        };
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn commands_convert() {
-    let mut i: uint32_t = 0;
-    let mut ccode: uint8_t = 0;
-    let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    mfscmdtableng = 0 as uint32_t;
-    i = 0 as uint32_t;
-    while !cmdtab[i as usize].commandstr.is_null() {
-        mfscmdtableng = mfscmdtableng.wrapping_add(1);
-        i = i.wrapping_add(1);
-    }
-    if mfscmdtableng == 0 as uint32_t {
-        mfscmdtab = ::core::ptr::null_mut::<mfscommand>();
-        return;
-    }
-    mfscmdtab = malloc(::core::mem::size_of::<mfscommand>().wrapping_mul(mfscmdtableng as size_t))
-        as *mut mfscommand;
-    i = 0 as uint32_t;
-    while !cmdtab[i as usize].commandstr.is_null() {
-        (*mfscmdtab.offset(i as isize)).command = cmdtab[i as usize].command;
-        (*mfscmdtab.offset(i as isize)).commandstr = strdup(cmdtab[i as usize].commandstr);
-        p = (*mfscmdtab.offset(i as isize)).commandstr;
-        ccode = 0 as uint8_t;
-        if *p.offset(0 as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-            && *p.offset(1 as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-            && *p.offset(2 as isize) as ::core::ffi::c_int == 'T' as ::core::ffi::c_int
-            && *p.offset(3 as isize) as ::core::ffi::c_int == 'O' as ::core::ffi::c_int
-        {
-            if *p.offset(0 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                && *p.offset(1 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+    unsafe {
+        let mut i: uint32_t = 0;
+        let mut ccode: uint8_t = 0;
+        let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        mfscmdtableng = 0 as uint32_t;
+        i = 0 as uint32_t;
+        while !cmdtab[i as usize].commandstr.is_null() {
+            mfscmdtableng = mfscmdtableng.wrapping_add(1);
+            i = i.wrapping_add(1);
+        }
+        if mfscmdtableng == 0 as uint32_t {
+            mfscmdtab = ::core::ptr::null_mut::<mfscommand>();
+            return;
+        }
+        mfscmdtab =
+            malloc(::core::mem::size_of::<mfscommand>().wrapping_mul(mfscmdtableng as size_t))
+                as *mut mfscommand;
+        i = 0 as uint32_t;
+        while !cmdtab[i as usize].commandstr.is_null() {
+            (*mfscmdtab.offset(i as isize)).command = cmdtab[i as usize].command;
+            (*mfscmdtab.offset(i as isize)).commandstr = strdup(cmdtab[i as usize].commandstr);
+            p = (*mfscmdtab.offset(i as isize)).commandstr;
+            ccode = 0 as uint8_t;
+            if *p.offset(0 as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+                && *p.offset(1 as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+                && *p.offset(2 as isize) as ::core::ffi::c_int == 'T' as ::core::ffi::c_int
+                && *p.offset(3 as isize) as ::core::ffi::c_int == 'O' as ::core::ffi::c_int
             {
-                if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+                if *p.offset(0 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                    && *p.offset(1 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
                 {
-                    ccode = 8 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
+                    if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+                    {
+                        ccode = 8 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
+                    {
+                        ccode = 13 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
+                    {
+                        ccode = 14 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'M' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                    {
+                        ccode = 1 as uint8_t;
+                    }
+                } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
+                    && *p.offset(1 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
                 {
-                    ccode = 13 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
+                    if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+                    {
+                        ccode = 5 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
+                    {
+                        ccode = 11 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'M' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                    {
+                        ccode = 10 as uint8_t;
+                    }
+                } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
+                    && *p.offset(1 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
                 {
-                    ccode = 14 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'M' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                    if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+                    {
+                        ccode = 6 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
+                    {
+                        ccode = 3 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'M' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                    {
+                        ccode = 4 as uint8_t;
+                    }
+                } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'M' as ::core::ffi::c_int
+                    && *p.offset(1 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
                 {
-                    ccode = 1 as uint8_t;
-                }
-            } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                && *p.offset(1 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
-            {
-                if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
-                {
-                    ccode = 5 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
-                {
-                    ccode = 11 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'M' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                {
-                    ccode = 10 as uint8_t;
-                }
-            } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                && *p.offset(1 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
-            {
-                if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
-                {
-                    ccode = 6 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
-                {
-                    ccode = 3 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'M' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                {
-                    ccode = 4 as uint8_t;
-                }
-            } else if *p.offset(0 as isize) as ::core::ffi::c_int == 'M' as ::core::ffi::c_int
-                && *p.offset(1 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-            {
-                if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
-                {
-                    ccode = 9 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
-                {
-                    ccode = 2 as uint8_t;
-                } else if *p.offset(4 as isize) as ::core::ffi::c_int == 'C' as ::core::ffi::c_int
-                    && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
-                {
-                    ccode = 12 as uint8_t;
+                    if *p.offset(4 as isize) as ::core::ffi::c_int == 'A' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'N' as ::core::ffi::c_int
+                    {
+                        ccode = 9 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'L' as ::core::ffi::c_int
+                    {
+                        ccode = 2 as uint8_t;
+                    } else if *p.offset(4 as isize) as ::core::ffi::c_int
+                        == 'C' as ::core::ffi::c_int
+                        && *p.offset(5 as isize) as ::core::ffi::c_int == 'S' as ::core::ffi::c_int
+                    {
+                        ccode = 12 as uint8_t;
+                    }
                 }
             }
+            (*mfscmdtab.offset(i as isize)).colorcode = ccode;
+            (*mfscmdtab.offset(i as isize)).display = 1 as uint8_t;
+            i = i.wrapping_add(1);
         }
-        (*mfscmdtab.offset(i as isize)).colorcode = ccode;
-        (*mfscmdtab.offset(i as isize)).display = 1 as uint8_t;
-        i = i.wrapping_add(1);
+        qsort(
+            mfscmdtab as *mut ::core::ffi::c_void,
+            mfscmdtableng as size_t,
+            ::core::mem::size_of::<mfscommand>(),
+            Some(
+                commands_cmp
+                    as unsafe extern "C" fn(
+                        *const ::core::ffi::c_void,
+                        *const ::core::ffi::c_void,
+                    ) -> ::core::ffi::c_int,
+            ),
+        );
     }
-    qsort(
-        mfscmdtab as *mut ::core::ffi::c_void,
-        mfscmdtableng as size_t,
-        ::core::mem::size_of::<mfscommand>(),
-        Some(
-            commands_cmp
-                as unsafe extern "C" fn(
-                    *const ::core::ffi::c_void,
-                    *const ::core::ffi::c_void,
-                ) -> ::core::ffi::c_int,
-        ),
-    );
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn commands_find(
     mut cmd: uint32_t,
     mut color: *mut uint8_t,
     mut display: *mut uint8_t,
 ) -> *const ::core::ffi::c_char {
-    let mut first: int32_t = 0;
-    let mut last: int32_t = 0;
-    let mut middle: int32_t = 0;
-    first = 0 as ::core::ffi::c_int as int32_t;
-    last = mfscmdtableng.wrapping_sub(1 as uint32_t) as int32_t;
-    middle = (first + last) / 2 as int32_t;
-    while first <= last {
-        if (*mfscmdtab.offset(middle as isize)).command < cmd {
-            first = middle + 1 as int32_t;
-        } else if (*mfscmdtab.offset(middle as isize)).command > cmd {
-            last = middle - 1 as int32_t;
-        } else {
-            *color = (*mfscmdtab.offset(middle as isize)).colorcode;
-            *display = (*mfscmdtab.offset(middle as isize)).display;
-            return (*mfscmdtab.offset(middle as isize)).commandstr;
-        }
+    unsafe {
+        let mut first: int32_t = 0;
+        let mut last: int32_t = 0;
+        let mut middle: int32_t = 0;
+        first = 0 as ::core::ffi::c_int as int32_t;
+        last = mfscmdtableng.wrapping_sub(1 as uint32_t) as int32_t;
         middle = (first + last) / 2 as int32_t;
+        while first <= last {
+            if (*mfscmdtab.offset(middle as isize)).command < cmd {
+                first = middle + 1 as int32_t;
+            } else if (*mfscmdtab.offset(middle as isize)).command > cmd {
+                last = middle - 1 as int32_t;
+            } else {
+                *color = (*mfscmdtab.offset(middle as isize)).colorcode;
+                *display = (*mfscmdtab.offset(middle as isize)).display;
+                return (*mfscmdtab.offset(middle as isize)).commandstr;
+            }
+            middle = (first + last) / 2 as int32_t;
+        }
+        *color = 0 as uint8_t;
+        *display = 0 as uint8_t;
+        return ::core::ptr::null::<::core::ffi::c_char>();
     }
-    *color = 0 as uint8_t;
-    *display = 0 as uint8_t;
-    return ::core::ptr::null::<::core::ffi::c_char>();
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn commands_exclude(mut opt: *const ::core::ffi::c_char) {
-    let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut i: uint32_t = 0;
-    str = strdup(opt);
-    p = strtok(str, b" ,;\0".as_ptr() as *const ::core::ffi::c_char);
-    while !p.is_null() {
-        i = 0 as uint32_t;
-        while i < mfscmdtableng {
-            if strcmp(p, (*mfscmdtab.offset(i as isize)).commandstr) == 0 as ::core::ffi::c_int {
-                (*mfscmdtab.offset(i as isize)).display = 0 as uint8_t;
+    unsafe {
+        let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut i: uint32_t = 0;
+        str = strdup(opt);
+        p = strtok(str, b" ,;\0".as_ptr() as *const ::core::ffi::c_char);
+        while !p.is_null() {
+            i = 0 as uint32_t;
+            while i < mfscmdtableng {
+                if strcmp(p, (*mfscmdtab.offset(i as isize)).commandstr) == 0 as ::core::ffi::c_int
+                {
+                    (*mfscmdtab.offset(i as isize)).display = 0 as uint8_t;
+                }
+                i = i.wrapping_add(1);
             }
-            i = i.wrapping_add(1);
+            p = strtok(
+                ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                b" ,;\0".as_ptr() as *const ::core::ffi::c_char,
+            );
         }
-        p = strtok(
-            ::core::ptr::null_mut::<::core::ffi::c_char>(),
-            b" ,;\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        free(str as *mut ::core::ffi::c_void);
     }
-    free(str as *mut ::core::ffi::c_void);
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn commands_onlyuse(mut opt: *const ::core::ffi::c_char) {
-    let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut i: uint32_t = 0;
-    static mut ft: uint8_t = 1 as uint8_t;
-    if ft != 0 {
-        i = 0 as uint32_t;
-        while i < mfscmdtableng {
-            (*mfscmdtab.offset(i as isize)).display = 0 as uint8_t;
-            i = i.wrapping_add(1);
-        }
-        ft = 0 as uint8_t;
-    }
-    str = strdup(opt);
-    p = strtok(str, b" ,;\0".as_ptr() as *const ::core::ffi::c_char);
-    while !p.is_null() {
-        i = 0 as uint32_t;
-        while i < mfscmdtableng {
-            if strcmp(p, (*mfscmdtab.offset(i as isize)).commandstr) == 0 as ::core::ffi::c_int {
-                (*mfscmdtab.offset(i as isize)).display = 1 as uint8_t;
+    unsafe {
+        let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut i: uint32_t = 0;
+        static mut ft: uint8_t = 1 as uint8_t;
+        if ft != 0 {
+            i = 0 as uint32_t;
+            while i < mfscmdtableng {
+                (*mfscmdtab.offset(i as isize)).display = 0 as uint8_t;
+                i = i.wrapping_add(1);
             }
-            i = i.wrapping_add(1);
+            ft = 0 as uint8_t;
         }
-        p = strtok(
-            ::core::ptr::null_mut::<::core::ffi::c_char>(),
-            b" ,;\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        str = strdup(opt);
+        p = strtok(str, b" ,;\0".as_ptr() as *const ::core::ffi::c_char);
+        while !p.is_null() {
+            i = 0 as uint32_t;
+            while i < mfscmdtableng {
+                if strcmp(p, (*mfscmdtab.offset(i as isize)).commandstr) == 0 as ::core::ffi::c_int
+                {
+                    (*mfscmdtab.offset(i as isize)).display = 1 as uint8_t;
+                }
+                i = i.wrapping_add(1);
+            }
+            p = strtok(
+                ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                b" ,;\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
+        free(str as *mut ::core::ffi::c_void);
     }
-    free(str as *mut ::core::ffi::c_void);
 }
 pub const COLOR_ADDR_SRCHI: [::core::ffi::c_char; 12] =
     unsafe { ::core::mem::transmute::<[u8; 12], [::core::ffi::c_char; 12]>(*b"\x1B[38;5;156m\0") };
@@ -1886,32 +1913,35 @@ static mut color_tab: [*const ::core::ffi::c_char; 17] = [
     b"\x1B[97m\0".as_ptr() as *const ::core::ffi::c_char,
     ::core::ptr::null::<::core::ffi::c_char>(),
 ];
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn hexdump(mut ptr: *const uint8_t, mut len: uint32_t) {
-    let mut eol: uint8_t = 0;
-    let mut i: uint32_t = 0;
-    eol = 0 as uint8_t;
-    i = 0 as uint32_t;
-    while i < len {
-        eol = 1 as uint8_t;
-        if i & 0x1f as uint32_t == 0 as uint32_t {
+    unsafe {
+        let mut eol: uint8_t = 0;
+        let mut i: uint32_t = 0;
+        eol = 0 as uint8_t;
+        i = 0 as uint32_t;
+        while i < len {
+            eol = 1 as uint8_t;
+            if i & 0x1f as uint32_t == 0 as uint32_t {
+                printf(
+                    b"\x1B[38;5;159m\t0x%05X:\x1B[38;5;228m\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    i,
+                );
+            }
             printf(
-                b"\x1B[38;5;159m\t0x%05X:\x1B[38;5;228m\0".as_ptr() as *const ::core::ffi::c_char,
-                i,
+                b" %02X\0".as_ptr() as *const ::core::ffi::c_char,
+                *ptr.offset(i as isize) as ::core::ffi::c_int,
             );
+            if i & 0x1f as uint32_t == 0x1f as uint32_t {
+                printf(b"\x1B(B\x1B[m\n\0".as_ptr() as *const ::core::ffi::c_char);
+                eol = 0 as uint8_t;
+            }
+            i = i.wrapping_add(1);
         }
-        printf(
-            b" %02X\0".as_ptr() as *const ::core::ffi::c_char,
-            *ptr.offset(i as isize) as ::core::ffi::c_int,
-        );
-        if i & 0x1f as uint32_t == 0x1f as uint32_t {
+        if eol != 0 {
             printf(b"\x1B(B\x1B[m\n\0".as_ptr() as *const ::core::ffi::c_char);
-            eol = 0 as uint8_t;
         }
-        i = i.wrapping_add(1);
-    }
-    if eol != 0 {
-        printf(b"\x1B(B\x1B[m\n\0".as_ptr() as *const ::core::ffi::c_char);
     }
 }
 static mut connhead: *mut connection = ::core::ptr::null_mut::<connection>();
@@ -1922,24 +1952,26 @@ unsafe extern "C" fn packet_find(
     mut dstip: uint32_t,
     mut dstport: uint16_t,
 ) -> *mut *mut connection {
-    let mut c: *mut connection = ::core::ptr::null_mut::<connection>();
-    let mut cp: *mut *mut connection = ::core::ptr::null_mut::<*mut connection>();
-    cp = &raw mut connhead;
-    loop {
-        c = *cp;
-        if c.is_null() {
-            break;
+    unsafe {
+        let mut c: *mut connection = ::core::ptr::null_mut::<connection>();
+        let mut cp: *mut *mut connection = ::core::ptr::null_mut::<*mut connection>();
+        cp = &raw mut connhead;
+        loop {
+            c = *cp;
+            if c.is_null() {
+                break;
+            }
+            if (*c).srcip == srcip
+                && (*c).dstip == dstip
+                && (*c).srcport as ::core::ffi::c_int == srcport as ::core::ffi::c_int
+                && (*c).dstport as ::core::ffi::c_int == dstport as ::core::ffi::c_int
+            {
+                return cp;
+            }
+            cp = &raw mut (*c).next as *mut *mut connection;
         }
-        if (*c).srcip == srcip
-            && (*c).dstip == dstip
-            && (*c).srcport as ::core::ffi::c_int == srcport as ::core::ffi::c_int
-            && (*c).dstport as ::core::ffi::c_int == dstport as ::core::ffi::c_int
-        {
-            return cp;
-        }
-        cp = &raw mut (*c).next as *mut *mut connection;
+        return ::core::ptr::null_mut::<*mut connection>();
     }
-    return ::core::ptr::null_mut::<*mut connection>();
 }
 #[inline]
 unsafe extern "C" fn print_info(
@@ -1948,310 +1980,195 @@ unsafe extern "C" fn print_info(
     mut srcport: uint16_t,
     mut dstport: uint16_t,
 ) {
-    printf(
-        b"\x1B[38;5;231m%ld.%06u : \0".as_ptr() as *const ::core::ffi::c_char,
-        (*ts).tv_sec,
-        (*ts).tv_usec as ::core::ffi::c_uint,
-    );
-    printf(
-        b"%s%3u.%3u.%3u.%3u : %5hu\x1B(B\x1B[m -> %s%3u.%3u.%3u.%3u : %5hu\x1B(B\x1B[m \0".as_ptr()
-            as *const ::core::ffi::c_char,
-        if (srcport as ::core::ffi::c_int) < 49152 as ::core::ffi::c_int {
-            COLOR_ADDR_SRCLO.as_ptr()
-        } else {
-            COLOR_ADDR_SRCHI.as_ptr()
-        },
-        *ip.offset(12 as isize) as ::core::ffi::c_int,
-        *ip.offset(13 as isize) as ::core::ffi::c_int,
-        *ip.offset(14 as isize) as ::core::ffi::c_int,
-        *ip.offset(15 as isize) as ::core::ffi::c_int,
-        srcport as ::core::ffi::c_int,
-        if (dstport as ::core::ffi::c_int) < 49152 as ::core::ffi::c_int {
-            COLOR_ADDR_DSTLO.as_ptr()
-        } else {
-            COLOR_ADDR_DSTHI.as_ptr()
-        },
-        *ip.offset(16 as isize) as ::core::ffi::c_int,
-        *ip.offset(17 as isize) as ::core::ffi::c_int,
-        *ip.offset(18 as isize) as ::core::ffi::c_int,
-        *ip.offset(19 as isize) as ::core::ffi::c_int,
-        dstport as ::core::ffi::c_int,
-    );
+    unsafe {
+        printf(
+            b"\x1B[38;5;231m%ld.%06u : \0".as_ptr() as *const ::core::ffi::c_char,
+            (*ts).tv_sec,
+            (*ts).tv_usec as ::core::ffi::c_uint,
+        );
+        printf(
+            b"%s%3u.%3u.%3u.%3u : %5hu\x1B(B\x1B[m -> %s%3u.%3u.%3u.%3u : %5hu\x1B(B\x1B[m \0"
+                .as_ptr() as *const ::core::ffi::c_char,
+            if (srcport as ::core::ffi::c_int) < 49152 as ::core::ffi::c_int {
+                COLOR_ADDR_SRCLO.as_ptr()
+            } else {
+                COLOR_ADDR_SRCHI.as_ptr()
+            },
+            *ip.offset(12 as isize) as ::core::ffi::c_int,
+            *ip.offset(13 as isize) as ::core::ffi::c_int,
+            *ip.offset(14 as isize) as ::core::ffi::c_int,
+            *ip.offset(15 as isize) as ::core::ffi::c_int,
+            srcport as ::core::ffi::c_int,
+            if (dstport as ::core::ffi::c_int) < 49152 as ::core::ffi::c_int {
+                COLOR_ADDR_DSTLO.as_ptr()
+            } else {
+                COLOR_ADDR_DSTHI.as_ptr()
+            },
+            *ip.offset(16 as isize) as ::core::ffi::c_int,
+            *ip.offset(17 as isize) as ::core::ffi::c_int,
+            *ip.offset(18 as isize) as ::core::ffi::c_int,
+            *ip.offset(19 as isize) as ::core::ffi::c_int,
+            dstport as ::core::ffi::c_int,
+        );
+    }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn parse_packet(
     mut args: *mut u_char,
     mut header: *const pcap_pkthdr,
     mut packet: *const u_char,
 ) {
-    let mut ud: *mut userdata = args as *mut userdata;
-    let mut ip: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut tcp: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut payload: *const uint8_t = ::core::ptr::null::<uint8_t>();
-    let mut iplen: uint32_t = 0;
-    let mut iphdrlen: uint32_t = 0;
-    let mut tcplen: uint32_t = 0;
-    let mut tcphdrlen: uint32_t = 0;
-    let mut payloadlen: uint32_t = 0;
-    let mut seqno: uint32_t = 0;
-    let mut skip: uint32_t = 0;
-    let mut srcip: uint32_t = 0;
-    let mut dstip: uint32_t = 0;
-    let mut srcport: uint16_t = 0;
-    let mut dstport: uint16_t = 0;
-    let mut mfscmd: uint32_t = 0;
-    let mut mfslen: uint32_t = 0;
-    let mut ccode: uint8_t = 0;
-    let mut display: uint8_t = 0;
-    let mut commandstr: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-    let mut c: *mut connection = ::core::ptr::null_mut::<connection>();
-    let mut cp: *mut *mut connection = ::core::ptr::null_mut::<*mut connection>();
-    let mut bytesskip: uint32_t = 0;
-    let mut linktype: uint16_t = 0;
-    bytesskip = 0 as uint32_t;
-    linktype = (*ud).linktype as uint16_t;
-    loop {
-        if linktype as ::core::ffi::c_int == DLT_EN10MB {
-            bytesskip = bytesskip.wrapping_add(14 as uint32_t);
-            break;
-        } else if linktype as ::core::ffi::c_int == DLT_NULL {
-            bytesskip = bytesskip.wrapping_add(4 as uint32_t);
-            break;
-        } else {
-            if linktype as ::core::ffi::c_int == DLT_RAW {
+    unsafe {
+        let mut ud: *mut userdata = args as *mut userdata;
+        let mut ip: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut tcp: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut payload: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let mut iplen: uint32_t = 0;
+        let mut iphdrlen: uint32_t = 0;
+        let mut tcplen: uint32_t = 0;
+        let mut tcphdrlen: uint32_t = 0;
+        let mut payloadlen: uint32_t = 0;
+        let mut seqno: uint32_t = 0;
+        let mut skip: uint32_t = 0;
+        let mut srcip: uint32_t = 0;
+        let mut dstip: uint32_t = 0;
+        let mut srcport: uint16_t = 0;
+        let mut dstport: uint16_t = 0;
+        let mut mfscmd: uint32_t = 0;
+        let mut mfslen: uint32_t = 0;
+        let mut ccode: uint8_t = 0;
+        let mut display: uint8_t = 0;
+        let mut commandstr: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
+        let mut c: *mut connection = ::core::ptr::null_mut::<connection>();
+        let mut cp: *mut *mut connection = ::core::ptr::null_mut::<*mut connection>();
+        let mut bytesskip: uint32_t = 0;
+        let mut linktype: uint16_t = 0;
+        bytesskip = 0 as uint32_t;
+        linktype = (*ud).linktype as uint16_t;
+        loop {
+            if linktype as ::core::ffi::c_int == DLT_EN10MB {
+                bytesskip = bytesskip.wrapping_add(14 as uint32_t);
                 break;
-            }
-            if linktype as ::core::ffi::c_int == DLT_LINUX_SLL {
-                bytesskip = bytesskip.wrapping_add(16 as uint32_t);
+            } else if linktype as ::core::ffi::c_int == DLT_NULL {
+                bytesskip = bytesskip.wrapping_add(4 as uint32_t);
                 break;
-            } else if linktype as ::core::ffi::c_int == DLT_PKTAP {
-                linktype = (*packet.offset(bytesskip.wrapping_add(8 as uint32_t) as isize)
-                    as ::core::ffi::c_uint)
-                    .wrapping_add((256 as ::core::ffi::c_uint).wrapping_mul(
-                        *packet.offset(bytesskip.wrapping_add(9 as uint32_t) as isize)
-                            as ::core::ffi::c_uint,
-                    )) as uint16_t;
-                bytesskip = (bytesskip as ::core::ffi::c_uint).wrapping_add(
-                    (*packet.offset(bytesskip as isize) as ::core::ffi::c_uint).wrapping_add(
-                        (256 as ::core::ffi::c_uint).wrapping_mul(
-                            *packet.offset(bytesskip.wrapping_add(1 as uint32_t) as isize)
-                                as ::core::ffi::c_uint,
-                        ),
-                    ),
-                ) as uint32_t;
             } else {
-                return;
+                if linktype as ::core::ffi::c_int == DLT_RAW {
+                    break;
+                }
+                if linktype as ::core::ffi::c_int == DLT_LINUX_SLL {
+                    bytesskip = bytesskip.wrapping_add(16 as uint32_t);
+                    break;
+                } else if linktype as ::core::ffi::c_int == DLT_PKTAP {
+                    linktype = (*packet.offset(bytesskip.wrapping_add(8 as uint32_t) as isize)
+                        as ::core::ffi::c_uint)
+                        .wrapping_add((256 as ::core::ffi::c_uint).wrapping_mul(
+                            *packet.offset(bytesskip.wrapping_add(9 as uint32_t) as isize)
+                                as ::core::ffi::c_uint,
+                        )) as uint16_t;
+                    bytesskip = (bytesskip as ::core::ffi::c_uint).wrapping_add(
+                        (*packet.offset(bytesskip as isize) as ::core::ffi::c_uint).wrapping_add(
+                            (256 as ::core::ffi::c_uint).wrapping_mul(
+                                *packet.offset(bytesskip.wrapping_add(1 as uint32_t) as isize)
+                                    as ::core::ffi::c_uint,
+                            ),
+                        ),
+                    ) as uint32_t;
+                } else {
+                    return;
+                }
             }
         }
-    }
-    if bytesskip >= (*header).caplen as uint32_t {
-        return;
-    }
-    ip = packet.offset(bytesskip as isize) as *const uint8_t;
-    iplen = ((*header).caplen as uint32_t).wrapping_sub(bytesskip);
-    if *ip.offset(0 as isize) as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-        != 0x40 as ::core::ffi::c_int
-    {
-        return;
-    }
-    if iplen < 20 as uint32_t {
-        return;
-    }
-    if *ip.offset(9 as isize) as ::core::ffi::c_int != 6 as ::core::ffi::c_int {
-        return;
-    }
-    iphdrlen = (4 as ::core::ffi::c_int
-        * (*ip.offset(0 as isize) as ::core::ffi::c_int & 0xf as ::core::ffi::c_int))
-        as uint32_t;
-    if iplen < iphdrlen {
-        return;
-    }
-    tcp = ip.offset(iphdrlen as isize);
-    tcplen = iplen.wrapping_sub(iphdrlen);
-    if tcplen < 20 as uint32_t {
-        return;
-    }
-    tcphdrlen = (4 as ::core::ffi::c_int
-        * (*tcp.offset(12 as isize) as ::core::ffi::c_int >> 4 as ::core::ffi::c_int))
-        as uint32_t;
-    if tcplen < tcphdrlen {
-        return;
-    }
-    srcip = (*ip.offset(12 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(13 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(14 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(15 as isize) as ::core::ffi::c_uint) as uint32_t;
-    dstip = (*ip.offset(16 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(17 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(18 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*ip.offset(19 as isize) as ::core::ffi::c_uint) as uint32_t;
-    srcport = (*tcp.offset(0 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*tcp.offset(1 as isize) as ::core::ffi::c_uint) as uint16_t;
-    dstport = (*tcp.offset(2 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*tcp.offset(3 as isize) as ::core::ffi::c_uint) as uint16_t;
-    if ((srcport as ::core::ffi::c_int) < (*ud).minport as ::core::ffi::c_int
-        || srcport as ::core::ffi::c_int > (*ud).maxport as ::core::ffi::c_int)
-        && ((dstport as ::core::ffi::c_int) < (*ud).minport as ::core::ffi::c_int
-            || dstport as ::core::ffi::c_int > (*ud).maxport as ::core::ffi::c_int)
-    {
-        return;
-    }
-    seqno = (*tcp.offset(4 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*tcp.offset(5 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*tcp.offset(6 as isize) as ::core::ffi::c_uint)
-        .wrapping_mul(256 as ::core::ffi::c_uint)
-        .wrapping_add(*tcp.offset(7 as isize) as ::core::ffi::c_uint) as uint32_t;
-    cp = packet_find(srcip, srcport, dstip, dstport);
-    if *tcp.offset(13 as isize) as ::core::ffi::c_int & 0x2 as ::core::ffi::c_int != 0 {
-        if (*ud).showconnections != 0 {
-            print_info(&raw const (*header).ts, ip, srcport, dstport);
-            printf(
-                b"\x1B[38;5;116m... new connection ...\x1B(B\x1B[m\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-            );
-        }
-    }
-    if *tcp.offset(13 as isize) as ::core::ffi::c_int & 0x5 as ::core::ffi::c_int != 0 {
-        if (*ud).showconnections != 0 {
-            print_info(&raw const (*header).ts, ip, srcport, dstport);
-            printf(
-                b"\x1B[38;5;100m... close connection ...\x1B(B\x1B[m\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-            );
-        }
-        if !cp.is_null() {
-            c = *cp;
-            *cp = (*c).next as *mut connection;
-            free(c as *mut ::core::ffi::c_void);
-        }
-        return;
-    }
-    payload = tcp.offset(tcphdrlen as isize);
-    payloadlen = tcplen.wrapping_sub(tcphdrlen);
-    if !cp.is_null() {
-        c = *cp;
-        if (*c).seq > seqno {
-            skip = (*c).seq.wrapping_sub(seqno);
-            print_info(&raw const (*header).ts, ip, srcport, dstport);
-            printf(
-                b"\x1B[38;5;180m... data in packet ...\x1B(B\x1B[m\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-            );
-        } else {
-            skip = 0 as uint32_t;
-        }
-        if skip < payloadlen {
-            payload = payload.offset(skip as isize);
-            payloadlen = payloadlen.wrapping_sub(skip);
-        } else {
+        if bytesskip >= (*header).caplen as uint32_t {
             return;
         }
-    }
-    while payloadlen >= 8 as uint32_t {
-        mfscmd = (*payload.offset(0 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(1 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(2 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(3 as isize) as ::core::ffi::c_uint)
-            as uint32_t;
-        mfslen = (*payload.offset(4 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(5 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(6 as isize) as ::core::ffi::c_uint)
-            .wrapping_mul(256 as ::core::ffi::c_uint)
-            .wrapping_add(*payload.offset(7 as isize) as ::core::ffi::c_uint)
-            as uint32_t;
-        commandstr = commands_find(mfscmd, &raw mut ccode, &raw mut display);
-        if (*ud).showmfsnops as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-            && mfscmd == ANTOAN_NOP as uint32_t
+        ip = packet.offset(bytesskip as isize) as *const uint8_t;
+        iplen = ((*header).caplen as uint32_t).wrapping_sub(bytesskip);
+        if *ip.offset(0 as isize) as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
+            != 0x40 as ::core::ffi::c_int
         {
-            display = 0 as uint8_t;
+            return;
         }
-        if !commandstr.is_null() && mfslen <= 100000000 as uint32_t {
-            if display != 0 {
+        if iplen < 20 as uint32_t {
+            return;
+        }
+        if *ip.offset(9 as isize) as ::core::ffi::c_int != 6 as ::core::ffi::c_int {
+            return;
+        }
+        iphdrlen = (4 as ::core::ffi::c_int
+            * (*ip.offset(0 as isize) as ::core::ffi::c_int & 0xf as ::core::ffi::c_int))
+            as uint32_t;
+        if iplen < iphdrlen {
+            return;
+        }
+        tcp = ip.offset(iphdrlen as isize);
+        tcplen = iplen.wrapping_sub(iphdrlen);
+        if tcplen < 20 as uint32_t {
+            return;
+        }
+        tcphdrlen = (4 as ::core::ffi::c_int
+            * (*tcp.offset(12 as isize) as ::core::ffi::c_int >> 4 as ::core::ffi::c_int))
+            as uint32_t;
+        if tcplen < tcphdrlen {
+            return;
+        }
+        srcip = (*ip.offset(12 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(13 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(14 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(15 as isize) as ::core::ffi::c_uint)
+            as uint32_t;
+        dstip = (*ip.offset(16 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(17 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(18 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*ip.offset(19 as isize) as ::core::ffi::c_uint)
+            as uint32_t;
+        srcport = (*tcp.offset(0 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*tcp.offset(1 as isize) as ::core::ffi::c_uint)
+            as uint16_t;
+        dstport = (*tcp.offset(2 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*tcp.offset(3 as isize) as ::core::ffi::c_uint)
+            as uint16_t;
+        if ((srcport as ::core::ffi::c_int) < (*ud).minport as ::core::ffi::c_int
+            || srcport as ::core::ffi::c_int > (*ud).maxport as ::core::ffi::c_int)
+            && ((dstport as ::core::ffi::c_int) < (*ud).minport as ::core::ffi::c_int
+                || dstport as ::core::ffi::c_int > (*ud).maxport as ::core::ffi::c_int)
+        {
+            return;
+        }
+        seqno = (*tcp.offset(4 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*tcp.offset(5 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*tcp.offset(6 as isize) as ::core::ffi::c_uint)
+            .wrapping_mul(256 as ::core::ffi::c_uint)
+            .wrapping_add(*tcp.offset(7 as isize) as ::core::ffi::c_uint)
+            as uint32_t;
+        cp = packet_find(srcip, srcport, dstip, dstport);
+        if *tcp.offset(13 as isize) as ::core::ffi::c_int & 0x2 as ::core::ffi::c_int != 0 {
+            if (*ud).showconnections != 0 {
                 print_info(&raw const (*header).ts, ip, srcport, dstport);
-                if ccode as ::core::ffi::c_int >= 1 as ::core::ffi::c_int
-                    && ccode as ::core::ffi::c_int <= 15 as ::core::ffi::c_int
-                {
-                    printf(
-                        b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-                        color_tab[ccode as usize],
-                    );
-                }
-                printf(b"%s\0".as_ptr() as *const ::core::ffi::c_char, commandstr);
-                if ccode != 0 {
-                    printf(COLOR_CLEAR.as_ptr());
-                }
-                printf(b" (%u)\n\0".as_ptr() as *const ::core::ffi::c_char, mfslen);
-                if payloadlen.wrapping_sub(8 as uint32_t) <= (*ud).maxdatainpacket {
-                    if mfslen < payloadlen.wrapping_sub(8 as uint32_t) {
-                        hexdump(payload.offset(8 as ::core::ffi::c_int as isize), mfslen);
-                    } else {
-                        hexdump(
-                            payload.offset(8 as ::core::ffi::c_int as isize),
-                            payloadlen.wrapping_sub(8 as uint32_t),
-                        );
-                    }
-                } else if mfslen < (*ud).maxdatainpacket {
-                    hexdump(payload.offset(8 as ::core::ffi::c_int as isize), mfslen);
-                } else {
-                    hexdump(
-                        payload.offset(8 as ::core::ffi::c_int as isize),
-                        (*ud).maxdatainpacket,
-                    );
-                    printf(b"\t(...)\n\0".as_ptr() as *const ::core::ffi::c_char);
-                }
+                printf(
+                    b"\x1B[38;5;116m... new connection ...\x1B(B\x1B[m\n\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
             }
-            if mfslen.wrapping_add(8 as uint32_t) == payloadlen {
-                if !cp.is_null() {
-                    c = *cp;
-                    *cp = (*c).next as *mut connection;
-                    free(c as *mut ::core::ffi::c_void);
-                }
-                payloadlen = 0 as uint32_t;
-                payload = ::core::ptr::null::<uint8_t>();
-            } else if mfslen.wrapping_add(8 as uint32_t) < payloadlen {
-                payloadlen = payloadlen.wrapping_sub(mfslen.wrapping_add(8 as uint32_t));
-                payload = payload.offset(mfslen.wrapping_add(8 as uint32_t) as isize);
-                seqno = seqno.wrapping_add(mfslen.wrapping_add(8 as uint32_t));
-            } else {
-                if !cp.is_null() {
-                    c = *cp;
-                    (*c).seq = seqno.wrapping_add(mfslen).wrapping_add(8 as uint32_t);
-                } else {
-                    c = malloc(::core::mem::size_of::<connection>()) as *mut connection;
-                    (*c).srcip = srcip;
-                    (*c).dstip = dstip;
-                    (*c).srcport = srcport;
-                    (*c).dstport = dstport;
-                    (*c).seq = seqno.wrapping_add(mfslen).wrapping_add(8 as uint32_t);
-                    (*c).next = connhead as *mut _connection;
-                    connhead = c;
-                }
-                payloadlen = 0 as uint32_t;
-                payload = ::core::ptr::null::<uint8_t>();
+        }
+        if *tcp.offset(13 as isize) as ::core::ffi::c_int & 0x5 as ::core::ffi::c_int != 0 {
+            if (*ud).showconnections != 0 {
+                print_info(&raw const (*header).ts, ip, srcport, dstport);
+                printf(
+                    b"\x1B[38;5;100m... close connection ...\x1B(B\x1B[m\n\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
             }
-        } else {
-            print_info(&raw const (*header).ts, ip, srcport, dstport);
-            printf(
-                b"\x1B[38;5;199m... not mfs packet (%u:%u) ...\x1B(B\x1B[m\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                mfscmd,
-                mfslen,
-            );
             if !cp.is_null() {
                 c = *cp;
                 *cp = (*c).next as *mut connection;
@@ -2259,22 +2176,148 @@ pub unsafe extern "C" fn parse_packet(
             }
             return;
         }
+        payload = tcp.offset(tcphdrlen as isize);
+        payloadlen = tcplen.wrapping_sub(tcphdrlen);
+        if !cp.is_null() {
+            c = *cp;
+            if (*c).seq > seqno {
+                skip = (*c).seq.wrapping_sub(seqno);
+                print_info(&raw const (*header).ts, ip, srcport, dstport);
+                printf(
+                    b"\x1B[38;5;180m... data in packet ...\x1B(B\x1B[m\n\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
+            } else {
+                skip = 0 as uint32_t;
+            }
+            if skip < payloadlen {
+                payload = payload.offset(skip as isize);
+                payloadlen = payloadlen.wrapping_sub(skip);
+            } else {
+                return;
+            }
+        }
+        while payloadlen >= 8 as uint32_t {
+            mfscmd = (*payload.offset(0 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(1 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(2 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(3 as isize) as ::core::ffi::c_uint)
+                as uint32_t;
+            mfslen = (*payload.offset(4 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(5 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(6 as isize) as ::core::ffi::c_uint)
+                .wrapping_mul(256 as ::core::ffi::c_uint)
+                .wrapping_add(*payload.offset(7 as isize) as ::core::ffi::c_uint)
+                as uint32_t;
+            commandstr = commands_find(mfscmd, &raw mut ccode, &raw mut display);
+            if (*ud).showmfsnops as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                && mfscmd == ANTOAN_NOP as uint32_t
+            {
+                display = 0 as uint8_t;
+            }
+            if !commandstr.is_null() && mfslen <= 100000000 as uint32_t {
+                if display != 0 {
+                    print_info(&raw const (*header).ts, ip, srcport, dstport);
+                    if ccode as ::core::ffi::c_int >= 1 as ::core::ffi::c_int
+                        && ccode as ::core::ffi::c_int <= 15 as ::core::ffi::c_int
+                    {
+                        printf(
+                            b"%s\0".as_ptr() as *const ::core::ffi::c_char,
+                            color_tab[ccode as usize],
+                        );
+                    }
+                    printf(b"%s\0".as_ptr() as *const ::core::ffi::c_char, commandstr);
+                    if ccode != 0 {
+                        printf(COLOR_CLEAR.as_ptr());
+                    }
+                    printf(b" (%u)\n\0".as_ptr() as *const ::core::ffi::c_char, mfslen);
+                    if payloadlen.wrapping_sub(8 as uint32_t) <= (*ud).maxdatainpacket {
+                        if mfslen < payloadlen.wrapping_sub(8 as uint32_t) {
+                            hexdump(payload.offset(8 as ::core::ffi::c_int as isize), mfslen);
+                        } else {
+                            hexdump(
+                                payload.offset(8 as ::core::ffi::c_int as isize),
+                                payloadlen.wrapping_sub(8 as uint32_t),
+                            );
+                        }
+                    } else if mfslen < (*ud).maxdatainpacket {
+                        hexdump(payload.offset(8 as ::core::ffi::c_int as isize), mfslen);
+                    } else {
+                        hexdump(
+                            payload.offset(8 as ::core::ffi::c_int as isize),
+                            (*ud).maxdatainpacket,
+                        );
+                        printf(b"\t(...)\n\0".as_ptr() as *const ::core::ffi::c_char);
+                    }
+                }
+                if mfslen.wrapping_add(8 as uint32_t) == payloadlen {
+                    if !cp.is_null() {
+                        c = *cp;
+                        *cp = (*c).next as *mut connection;
+                        free(c as *mut ::core::ffi::c_void);
+                    }
+                    payloadlen = 0 as uint32_t;
+                    payload = ::core::ptr::null::<uint8_t>();
+                } else if mfslen.wrapping_add(8 as uint32_t) < payloadlen {
+                    payloadlen = payloadlen.wrapping_sub(mfslen.wrapping_add(8 as uint32_t));
+                    payload = payload.offset(mfslen.wrapping_add(8 as uint32_t) as isize);
+                    seqno = seqno.wrapping_add(mfslen.wrapping_add(8 as uint32_t));
+                } else {
+                    if !cp.is_null() {
+                        c = *cp;
+                        (*c).seq = seqno.wrapping_add(mfslen).wrapping_add(8 as uint32_t);
+                    } else {
+                        c = malloc(::core::mem::size_of::<connection>()) as *mut connection;
+                        (*c).srcip = srcip;
+                        (*c).dstip = dstip;
+                        (*c).srcport = srcport;
+                        (*c).dstport = dstport;
+                        (*c).seq = seqno.wrapping_add(mfslen).wrapping_add(8 as uint32_t);
+                        (*c).next = connhead as *mut _connection;
+                        connhead = c;
+                    }
+                    payloadlen = 0 as uint32_t;
+                    payload = ::core::ptr::null::<uint8_t>();
+                }
+            } else {
+                print_info(&raw const (*header).ts, ip, srcport, dstport);
+                printf(
+                    b"\x1B[38;5;199m... not mfs packet (%u:%u) ...\x1B(B\x1B[m\n\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    mfscmd,
+                    mfslen,
+                );
+                if !cp.is_null() {
+                    c = *cp;
+                    *cp = (*c).next as *mut connection;
+                    free(c as *mut ::core::ffi::c_void);
+                }
+                return;
+            }
+        }
     }
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn usage(mut appname: *const ::core::ffi::c_char) {
-    fprintf(
-        stderr,
-        b"usage: %s -l | %s [-xyn] [-r pcap_file] [-i interface] [-p portrange] [-f pcap_filter] [-c packet_count] [-s max_bytes_to_show] [-e commands] [-o commands]\n\0"
-            .as_ptr() as *const ::core::ffi::c_char,
-        appname,
-        appname,
-    );
-    fprintf(
-        stderr,
-        b"\t-e: do not display this commands\n\t-o: when present only this commands will be displayed\n\t-x: ignore maintenance packets like 'CSTOMA_SPACE' or 'CLTOMA_FUSE_TIME_SYNC'\n\t-y: do not show SYN/FIN packets\n\t-n: show NOP packets\n\t-p: show only packets on given port range (default: 9419-9422)\n\0"
-            .as_ptr() as *const ::core::ffi::c_char,
-    );
+    unsafe {
+        fprintf(
+            stderr,
+            b"usage: %s -l | %s [-xyn] [-r pcap_file] [-i interface] [-p portrange] [-f pcap_filter] [-c packet_count] [-s max_bytes_to_show] [-e commands] [-o commands]\n\0"
+                .as_ptr() as *const ::core::ffi::c_char,
+            appname,
+            appname,
+        );
+        fprintf(
+            stderr,
+            b"\t-e: do not display this commands\n\t-o: when present only this commands will be displayed\n\t-x: ignore maintenance packets like 'CSTOMA_SPACE' or 'CLTOMA_FUSE_TIME_SYNC'\n\t-y: do not show SYN/FIN packets\n\t-n: show NOP packets\n\t-p: show only packets on given port range (default: 9419-9422)\n\0"
+                .as_ptr() as *const ::core::ffi::c_char,
+        );
+    }
 }
 pub const ARGLIST: [::core::ffi::c_char; 23] = unsafe {
     ::core::mem::transmute::<[u8; 23], [::core::ffi::c_char; 23]>(*b"s:p:i:f:c:e:o:r:hxyln?\0")
@@ -2283,358 +2326,368 @@ unsafe fn main_0(
     mut argc: ::core::ffi::c_int,
     mut argv: *mut *mut ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut ch: ::core::ffi::c_int = 0;
-    let mut errbuf: [::core::ffi::c_char; 256] = [0; 256];
-    let mut dev: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut filter: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut pcapfile: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut optaux: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut packetcnt: int32_t = 0;
-    let mut devnet: bpf_u_int32 = 0;
-    let mut devmask: bpf_u_int32 = 0;
-    let mut alldevsp: *mut pcap_if_t = ::core::ptr::null_mut::<pcap_if_t>();
-    let mut devit: *mut pcap_if_t = ::core::ptr::null_mut::<pcap_if_t>();
-    let mut handle: *mut pcap_t = ::core::ptr::null_mut::<pcap_t>();
-    let mut datalink: ::core::ffi::c_int = 0;
-    let mut fp: bpf_program = bpf_program {
-        bf_len: 0,
-        bf_insns: ::core::ptr::null_mut::<bpf_insn>(),
-    };
-    let mut udm: userdata = userdata {
-        linktype: 0,
-        showmfsnops: 0,
-        showconnections: 0,
-        minport: 0,
-        maxport: 0,
-        maxdatainpacket: 0,
-    };
-    let mut ok: uint8_t = 1 as uint8_t;
-    commands_convert();
-    dev = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    filter = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    pcapfile = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    packetcnt = -1 as ::core::ffi::c_int as int32_t;
-    udm.maxdatainpacket = 128 as uint32_t;
-    udm.showconnections = 1 as uint8_t;
-    udm.minport = 9419 as uint16_t;
-    udm.maxport = 9422 as uint16_t;
-    udm.showmfsnops = 0 as uint8_t;
-    '_err: {
-        loop {
-            ch = getopt(argc, argv, ARGLIST.as_ptr());
-            if ch == -1 as ::core::ffi::c_int {
-                break;
-            }
-            match ch {
-                115 => {
-                    udm.maxdatainpacket = strtoul(
-                        optarg,
-                        ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
-                        0 as ::core::ffi::c_int,
-                    ) as uint32_t;
+    unsafe {
+        let mut ch: ::core::ffi::c_int = 0;
+        let mut errbuf: [::core::ffi::c_char; 256] = [0; 256];
+        let mut dev: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut filter: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut pcapfile: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut optaux: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let mut packetcnt: int32_t = 0;
+        let mut devnet: bpf_u_int32 = 0;
+        let mut devmask: bpf_u_int32 = 0;
+        let mut alldevsp: *mut pcap_if_t = ::core::ptr::null_mut::<pcap_if_t>();
+        let mut devit: *mut pcap_if_t = ::core::ptr::null_mut::<pcap_if_t>();
+        let mut handle: *mut pcap_t = ::core::ptr::null_mut::<pcap_t>();
+        let mut datalink: ::core::ffi::c_int = 0;
+        let mut fp: bpf_program = bpf_program {
+            bf_len: 0,
+            bf_insns: ::core::ptr::null_mut::<bpf_insn>(),
+        };
+        let mut udm: userdata = userdata {
+            linktype: 0,
+            showmfsnops: 0,
+            showconnections: 0,
+            minport: 0,
+            maxport: 0,
+            maxdatainpacket: 0,
+        };
+        let mut ok: uint8_t = 1 as uint8_t;
+        commands_convert();
+        dev = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        filter = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        pcapfile = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        packetcnt = -1 as ::core::ffi::c_int as int32_t;
+        udm.maxdatainpacket = 128 as uint32_t;
+        udm.showconnections = 1 as uint8_t;
+        udm.minport = 9419 as uint16_t;
+        udm.maxport = 9422 as uint16_t;
+        udm.showmfsnops = 0 as uint8_t;
+        '_err: {
+            loop {
+                ch = getopt(argc, argv, ARGLIST.as_ptr());
+                if ch == -1 as ::core::ffi::c_int {
+                    break;
                 }
-                112 => {
-                    if *optarg.offset(0 as isize) as ::core::ffi::c_int == '*' as ::core::ffi::c_int
-                    {
-                        udm.minport = 0 as uint16_t;
-                        udm.maxport = 65535 as uint16_t;
-                    } else {
-                        udm.minport =
-                            strtoul(optarg, &raw mut optaux, 10 as ::core::ffi::c_int) as uint16_t;
-                        while *optaux as ::core::ffi::c_int == ' ' as ::core::ffi::c_int {
-                            optaux = optaux.offset(1);
-                        }
-                        if *optaux as ::core::ffi::c_int == '-' as ::core::ffi::c_int {
-                            optaux = optaux.offset(1);
+                match ch {
+                    115 => {
+                        udm.maxdatainpacket = strtoul(
+                            optarg,
+                            ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
+                            0 as ::core::ffi::c_int,
+                        ) as uint32_t;
+                    }
+                    112 => {
+                        if *optarg.offset(0 as isize) as ::core::ffi::c_int
+                            == '*' as ::core::ffi::c_int
+                        {
+                            udm.minport = 0 as uint16_t;
+                            udm.maxport = 65535 as uint16_t;
+                        } else {
+                            udm.minport = strtoul(optarg, &raw mut optaux, 10 as ::core::ffi::c_int)
+                                as uint16_t;
                             while *optaux as ::core::ffi::c_int == ' ' as ::core::ffi::c_int {
                                 optaux = optaux.offset(1);
                             }
-                            udm.maxport = strtoul(
-                                optaux,
-                                ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
-                                10 as ::core::ffi::c_int,
-                            ) as uint16_t;
-                        } else {
-                            udm.maxport = udm.minport;
-                        }
-                    }
-                }
-                105 => {
-                    if !dev.is_null() {
-                        free(dev as *mut ::core::ffi::c_void);
-                    }
-                    dev = strdup(optarg);
-                }
-                102 => {
-                    if !filter.is_null() {
-                        free(filter as *mut ::core::ffi::c_void);
-                    }
-                    filter = strdup(optarg);
-                }
-                99 => {
-                    packetcnt = strtol(
-                        optarg,
-                        ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
-                        0 as ::core::ffi::c_int,
-                    ) as int32_t;
-                }
-                101 => {
-                    commands_exclude(optarg);
-                }
-                111 => {
-                    commands_onlyuse(optarg);
-                }
-                120 => {
-                    commands_exclude(
-                        b"ANTOMA_REGISTER,MATOAN_STATE,CSTOMA_SPACE,CLTOMA_FUSE_SUSTAINED_INODES,CSTOMA_CURRENT_LOAD,MATOCS_MANAGER_OFFSET_TIME,CLTOMA_FUSE_TIME_SYNC,MATOCL_FUSE_TIME_SYNC\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                    );
-                }
-                121 => {
-                    udm.showconnections = 0 as uint8_t;
-                }
-                110 => {
-                    udm.showmfsnops = 1 as uint8_t;
-                }
-                114 => {
-                    if !pcapfile.is_null() {
-                        free(pcapfile as *mut ::core::ffi::c_void);
-                    }
-                    pcapfile = strdup(optarg);
-                }
-                108 => {
-                    if pcap_findalldevs(
-                        &raw mut alldevsp,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    ) < 0 as ::core::ffi::c_int
-                    {
-                        fprintf(
-                            stderr,
-                            b"Couldn't find default device: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            &raw mut errbuf as *mut ::core::ffi::c_char,
-                        );
-                        break '_err;
-                    } else {
-                        ok = 0 as uint8_t;
-                        if alldevsp.is_null() {
-                            printf(b"Network device list is empty\n\0".as_ptr()
-                                as *const ::core::ffi::c_char);
-                            break '_err;
-                        } else {
-                            devit = alldevsp;
-                            while !devit.is_null() {
-                                if !(*devit).addresses.is_null()
-                                    && (*devit).flags
-                                        & (PCAP_IF_UP | PCAP_IF_RUNNING) as bpf_u_int32
-                                        == (PCAP_IF_UP | PCAP_IF_RUNNING) as bpf_u_int32
-                                {
-                                    printf(
-                                        b"%s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                                        (*devit).name,
-                                    );
+                            if *optaux as ::core::ffi::c_int == '-' as ::core::ffi::c_int {
+                                optaux = optaux.offset(1);
+                                while *optaux as ::core::ffi::c_int == ' ' as ::core::ffi::c_int {
+                                    optaux = optaux.offset(1);
                                 }
-                                devit = (*devit).next as *mut pcap_if_t;
+                                udm.maxport = strtoul(
+                                    optaux,
+                                    ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
+                                    10 as ::core::ffi::c_int,
+                                ) as uint16_t;
+                            } else {
+                                udm.maxport = udm.minport;
                             }
-                            pcap_freealldevs(alldevsp);
-                            break '_err;
                         }
                     }
-                }
-                _ => {
-                    usage(*argv.offset(0 as isize));
-                    break '_err;
-                }
-            }
-        }
-        if !dev.is_null() && !pcapfile.is_null() {
-            fprintf(
-                stderr,
-                b"Options '-i' and '-r' are mutually exclusive\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-            );
-        } else {
-            if dev.is_null() && pcapfile.is_null() {
-                if pcap_lookupnet(
-                    b"any\0".as_ptr() as *const ::core::ffi::c_char,
-                    &raw mut devnet,
-                    &raw mut devmask,
-                    &raw mut errbuf as *mut ::core::ffi::c_char,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    if pcap_findalldevs(
-                        &raw mut alldevsp,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    ) < 0 as ::core::ffi::c_int
-                    {
-                        fprintf(
-                            stderr,
-                            b"Couldn't find default device: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
+                    105 => {
+                        if !dev.is_null() {
+                            free(dev as *mut ::core::ffi::c_void);
+                        }
+                        dev = strdup(optarg);
+                    }
+                    102 => {
+                        if !filter.is_null() {
+                            free(filter as *mut ::core::ffi::c_void);
+                        }
+                        filter = strdup(optarg);
+                    }
+                    99 => {
+                        packetcnt = strtol(
+                            optarg,
+                            ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
+                            0 as ::core::ffi::c_int,
+                        ) as int32_t;
+                    }
+                    101 => {
+                        commands_exclude(optarg);
+                    }
+                    111 => {
+                        commands_onlyuse(optarg);
+                    }
+                    120 => {
+                        commands_exclude(
+                            b"ANTOMA_REGISTER,MATOAN_STATE,CSTOMA_SPACE,CLTOMA_FUSE_SUSTAINED_INODES,CSTOMA_CURRENT_LOAD,MATOCS_MANAGER_OFFSET_TIME,CLTOMA_FUSE_TIME_SYNC,MATOCL_FUSE_TIME_SYNC\0"
+                                .as_ptr() as *const ::core::ffi::c_char,
+                        );
+                    }
+                    121 => {
+                        udm.showconnections = 0 as uint8_t;
+                    }
+                    110 => {
+                        udm.showmfsnops = 1 as uint8_t;
+                    }
+                    114 => {
+                        if !pcapfile.is_null() {
+                            free(pcapfile as *mut ::core::ffi::c_void);
+                        }
+                        pcapfile = strdup(optarg);
+                    }
+                    108 => {
+                        if pcap_findalldevs(
+                            &raw mut alldevsp,
                             &raw mut errbuf as *mut ::core::ffi::c_char,
-                        );
-                        break '_err;
-                    } else if alldevsp.is_null() {
-                        fprintf(
-                            stderr,
-                            b"Couldn't find default device (empty devices list)\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                        );
-                        break '_err;
-                    } else {
-                        dev = strdup((*alldevsp).name);
-                        pcap_freealldevs(alldevsp);
+                        ) < 0 as ::core::ffi::c_int
+                        {
+                            fprintf(
+                                stderr,
+                                b"Couldn't find default device: %s\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char,
+                                &raw mut errbuf as *mut ::core::ffi::c_char,
+                            );
+                            break '_err;
+                        } else {
+                            ok = 0 as uint8_t;
+                            if alldevsp.is_null() {
+                                printf(b"Network device list is empty\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char);
+                                break '_err;
+                            } else {
+                                devit = alldevsp;
+                                while !devit.is_null() {
+                                    if !(*devit).addresses.is_null()
+                                        && (*devit).flags
+                                            & (PCAP_IF_UP | PCAP_IF_RUNNING) as bpf_u_int32
+                                            == (PCAP_IF_UP | PCAP_IF_RUNNING) as bpf_u_int32
+                                    {
+                                        printf(
+                                            b"%s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                                            (*devit).name,
+                                        );
+                                    }
+                                    devit = (*devit).next as *mut pcap_if_t;
+                                }
+                                pcap_freealldevs(alldevsp);
+                                break '_err;
+                            }
+                        }
                     }
-                } else {
-                    dev = strdup(b"any\0".as_ptr() as *const ::core::ffi::c_char);
-                }
-                if dev.is_null() {
-                    fprintf(
-                        stderr,
-                        b"Couldn't find default device: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    );
-                    break '_err;
-                }
-            }
-            if !pcapfile.is_null() {
-                handle = pcap_open_offline(pcapfile, &raw mut errbuf as *mut ::core::ffi::c_char);
-                if handle.is_null() {
-                    fprintf(
-                        stderr,
-                        b"Couldn't open pcap file %s: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        pcapfile,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    );
-                    break '_err;
-                } else {
-                    devnet = PCAP_NETMASK_UNKNOWN as bpf_u_int32;
-                }
-            } else {
-                if pcap_lookupnet(
-                    dev,
-                    &raw mut devnet,
-                    &raw mut devmask,
-                    &raw mut errbuf as *mut ::core::ffi::c_char,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    printf(
-                        b"Device: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                        dev,
-                    );
-                    fprintf(
-                        stderr,
-                        b"Couldn't get netmask for device %s: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        dev,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    );
-                    devnet = 0 as bpf_u_int32;
-                    devmask = 0 as bpf_u_int32;
-                } else {
-                    printf(
-                        b"Device: %s (%u.%u.%u.%u/%u.%u.%u.%u)\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        dev,
-                        devnet & 0xff as bpf_u_int32,
-                        devnet >> 8 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                        devnet >> 16 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                        devnet >> 24 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                        devmask & 0xff as bpf_u_int32,
-                        devmask >> 8 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                        devmask >> 16 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                        devmask >> 24 as ::core::ffi::c_int & 0xff as bpf_u_int32,
-                    );
-                }
-                handle = pcap_open_live(
-                    dev,
-                    100000 as ::core::ffi::c_int,
-                    1 as ::core::ffi::c_int,
-                    1000 as ::core::ffi::c_int,
-                    &raw mut errbuf as *mut ::core::ffi::c_char,
-                );
-                if handle.is_null() {
-                    fprintf(
-                        stderr,
-                        b"Couldn't open device %s: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                        dev,
-                        &raw mut errbuf as *mut ::core::ffi::c_char,
-                    );
-                    break '_err;
-                }
-            }
-            datalink = pcap_datalink(handle);
-            if false
-                || datalink == DLT_EN10MB
-                || datalink == DLT_NULL
-                || datalink == DLT_RAW
-                || datalink == DLT_LINUX_SLL
-                || datalink == DLT_PKTAP
-            {
-                udm.linktype = datalink as uint8_t;
-                if !filter.is_null() {
-                    if pcap_compile(handle, &raw mut fp, filter, 0 as ::core::ffi::c_int, devnet)
-                        < 0 as ::core::ffi::c_int
-                    {
-                        fprintf(
-                            stderr,
-                            b"Couldn't parse filter %s: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            filter,
-                            pcap_geterr(handle),
-                        );
-                        break '_err;
-                    } else if pcap_setfilter(handle, &raw mut fp) < 0 as ::core::ffi::c_int {
-                        fprintf(
-                            stderr,
-                            b"Couldn't install filter %s: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            filter,
-                            pcap_geterr(handle),
-                        );
+                    _ => {
+                        usage(*argv.offset(0 as isize));
                         break '_err;
                     }
                 }
-                pcap_loop(
-                    handle,
-                    packetcnt as ::core::ffi::c_int,
-                    Some(
-                        parse_packet
-                            as unsafe extern "C" fn(
-                                *mut u_char,
-                                *const pcap_pkthdr,
-                                *const u_char,
-                            ) -> (),
-                    ),
-                    &raw mut udm as *mut ::core::ffi::c_void as *mut u_char,
-                );
-                pcap_freecode(&raw mut fp);
-                pcap_close(handle);
-                printf(b"\nCapture complete.\n\0".as_ptr() as *const ::core::ffi::c_char);
-                ok = 0 as uint8_t;
-            } else {
+            }
+            if !dev.is_null() && !pcapfile.is_null() {
                 fprintf(
                     stderr,
-                    b"device '%s' uses unsupported datalink type: %s\n\0".as_ptr()
+                    b"Options '-i' and '-r' are mutually exclusive\n\0".as_ptr()
                         as *const ::core::ffi::c_char,
-                    dev,
-                    pcap_datalink_val_to_name(datalink),
                 );
+            } else {
+                if dev.is_null() && pcapfile.is_null() {
+                    if pcap_lookupnet(
+                        b"any\0".as_ptr() as *const ::core::ffi::c_char,
+                        &raw mut devnet,
+                        &raw mut devmask,
+                        &raw mut errbuf as *mut ::core::ffi::c_char,
+                    ) < 0 as ::core::ffi::c_int
+                    {
+                        if pcap_findalldevs(
+                            &raw mut alldevsp,
+                            &raw mut errbuf as *mut ::core::ffi::c_char,
+                        ) < 0 as ::core::ffi::c_int
+                        {
+                            fprintf(
+                                stderr,
+                                b"Couldn't find default device: %s\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char,
+                                &raw mut errbuf as *mut ::core::ffi::c_char,
+                            );
+                            break '_err;
+                        } else if alldevsp.is_null() {
+                            fprintf(
+                                stderr,
+                                b"Couldn't find default device (empty devices list)\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char,
+                            );
+                            break '_err;
+                        } else {
+                            dev = strdup((*alldevsp).name);
+                            pcap_freealldevs(alldevsp);
+                        }
+                    } else {
+                        dev = strdup(b"any\0".as_ptr() as *const ::core::ffi::c_char);
+                    }
+                    if dev.is_null() {
+                        fprintf(
+                            stderr,
+                            b"Couldn't find default device: %s\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            &raw mut errbuf as *mut ::core::ffi::c_char,
+                        );
+                        break '_err;
+                    }
+                }
+                if !pcapfile.is_null() {
+                    handle =
+                        pcap_open_offline(pcapfile, &raw mut errbuf as *mut ::core::ffi::c_char);
+                    if handle.is_null() {
+                        fprintf(
+                            stderr,
+                            b"Couldn't open pcap file %s: %s\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            pcapfile,
+                            &raw mut errbuf as *mut ::core::ffi::c_char,
+                        );
+                        break '_err;
+                    } else {
+                        devnet = PCAP_NETMASK_UNKNOWN as bpf_u_int32;
+                    }
+                } else {
+                    if pcap_lookupnet(
+                        dev,
+                        &raw mut devnet,
+                        &raw mut devmask,
+                        &raw mut errbuf as *mut ::core::ffi::c_char,
+                    ) < 0 as ::core::ffi::c_int
+                    {
+                        printf(
+                            b"Device: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
+                            dev,
+                        );
+                        fprintf(
+                            stderr,
+                            b"Couldn't get netmask for device %s: %s\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            dev,
+                            &raw mut errbuf as *mut ::core::ffi::c_char,
+                        );
+                        devnet = 0 as bpf_u_int32;
+                        devmask = 0 as bpf_u_int32;
+                    } else {
+                        printf(
+                            b"Device: %s (%u.%u.%u.%u/%u.%u.%u.%u)\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            dev,
+                            devnet & 0xff as bpf_u_int32,
+                            devnet >> 8 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                            devnet >> 16 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                            devnet >> 24 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                            devmask & 0xff as bpf_u_int32,
+                            devmask >> 8 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                            devmask >> 16 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                            devmask >> 24 as ::core::ffi::c_int & 0xff as bpf_u_int32,
+                        );
+                    }
+                    handle = pcap_open_live(
+                        dev,
+                        100000 as ::core::ffi::c_int,
+                        1 as ::core::ffi::c_int,
+                        1000 as ::core::ffi::c_int,
+                        &raw mut errbuf as *mut ::core::ffi::c_char,
+                    );
+                    if handle.is_null() {
+                        fprintf(
+                            stderr,
+                            b"Couldn't open device %s: %s\n\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                            dev,
+                            &raw mut errbuf as *mut ::core::ffi::c_char,
+                        );
+                        break '_err;
+                    }
+                }
+                datalink = pcap_datalink(handle);
+                if false
+                    || datalink == DLT_EN10MB
+                    || datalink == DLT_NULL
+                    || datalink == DLT_RAW
+                    || datalink == DLT_LINUX_SLL
+                    || datalink == DLT_PKTAP
+                {
+                    udm.linktype = datalink as uint8_t;
+                    if !filter.is_null() {
+                        if pcap_compile(
+                            handle,
+                            &raw mut fp,
+                            filter,
+                            0 as ::core::ffi::c_int,
+                            devnet,
+                        ) < 0 as ::core::ffi::c_int
+                        {
+                            fprintf(
+                                stderr,
+                                b"Couldn't parse filter %s: %s\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char,
+                                filter,
+                                pcap_geterr(handle),
+                            );
+                            break '_err;
+                        } else if pcap_setfilter(handle, &raw mut fp) < 0 as ::core::ffi::c_int {
+                            fprintf(
+                                stderr,
+                                b"Couldn't install filter %s: %s\n\0".as_ptr()
+                                    as *const ::core::ffi::c_char,
+                                filter,
+                                pcap_geterr(handle),
+                            );
+                            break '_err;
+                        }
+                    }
+                    pcap_loop(
+                        handle,
+                        packetcnt as ::core::ffi::c_int,
+                        Some(
+                            parse_packet
+                                as unsafe extern "C" fn(
+                                    *mut u_char,
+                                    *const pcap_pkthdr,
+                                    *const u_char,
+                                ) -> (),
+                        ),
+                        &raw mut udm as *mut ::core::ffi::c_void as *mut u_char,
+                    );
+                    pcap_freecode(&raw mut fp);
+                    pcap_close(handle);
+                    printf(b"\nCapture complete.\n\0".as_ptr() as *const ::core::ffi::c_char);
+                    ok = 0 as uint8_t;
+                } else {
+                    fprintf(
+                        stderr,
+                        b"device '%s' uses unsupported datalink type: %s\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        dev,
+                        pcap_datalink_val_to_name(datalink),
+                    );
+                }
             }
         }
+        if !pcapfile.is_null() {
+            free(pcapfile as *mut ::core::ffi::c_void);
+        }
+        if !filter.is_null() {
+            free(filter as *mut ::core::ffi::c_void);
+        }
+        if !dev.is_null() {
+            free(dev as *mut ::core::ffi::c_void);
+        }
+        return ok as ::core::ffi::c_int;
     }
-    if !pcapfile.is_null() {
-        free(pcapfile as *mut ::core::ffi::c_void);
-    }
-    if !filter.is_null() {
-        free(filter as *mut ::core::ffi::c_void);
-    }
-    if !dev.is_null() {
-        free(dev as *mut ::core::ffi::c_void);
-    }
-    return ok as ::core::ffi::c_int;
 }
 pub fn main() {
     let mut args_strings: Vec<Vec<u8>> = ::std::env::args()

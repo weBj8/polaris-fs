@@ -34,14 +34,15 @@ Not yet ported: admin/tool binaries (`mfseattr`, `mfsquota`, `mfstrashtool`,
 
 ## Building
 
-Requires Rust nightly-2023-04-15 (each crate carries a
-`rust-toolchain.toml`; `rustup toolchain install nightly-2023-04-15
---profile minimal --component rustc-dev,rustfmt,rust-src`).
+Requires a recent Rust **nightly** (the transpiled code defines C-variadic
+functions, which are not stable yet — `c_variadic` is stabilizing in
+Rust 1.99, after which stable Rust will suffice). Each crate carries a
+`rust-toolchain.toml` (`channel = "nightly"`). Crates use edition 2024
+and build with `lto = true, codegen-units = 1`.
 
 ```sh
-cd port/mfsmaster && cargo build --release
-# binaries: target/release/main (mfsmaster/mfschunkserver/mfsmetalogger/mfsgui)
-#           target/release/mfsmount, target/release/mfsbdev, ...
+./build-all.sh        # installs nightly via rustup if missing, builds all 7
+# binaries: dist/{mfsmaster,mfschunkserver,mfsmetalogger,mfsgui,mfsmount,mfsbdev,mfsnetdump}
 ```
 
 Release mode is required: the C code relies on wrapping arithmetic; debug
@@ -65,8 +66,15 @@ All scratch data lives under `target/mfs-port/` (never `/tmp`):
    several daemons (e.g. `mfscommon/main.c` resolved to the mfsgui
    variant). Giving each binary its own directory side-steps this.
 4. `c2rust transpile ccdb-<bin>/compile_commands.json --output-dir <out>
-   -b <main TU>` (`main` for daemons using `mfscommon/main.c`;
+   -b <main TU> --edition 2024 --deny-unsafe-op-in-unsafe-fn`
+   (`main` for daemons using `mfscommon/main.c`;
    `mfsmount`/`mfsbdev`/`mfsgui`... otherwise).
+5. `python3 tools/postprocess_stable.py <out>` — drops `#![feature(...)]`
+   lines and replaces extern-block opaque types with zero-variant enums.
+6. Re-apply the local patches below (bitfields path dep, `_Atomic`
+   statics, groups-cache UAF fix, link libs, `core_intrinsics`/`c_variadic`
+   feature attrs, `VaList::arg` → `next_arg` rename, `static_mut_refs`
+   raw-pointer reads).
 
 ## Local patches applied after transpiling
 
@@ -84,6 +92,13 @@ All scratch data lives under `target/mfs-port/` (never `/tmp`):
 3. Link libraries via `build.rs`: `mfsmaster`/`mfschunkserver` link `z`;
    `mfsmount` links `fuse3` and `z`; `mfsnetdump` links `pcap`.
 4. `mfsgui` uses `-b main` (its `main()` lives in `mfscommon/main.c`).
+5. Groups-cache use-after-free fix in `mfsmount/src/mfsclient/getgroups.rs`
+   (see commit history; latent MooseFS bug, crashes opendir for root).
+6. Edition-2024/stable-toolchain adjustments: `mfs_log_sink` read via
+   `&raw const` (static_mut_refs is a hard error in edition 2024),
+   `#![feature(c_variadic, core_intrinsics)]` in crate roots,
+   `VaList::arg::<T>()` → `next_arg::<T>()` (API rename on recent
+   nightlies).
 
 ## Known caveats
 
