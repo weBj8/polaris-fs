@@ -1,0 +1,42 @@
+# docker compose for the metadata tier on core@10.192.1.23
+# Deploy:  scp this file, then `docker compose up -d` in the same directory.
+services:
+  mfsmaster:
+    image: mfs-rust:4.59.2
+    container_name: mfsmaster
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ROLE: mfsmaster
+    volumes:
+      - /var/mnt/nvme1/mfsmaster:/var/lib/mfs
+
+  mfsmetalogger:
+    image: mfs-rust:4.59.2
+    container_name: mfsmetalogger
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ROLE: mfsmetalogger
+      MASTER_HOST: 10.10.0.1
+    volumes:
+      - /var/mnt/nvme1/mfsmetalogger:/var/lib/mfs
+    depends_on:
+      - mfsmaster
+
+  mfsmount:
+    image: mfs-rust:4.59.2
+    container_name: mfsmount
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    devices:
+      - /dev/fuse
+    environment:
+      ROLE: mfsmount
+      MASTER_HOST: 10.10.0.1
+      MOUNT_POINT: /mnt/plfs
+    volumes:
+      - /mnt/plfs:/mnt/plfs:shared
+    depends_on:
+      - mfsmaster

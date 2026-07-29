@@ -1,4 +1,5 @@
 target/
+dist/
 .codegraph/
 .omo/
 .pi-subagents/
