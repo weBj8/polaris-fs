@@ -1,0 +1,25 @@
+[workspace]
+members = [
+]
+[package]
+name = "mfsmetalogger"
+authors = ["C2Rust"]
+version = "0.0.0"
+publish = false
+edition = "2021"
+autobins = false
+
+[lib]
+name = "mfsmetalogger"
+path = "lib.rs"
+crate-type = ["staticlib", "rlib"]
+[[bin]]
+path = "src/mfscommon/main.rs"
+name = "main"
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
+libc = "0.2"
+
+
+[profile.release]
+strip = "debuginfo"

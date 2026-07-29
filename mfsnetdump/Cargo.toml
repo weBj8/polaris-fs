@@ -1,0 +1,24 @@
+[workspace]
+members = [
+]
+[package]
+name = "mfsnetdump"
+authors = ["C2Rust"]
+version = "0.0.0"
+publish = false
+edition = "2021"
+autobins = false
+
+[lib]
+name = "mfsnetdump"
+path = "lib.rs"
+crate-type = ["staticlib", "rlib"]
+[[bin]]
+path = "src/mfsnetdump.rs"
+name = "mfsnetdump"
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
+
+
+[profile.release]
+strip = "debuginfo"
