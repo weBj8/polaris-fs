@@ -1,1 +1,3 @@
-fn main(){println!("cargo:rustc-link-lib=pcap");}
+fn main() {
+    println!("cargo:rustc-link-lib=pcap");
+}

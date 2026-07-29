@@ -911,13 +911,13 @@ pub unsafe extern "C" fn groups_get_common(
             groups_dump(g);
         }
         // caller reference: the cache insert above only adds the cache's own
-    // reference. Without a separate caller reference, the caller's
-    // groups_rel() drops lcnt to 0 and frees the object while the cache
-    // entry still points at it (use-after-free, hit reliably by root
-    // because the uid==0 path reallocates on every call).
-    // Latent bug inherited from the C source; fixed here, not in callers.
-    (*g).lcnt = (*g).lcnt.wrapping_add(1);
-    return g;
+        // reference. Without a separate caller reference, the caller's
+        // groups_rel() drops lcnt to 0 and frees the object while the cache
+        // entry still points at it (use-after-free, hit reliably by root
+        // because the uid==0 path reallocates on every call).
+        // Latent bug inherited from the C source; fixed here, not in callers.
+        (*g).lcnt = (*g).lcnt.wrapping_add(1);
+        return g;
     }
 }
 #[unsafe(no_mangle)]

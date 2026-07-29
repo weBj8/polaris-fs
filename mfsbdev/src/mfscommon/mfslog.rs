@@ -377,9 +377,7 @@ pub unsafe extern "C" fn mfs_log(
         msg[(MSGBUFFSIZE - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
         let sink = *&raw const mfs_log_sink;
         if sink.is_some() {
-            sink.expect("non-null function pointer")(
-                &raw mut msg as *mut ::core::ffi::c_char,
-            );
+            sink.expect("non-null function pointer")(&raw mut msg as *mut ::core::ffi::c_char);
         }
         if syslog_open != 0 {
             syslog(
