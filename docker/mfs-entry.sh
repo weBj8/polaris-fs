@@ -55,6 +55,10 @@ mfschunkserver)
         echo "$d" >>"$DATA_PATH/mfshdd.cfg"
     done
     ;;
+mfsgui)
+    common
+    echo "ROOT_DIR = ${ROOT_DIR:-/usr/share/mfscgi}" >>"$CFG"
+    ;;
 mfsmount)
     : "${MASTER_HOST:?set MASTER_HOST}"
     : "${MOUNT_POINT:=/mnt/plfs}"

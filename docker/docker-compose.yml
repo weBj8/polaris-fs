@@ -40,3 +40,17 @@ services:
       - /mnt/plfs:/mnt/plfs:shared
     depends_on:
       - mfsmaster
+
+  mfsgui:
+    image: mfs-rust:4.59.2
+    container_name: mfsgui
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ROLE: mfsgui
+    extra_hosts:
+      - "mfsmaster:10.10.0.1"
+    volumes:
+      - /var/mnt/nvme1/mfsgui:/var/lib/mfs
+    depends_on:
+      - mfsmaster
