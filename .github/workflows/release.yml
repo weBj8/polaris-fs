@@ -55,8 +55,11 @@ jobs:
       - name: Save libfuse 3.18
         if: steps.cache-fuse.outputs.cache-hit != 'true'
         run: |
+          cd /
           sudo tar cf /tmp/fuse318-installed/install.tar \
-            -C / usr/local/lib usr/local/include
+            $(ls usr/local/lib/x86_64-linux-gnu/libfuse3.so* \
+            usr/local/lib/x86_64-linux-gnu/pkgconfig/fuse3.pc \
+            usr/local/include/fuse3)
           sudo ldconfig
 
       - name: Install Rust (nightly for c_variadic/extern_types-era features)

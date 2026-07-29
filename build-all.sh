@@ -6,6 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 TOOLCHAIN=nightly
 
+# one shared target dir: deps (libc, c2rust-bitfields) compile once for all 7 crates
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/build-all}"
+
 if ! rustup toolchain list | grep -q "^$TOOLCHAIN"; then
     echo ">> installing $TOOLCHAIN"
     rustup toolchain install "$TOOLCHAIN" --profile minimal
@@ -28,7 +31,7 @@ for entry in "${CRATES[@]}"; do
     bin="${entry##*:}"
     echo ">> building $crate"
     (cd "$crate" && cargo +"$TOOLCHAIN" build --release --quiet)
-    cp "$crate/target/release/$bin" "dist/$crate"
+    cp "$CARGO_TARGET_DIR/release/$bin" "dist/$crate"
 done
 
 echo ">> done:"
