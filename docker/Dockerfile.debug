@@ -1,0 +1,8 @@
+FROM mfs-rust:4.59.2
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gdb \
+ && rm -rf /var/lib/apt/lists/*
+
+# unstripped binary for symbolized backtraces
+COPY dist/mfsmount.nostrip /usr/local/sbin/mfsmount
