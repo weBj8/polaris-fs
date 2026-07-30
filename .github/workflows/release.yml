@@ -121,7 +121,8 @@ jobs:
           # Preserve crash artifacts before cleanup. The mfsmount binary is
           # bundled so the core can be symbolized against the exact build.
           mkdir -p target/smoke-artifacts
-          sudo sh -c 'cp -f dist/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null; chown -R $(id -u):$(id -g) target/smoke-artifacts'
+          sudo sh -c 'cp -f dist/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null'
+          sudo chown -R "$(id -u):$(id -g)" target/smoke-artifacts
           sudo rm -rf target/smoke core*   # drop root-owned artifacts so later cache hashFiles works
           exit $rc
 
