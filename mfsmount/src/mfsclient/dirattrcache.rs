@@ -1,3661 +1,510 @@
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-use ::c2rust_bitfields;
+//! Directory attribute cache — safe Rust rewrite (P4).
+//!
+//! Original: MooseFS mfsclient/dirattrcache.c. Per-(ctx,parent) caches of
+//! readdir blobs with lazily built name/node indexes (dirblob_*_index).
+//! The module does NOT own the blob memory — the caller (mfs_fuse readdir
+//! path) keeps it alive until dcache_release; indexes and all blob walks
+//! are therefore raw-pointer operations and stay at the boundary.
+//!
+//! Safe core in `imp`: the blob element counter, the attr record fixup
+//! (copy min(attrsize,36) + zero-fill), and the global dircache registry
+//! matching. Everything that dereferences a blob pointer is boundary code
+//! with the lifetime contract documented.
+
+use std::sync::Mutex as StdMutex;
+
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn abort() -> !;
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const pthread_mutexattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn name_index_create(minelements: uint32_t) -> *mut ::core::ffi::c_void;
     unsafe fn name_index_destroy(vidx: *mut ::core::ffi::c_void);
     unsafe fn name_index_add(vidx: *mut ::core::ffi::c_void, ptr: *mut uint8_t);
     unsafe fn name_index_find(
         vidx: *mut ::core::ffi::c_void,
-        str: *const uint8_t,
+        str_: *const uint8_t,
         len: uint8_t,
     ) -> *mut uint8_t;
     unsafe fn node_index_create(minelements: uint32_t) -> *mut ::core::ffi::c_void;
     unsafe fn node_index_destroy(vidx: *mut ::core::ffi::c_void);
     unsafe fn node_index_add(vidx: *mut ::core::ffi::c_void, ptr: *mut uint8_t);
     unsafe fn node_index_find(vidx: *mut ::core::ffi::c_void, node: uint32_t) -> *mut uint8_t;
-    static mut stderr: *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn mfs_log(
-        mode: ::core::ffi::c_int,
-        priority: ::core::ffi::c_int,
-        fmt: *const ::core::ffi::c_char,
-        ...
-    );
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
 }
-pub type __uint64_t = u64;
-pub type __uid_t = ::core::ffi::c_uint;
-pub type __gid_t = ::core::ffi::c_uint;
-pub type __mode_t = ::core::ffi::c_uint;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-pub type __pid_t = ::core::ffi::c_int;
 pub type uint8_t = u8;
-pub type uint16_t = u16;
 pub type uint32_t = u32;
-pub type gid_t = __gid_t;
-pub type mode_t = __mode_t;
-pub type uid_t = __uid_t;
-pub type pid_t = __pid_t;
-pub type size_t = usize;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutexattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
+pub type uid_t = ::core::ffi::c_uint;
+pub type gid_t = ::core::ffi::c_uint;
+pub type pid_t = ::core::ffi::c_int;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct fuse_ctx {
     pub uid: uid_t,
     pub gid: gid_t,
     pub pid: pid_t,
-    pub umask: mode_t,
+    pub umask: ::core::ffi::c_uint,
 }
-pub type C2Rust_Unnamed = ::core::ffi::c_uint;
-pub const PTHREAD_MUTEX_FAST_NP: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_DEFAULT: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ERRORCHECK: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_NORMAL: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ADAPTIVE_NP: C2Rust_Unnamed = 3;
-pub const PTHREAD_MUTEX_ERRORCHECK_NP: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE_NP: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_TIMED_NP: C2Rust_Unnamed = 0;
-pub type dircache = _dircache;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _dircache {
-    pub ctx: fuse_ctx,
-    pub parent: uint32_t,
-    pub dbhead: *mut dirbuff,
-    pub attrsize: uint8_t,
-    pub name_index: *mut ::core::ffi::c_void,
-    pub node_index: *mut ::core::ffi::c_void,
-    pub lock: pthread_mutex_t,
-    pub next: *mut _dircache,
-    pub prev: *mut *mut _dircache,
-}
-pub type dirbuff = _dirbuff;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _dirbuff {
-    pub dbuff: *mut uint8_t,
-    pub dsize: uint32_t,
-    pub next: *mut _dirbuff,
-}
-pub type FILE = _IO_FILE;
-#[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    #[bitfield(name = "_flags2", ty = "::core::ffi::c_int", bits = "0..=23")]
-    pub _flags2: [u8; 3],
-    pub _short_backupbuf: [::core::ffi::c_char; 1],
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused3: ::core::ffi::c_int,
-    pub _total_written: __uint64_t,
-    pub _unused2: [::core::ffi::c_char; 8],
-}
-pub type _IO_lock_t = ();
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const MFSLOG_ERR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const ATTR_RECORD_SIZE: ::core::ffi::c_int = 36 as ::core::ffi::c_int;
-pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[inline]
-unsafe extern "C" fn get32bit(mut ptr: *mut *const uint8_t) -> uint32_t {
-    unsafe {
-        let mut t32: uint32_t = 0;
-        memcpy(
-            &raw mut t32 as *mut ::core::ffi::c_void,
-            *ptr as *const ::core::ffi::c_void,
-            4 as size_t,
-        );
-        *ptr = (*ptr).offset(4 as ::core::ffi::c_int as isize);
-        return t32.swap_bytes();
+pub const ATTR_RECORD_SIZE: usize = 36;
+
+const NAME_INDEX_FLAG: u8 = 1;
+const NODE_INDEX_FLAG: u8 = 2;
+
+#[deny(unsafe_code)]
+pub mod imp {
+    /// Count complete entries in a directory blob.
+    /// Entry layout: [nleng:1][name][inode:4][attr:attrsize]; the walk
+    /// advances nleng+5+attrsize per step and counts entries that fit
+    /// completely (exact C semantics, including the final partial entry
+    /// being skipped but still terminating the walk).
+    pub fn elemcount(dbuff: &[u8], attrsize: u8) -> u32 {
+        let mut ret = 0u32;
+        let mut pos = 0usize;
+        let step_extra = 5usize + attrsize as usize;
+        while pos < dbuff.len() {
+            let enleng = dbuff[pos] as usize;
+            if pos + enleng + step_extra <= dbuff.len() {
+                ret += 1;
+            }
+            pos += enleng + step_extra;
+        }
+        ret
+    }
+
+    /// Copy an attr record of `attrsize` bytes into a 36-byte record:
+    /// copy min(attrsize,36), zero-fill the rest (C memcpy/memset pair).
+    pub fn fix_attr(record: &[u8], attrsize: u8) -> [u8; 36] {
+        let mut out = [0u8; 36];
+        let n = (attrsize as usize).min(36).min(record.len());
+        out[..n].copy_from_slice(&record[..n]);
+        out
+    }
+
+    /// Registry matching: does a dircache belong to (ctx, parent)?
+    pub fn ctx_matches(c_pid: i32, c_uid: u32, c_gid: u32, d_pid: i32, d_uid: u32, d_gid: u32) -> bool {
+        c_pid == d_pid && c_uid == d_uid && c_gid == d_gid
     }
 }
-pub const NAME_INDEX_FLAG: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const NODE_INDEX_FLAG: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-static mut head: *mut dircache = ::core::ptr::null_mut::<dircache>();
-static mut glock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-#[inline]
-unsafe extern "C" fn dcache_elemcount(
-    mut dbuff: *const uint8_t,
-    mut dsize: uint32_t,
-    mut attrsize: uint8_t,
-) -> uint32_t {
-    unsafe {
-        let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut enleng: uint16_t = 0;
-        let mut ret: uint32_t = 0;
-        ptr = dbuff;
-        eptr = dbuff.offset(dsize as isize);
-        ret = 0 as uint32_t;
-        while ptr < eptr {
-            enleng = *ptr as uint16_t;
-            if ptr
-                .offset(enleng as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_uint as isize)
-                .offset(attrsize as ::core::ffi::c_int as isize)
-                <= eptr
-            {
-                ret = ret.wrapping_add(1);
-            }
-            ptr = ptr.offset(
-                (enleng as ::core::ffi::c_uint)
-                    .wrapping_add(5 as ::core::ffi::c_uint)
-                    .wrapping_add(attrsize as ::core::ffi::c_uint) as isize,
-            );
-        }
-        return ret;
-    }
+
+// ---------------------------------------------------------------------------
+// Boundary: blob memory (caller-owned) and index handles.
+// ---------------------------------------------------------------------------
+
+struct Inner {
+    /// caller-owned readdir blobs; NOT freed here (C contract)
+    blobs: Vec<(*mut uint8_t, uint32_t)>,
+    name_index: *mut ::core::ffi::c_void,
+    node_index: *mut ::core::ffi::c_void,
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_new(
-    mut ctx: *const fuse_ctx,
-    mut parent: uint32_t,
-    mut attrsize: uint8_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        d = malloc(::core::mem::size_of::<dircache>()) as *mut dircache;
-        (*d).ctx.pid = (*ctx).pid;
-        (*d).ctx.uid = (*ctx).uid;
-        (*d).ctx.gid = (*ctx).gid;
-        (*d).parent = parent;
-        (*d).dbhead = ::core::ptr::null_mut::<dirbuff>();
-        (*d).attrsize = attrsize;
-        (*d).name_index = NULL;
-        (*d).node_index = NULL;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_init(
-            &raw mut (*d).lock,
-            ::core::ptr::null::<pthread_mutexattr_t>(),
-        );
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    88 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&(d->lock),NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    89 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        if !head.is_null() {
-            (*head).prev = &raw mut (*d).next;
-        }
-        (*d).next = head as *mut _dircache;
-        (*d).prev = &raw mut head as *mut *mut _dircache;
-        head = d;
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    96 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
-        return d as *mut ::core::ffi::c_void;
-    }
+
+struct DirCache {
+    pid: pid_t,
+    uid: uid_t,
+    gid: gid_t,
+    parent: uint32_t,
+    attrsize: u8,
+    inner: StdMutex<Inner>,
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_release(mut r: *mut ::core::ffi::c_void) {
+// SAFETY: raw blob pointers are only dereferenced with the inner mutex
+// held and the caller keeps blobs alive until dcache_release (mfs_fuse
+// readdir flow).
+unsafe impl Send for DirCache {}
+unsafe impl Send for Inner {}
+unsafe impl Sync for DirCache {}
+
+/// registry: handles as usize (glock in C); lock order registry → d.lock
+static REGISTRY: StdMutex<Vec<usize>> = StdMutex::new(Vec::new());
+
+/// Walk every entry pointer of every blob (C: dcache_add_blob_to_indexes).
+/// SAFETY: blobs alive per module contract; inner mutex held by caller.
+unsafe fn add_blobs_to_indexes(inner: &Inner, attrsize: u8, mask: u8) {
     unsafe {
-        let mut d: *mut dircache = r as *mut dircache;
-        let mut db: *mut dirbuff = ::core::ptr::null_mut::<dirbuff>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    104 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        if !(*d).next.is_null() {
-            (*(*d).next).prev = (*d).prev;
-        }
-        *(*d).prev = (*d).next;
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    109 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    110 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
-        if !(*d).name_index.is_null() {
-            name_index_destroy((*d).name_index);
-        }
-        if !(*d).node_index.is_null() {
-            node_index_destroy((*d).node_index);
-        }
-        while !(*d).dbhead.is_null() {
-            db = (*d).dbhead;
-            (*d).dbhead = (*db).next as *mut dirbuff;
-            free(db as *mut ::core::ffi::c_void);
-        }
-        let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_5: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-            } else if _mfs_assert_ret_2 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_6: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-            } else {
-                let mut _mfs_errorstring_err_2: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_2: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    122 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_3: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut (*d).lock);
-        if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_3 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-            } else if _mfs_assert_ret_3 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_8: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-            } else {
-                let mut _mfs_errorstring_err_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_3: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-            }
-            abort();
-        }
-        free(d as *mut ::core::ffi::c_void);
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_add_blob_to_indexes(
-    mut d: *mut dircache,
-    mut db: *mut dirbuff,
-    mut index_mask: uint8_t,
-) {
-    unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        ptr = (*db).dbuff;
-        while ptr < (*db).dbuff.offset((*db).dsize as isize) {
-            if index_mask as ::core::ffi::c_int & NAME_INDEX_FLAG != 0 {
-                name_index_add((*d).name_index, ptr);
-            }
-            if index_mask as ::core::ffi::c_int & NODE_INDEX_FLAG != 0 {
-                node_index_add((*d).node_index, ptr);
-            }
-            ptr = ptr
-                .offset(*ptr as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_int as isize)
-                .offset((*d).attrsize as ::core::ffi::c_int as isize);
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_make_name_index(mut d: *mut dircache) {
-    unsafe {
-        let mut db: *mut dirbuff = ::core::ptr::null_mut::<dirbuff>();
-        let mut elemcount: uint32_t = 0;
-        elemcount = 0 as uint32_t;
-        db = (*d).dbhead;
-        while !db.is_null() {
-            elemcount =
-                elemcount.wrapping_add(dcache_elemcount((*db).dbuff, (*db).dsize, (*d).attrsize));
-            db = (*db).next as *mut dirbuff;
-        }
-        (*d).name_index = name_index_create(elemcount);
-        db = (*d).dbhead;
-        while !db.is_null() {
-            dcache_add_blob_to_indexes(d, db, NAME_INDEX_FLAG as uint8_t);
-            db = (*db).next as *mut dirbuff;
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_make_node_index(mut d: *mut dircache) {
-    unsafe {
-        let mut db: *mut dirbuff = ::core::ptr::null_mut::<dirbuff>();
-        let mut elemcount: uint32_t = 0;
-        elemcount = 0 as uint32_t;
-        db = (*d).dbhead;
-        while !db.is_null() {
-            elemcount =
-                elemcount.wrapping_add(dcache_elemcount((*db).dbuff, (*db).dsize, (*d).attrsize));
-            db = (*db).next as *mut dirbuff;
-        }
-        (*d).node_index = node_index_create(elemcount);
-        db = (*d).dbhead;
-        while !db.is_null() {
-            dcache_add_blob_to_indexes(d, db, NODE_INDEX_FLAG as uint8_t);
-            db = (*db).next as *mut dirbuff;
-        }
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_append(
-    mut r: *mut ::core::ffi::c_void,
-    mut dbuff: *mut uint8_t,
-    mut dsize: uint32_t,
-) {
-    unsafe {
-        let mut d: *mut dircache = r as *mut dircache;
-        let mut db: *mut dirbuff = ::core::ptr::null_mut::<dirbuff>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    174 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        db = malloc(::core::mem::size_of::<dirbuff>()) as *mut dirbuff;
-        (*db).dbuff = dbuff;
-        (*db).dsize = dsize;
-        (*db).next = (*d).dbhead as *mut _dirbuff;
-        (*d).dbhead = db;
-        dcache_add_blob_to_indexes(
-            d,
-            db,
-            ((if !(*d).name_index.is_null() {
-                NAME_INDEX_FLAG
-            } else {
-                0 as ::core::ffi::c_int
-            }) | (if !(*d).node_index.is_null() {
-                NODE_INDEX_FLAG
-            } else {
-                0 as ::core::ffi::c_int
-            })) as uint8_t,
-        );
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_namehash_invalidate(
-    mut d: *mut dircache,
-    mut nleng: uint8_t,
-    mut name: *const uint8_t,
-) {
-    unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    187 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        if (*d).name_index.is_null() {
-            dcache_make_name_index(d);
-        }
-        ptr = name_index_find((*d).name_index, name, nleng);
-        if !ptr.is_null() {
-            ptr = ptr.offset((*ptr as ::core::ffi::c_int + 1 as ::core::ffi::c_int) as isize);
-            memset(
-                ptr as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<uint32_t>().wrapping_add((*d).attrsize as size_t),
-            );
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_namehash_get(
-    mut d: *mut dircache,
-    mut nleng: uint8_t,
-    mut name: *const uint8_t,
-    mut inode: *mut uint32_t,
-    mut attr: *mut uint8_t,
-) -> uint8_t {
-    unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut res: uint8_t = 0;
-        res = 0 as uint8_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        if (*d).name_index.is_null() {
-            dcache_make_name_index(d);
-        }
-        ptr = name_index_find((*d).name_index, name, nleng);
-        if !ptr.is_null() {
-            rptr = ptr
-                .offset(*ptr as ::core::ffi::c_int as isize)
-                .offset(1 as ::core::ffi::c_int as isize);
-            *inode = get32bit(&raw mut rptr);
-            if *rptr != 0 {
-                if (*d).attrsize as ::core::ffi::c_int >= ATTR_RECORD_SIZE {
-                    memcpy(
-                        attr as *mut ::core::ffi::c_void,
-                        rptr as *const ::core::ffi::c_void,
-                        ATTR_RECORD_SIZE as size_t,
-                    );
-                } else {
-                    memcpy(
-                        attr as *mut ::core::ffi::c_void,
-                        rptr as *const ::core::ffi::c_void,
-                        (*d).attrsize as size_t,
-                    );
-                    memset(
-                        attr.offset((*d).attrsize as ::core::ffi::c_int as isize)
-                            as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        (ATTR_RECORD_SIZE - (*d).attrsize as ::core::ffi::c_int) as size_t,
-                    );
+        for &(mut ptr, dsize) in &inner.blobs {
+            let end = ptr.add(dsize as usize);
+            while ptr < end {
+                let enleng = *ptr as usize;
+                if mask & NAME_INDEX_FLAG != 0 && !inner.name_index.is_null() {
+                    name_index_add(inner.name_index, ptr);
                 }
-                res = 1 as uint8_t;
-            }
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    223 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        return res;
-    }
-}
-#[inline]
-unsafe extern "C" fn dcache_inodehash_get(
-    mut d: *mut dircache,
-    mut inode: uint32_t,
-    mut attr: *mut uint8_t,
-) -> uint8_t {
-    unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut res: uint8_t = 0;
-        res = 0 as uint8_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    233 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        if (*d).node_index.is_null() {
-            dcache_make_node_index(d);
-        }
-        ptr = node_index_find((*d).node_index, inode);
-        if !ptr.is_null() {
-            rptr = ptr
-                .offset(*ptr as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_int as isize);
-            if *rptr != 0 {
-                if (*d).attrsize as ::core::ffi::c_int >= ATTR_RECORD_SIZE {
-                    memcpy(
-                        attr as *mut ::core::ffi::c_void,
-                        rptr as *const ::core::ffi::c_void,
-                        ATTR_RECORD_SIZE as size_t,
-                    );
-                } else {
-                    memcpy(
-                        attr as *mut ::core::ffi::c_void,
-                        rptr as *const ::core::ffi::c_void,
-                        (*d).attrsize as size_t,
-                    );
-                    memset(
-                        attr.offset((*d).attrsize as ::core::ffi::c_int as isize)
-                            as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        (ATTR_RECORD_SIZE - (*d).attrsize as ::core::ffi::c_int) as size_t,
-                    );
+                if mask & NODE_INDEX_FLAG != 0 && !inner.node_index.is_null() {
+                    node_index_add(inner.node_index, ptr);
                 }
-                res = 1 as uint8_t;
+                ptr = ptr.add(enleng + 5 + attrsize as usize);
             }
         }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    250 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        return res;
     }
 }
-#[inline]
-unsafe extern "C" fn dcache_inodehash_set(
-    mut d: *mut dircache,
-    mut inode: uint32_t,
-    mut attr: *const uint8_t,
-) -> uint8_t {
+
+/// SAFETY: inner mutex held; blobs alive.
+unsafe fn make_name_index(inner: &mut Inner, attrsize: u8) {
     unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut res: uint8_t = 0;
-        res = 0 as uint8_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    260 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+        let mut elemcount = 0u32;
+        for &(ptr, dsize) in &inner.blobs {
+            let buf = ::core::slice::from_raw_parts(ptr, dsize as usize);
+            elemcount += imp::elemcount(buf, attrsize);
         }
-        if (*d).node_index.is_null() {
-            dcache_make_node_index(d);
-        }
-        ptr = node_index_find((*d).node_index, inode);
-        if !ptr.is_null() {
-            wptr = ptr
-                .offset(*ptr as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_int as isize);
-            if ((*d).attrsize as ::core::ffi::c_int) < ATTR_RECORD_SIZE {
-                memcpy(
-                    wptr as *mut ::core::ffi::c_void,
-                    attr as *const ::core::ffi::c_void,
-                    (*d).attrsize as size_t,
-                );
-            } else {
-                memcpy(
-                    wptr as *mut ::core::ffi::c_void,
-                    attr as *const ::core::ffi::c_void,
-                    ATTR_RECORD_SIZE as size_t,
-                );
-            }
-            res = 1 as uint8_t;
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    274 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        return res;
+        inner.name_index = name_index_create(elemcount);
+        add_blobs_to_indexes(inner, attrsize, NAME_INDEX_FLAG);
     }
 }
-#[inline]
-unsafe extern "C" fn dcache_inodehash_invalidate_attr(
-    mut d: *mut dircache,
-    mut inode: uint32_t,
-) -> uint8_t {
+
+/// SAFETY: inner mutex held; blobs alive.
+unsafe fn make_node_index(inner: &mut Inner, attrsize: u8) {
     unsafe {
-        let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        let mut res: uint8_t = 0;
-        res = 0 as uint8_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*d).lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    284 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+        let mut elemcount = 0u32;
+        for &(ptr, dsize) in &inner.blobs {
+            let buf = ::core::slice::from_raw_parts(ptr, dsize as usize);
+            elemcount += imp::elemcount(buf, attrsize);
         }
-        if (*d).node_index.is_null() {
-            dcache_make_node_index(d);
-        }
-        ptr = node_index_find((*d).node_index, inode);
-        if !ptr.is_null() {
-            wptr = ptr
-                .offset(*ptr as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_int as isize);
-            memset(
-                wptr as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                (*d).attrsize as size_t,
-            );
-            res = 1 as uint8_t;
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut (*d).lock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    294 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&(d->lock))\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        return res;
+        inner.node_index = node_index_create(elemcount);
+        add_blobs_to_indexes(inner, attrsize, NODE_INDEX_FLAG);
     }
 }
+
+/// dcache_namehash_get: find name, read inode + attr record.
+/// SAFETY: d.lock held; blobs alive. Returns (inode, attr) on valid hit.
+unsafe fn namehash_get(inner: &mut Inner, attrsize: u8, nleng: uint8_t, name: *const uint8_t) -> Option<(uint32_t, [u8; 36])> {
+    unsafe {
+        if inner.name_index.is_null() {
+            make_name_index(inner, attrsize);
+        }
+        let ptr = name_index_find(inner.name_index, name, nleng);
+        if ptr.is_null() {
+            return None;
+        }
+        let rptr = ptr.add(*ptr as usize + 1);
+        let inode = u32::from_be_bytes([*rptr, *rptr.add(1), *rptr.add(2), *rptr.add(3)]);
+        let abase = rptr.add(4);
+        if *abase == 0 {
+            return None; // attributes invalidated
+        }
+        let record = ::core::slice::from_raw_parts(abase, attrsize as usize);
+        Some((inode, imp::fix_attr(record, attrsize)))
+    }
+}
+
+/// dcache_inodehash_get: find inode, read attr record.
+/// SAFETY: d.lock held; blobs alive.
+unsafe fn inodehash_get(inner: &mut Inner, attrsize: u8, inode: uint32_t) -> Option<[u8; 36]> {
+    unsafe {
+        if inner.node_index.is_null() {
+            make_node_index(inner, attrsize);
+        }
+        let ptr = node_index_find(inner.node_index, inode);
+        if ptr.is_null() {
+            return None;
+        }
+        let abase = ptr.add(*ptr as usize + 5);
+        if *abase == 0 {
+            return None;
+        }
+        let record = ::core::slice::from_raw_parts(abase, attrsize as usize);
+        Some(imp::fix_attr(record, attrsize))
+    }
+}
+
+/// SAFETY: d.lock held; blobs alive.
+unsafe fn inodehash_set(inner: &mut Inner, attrsize: u8, inode: uint32_t, attr: *const uint8_t) -> bool {
+    unsafe {
+        if inner.node_index.is_null() {
+            make_node_index(inner, attrsize);
+        }
+        let ptr = node_index_find(inner.node_index, inode);
+        if ptr.is_null() {
+            return false;
+        }
+        let wptr = ptr.add(*ptr as usize + 5);
+        let n = (attrsize as usize).min(ATTR_RECORD_SIZE);
+        ::core::ptr::copy_nonoverlapping(attr, wptr, n);
+        true
+    }
+}
+
+/// SAFETY: d.lock held; blobs alive.
+unsafe fn inodehash_invalidate_attr(inner: &mut Inner, attrsize: u8, inode: uint32_t) -> bool {
+    unsafe {
+        if inner.node_index.is_null() {
+            make_node_index(inner, attrsize);
+        }
+        let ptr = node_index_find(inner.node_index, inode);
+        if ptr.is_null() {
+            return false;
+        }
+        let wptr = ptr.add(*ptr as usize + 5);
+        ::core::ptr::write_bytes(wptr, 0, attrsize as usize);
+        true
+    }
+}
+
+/// SAFETY: d.lock held; blobs alive.
+unsafe fn namehash_invalidate(inner: &mut Inner, attrsize: u8, nleng: uint8_t, name: *const uint8_t) {
+    unsafe {
+        if inner.name_index.is_null() {
+            make_name_index(inner, attrsize);
+        }
+        let ptr = name_index_find(inner.name_index, name, nleng);
+        if !ptr.is_null() {
+            let wptr = ptr.add(*ptr as usize + 1);
+            ::core::ptr::write_bytes(wptr, 0, 4 + attrsize as usize);
+        }
+    }
+}
+
+fn registry_find(parent: uint32_t, ctx: *const fuse_ctx) -> Vec<usize> {
+    let g = REGISTRY.lock().unwrap();
+    g.iter()
+        .copied()
+        .filter(|&h| {
+            let d = unsafe { &*(h as *const DirCache) };
+            // SAFETY: handle validity is the caller's contract (dcache_new
+            // → dcache_release); registry holds only live handles.
+            d.parent == parent
+                && imp::ctx_matches(
+                    unsafe { (*ctx).pid },
+                    unsafe { (*ctx).uid },
+                    unsafe { (*ctx).gid },
+                    d.pid,
+                    d.uid,
+                    d.gid,
+                )
+        })
+        .collect()
+}
+
+fn registry_all_ctx(ctx: *const fuse_ctx) -> Vec<usize> {
+    let g = REGISTRY.lock().unwrap();
+    g.iter()
+        .copied()
+        .filter(|&h| {
+            let d = unsafe { &*(h as *const DirCache) };
+            imp::ctx_matches(
+                unsafe { (*ctx).pid },
+                unsafe { (*ctx).uid },
+                unsafe { (*ctx).gid },
+                d.pid,
+                d.uid,
+                d.gid,
+            )
+        })
+        .collect()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dcache_new(ctx: *const fuse_ctx, parent: uint32_t, attrsize: uint8_t) -> *mut ::core::ffi::c_void {
+    unsafe {
+        let d = Box::new(DirCache {
+            pid: (*ctx).pid,
+            uid: (*ctx).uid,
+            gid: (*ctx).gid,
+            parent,
+            attrsize,
+            inner: StdMutex::new(Inner {
+                blobs: Vec::new(),
+                name_index: ::core::ptr::null_mut(),
+                node_index: ::core::ptr::null_mut(),
+            }),
+        });
+        let h = Box::into_raw(d) as usize;
+        REGISTRY.lock().unwrap().push(h);
+        h as *mut ::core::ffi::c_void
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dcache_release(r: *mut ::core::ffi::c_void) {
+    if r.is_null() {
+        return;
+    }
+    let h = r as usize;
+    REGISTRY.lock().unwrap().retain(|&x| x != h);
+    // SAFETY: handle from dcache_new, released exactly once.
+    let d = unsafe { Box::from_raw(r as *mut DirCache) };
+    let inner = d.inner.lock().unwrap();
+    unsafe {
+        if !inner.name_index.is_null() {
+            name_index_destroy(inner.name_index);
+        }
+        if !inner.node_index.is_null() {
+            node_index_destroy(inner.node_index);
+        }
+    }
+    // blobs are caller-owned — intentionally not freed (C contract)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dcache_append(r: *mut ::core::ffi::c_void, dbuff: *mut uint8_t, dsize: uint32_t) {
+    unsafe {
+        // SAFETY: handle from dcache_new; blob stays caller-owned.
+        let d = &*(r as *const DirCache);
+        let mut inner = d.inner.lock().unwrap();
+        inner.blobs.push((dbuff, dsize));
+        let mask = (if inner.name_index.is_null() {
+            0
+        } else {
+            NAME_INDEX_FLAG
+        }) | (if inner.node_index.is_null() {
+            0
+        } else {
+            NODE_INDEX_FLAG
+        });
+        if mask != 0 {
+            // index the new blob only (C: dcache_add_blob_to_indexes(db))
+            let end = dbuff.add(dsize as usize);
+            let mut ptr = dbuff;
+            while ptr < end {
+                let enleng = *ptr as usize;
+                if mask & NAME_INDEX_FLAG != 0 {
+                    name_index_add(inner.name_index, ptr);
+                }
+                if mask & NODE_INDEX_FLAG != 0 {
+                    node_index_add(inner.node_index, ptr);
+                }
+                ptr = ptr.add(enleng + 5 + d.attrsize as usize);
+            }
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dcache_lookup(
-    mut ctx: *const fuse_ctx,
-    mut parent: uint32_t,
-    mut nleng: uint8_t,
-    mut name: *const uint8_t,
-    mut inode: *mut uint32_t,
-    mut attr: *mut uint8_t,
+    ctx: *const fuse_ctx,
+    parent: uint32_t,
+    nleng: uint8_t,
+    name: *const uint8_t,
+    inode: *mut uint32_t,
+    attr: *mut uint8_t,
 ) -> uint8_t {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    301 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
+    for h in registry_find(parent, ctx) {
+        // SAFETY: live handle; blobs alive.
+        let d = unsafe { &*(h as *const DirCache) };
+        let mut inner = d.inner.lock().unwrap();
+        if let Some((ino, rec)) = unsafe { namehash_get(&mut inner, d.attrsize, nleng, name) } {
+            unsafe {
+                *inode = ino;
+                ::core::ptr::copy_nonoverlapping(rec.as_ptr(), attr, ATTR_RECORD_SIZE);
             }
-            abort();
+            return 1;
         }
-        d = head;
-        while !d.is_null() {
-            if parent == (*d).parent
-                && (*ctx).pid == (*d).ctx.pid
-                && (*ctx).uid == (*d).ctx.uid
-                && (*ctx).gid == (*d).ctx.gid
-            {
-                if dcache_namehash_get(d, nleng, name, inode, attr) != 0 {
-                    let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                        pthread_mutex_unlock(&raw mut glock);
-                    if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                        if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                            && *__errno_location() != 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                        } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                            && *__errno_location() == 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                        } else {
-                            let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                305 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                        }
-                        abort();
-                    }
-                    return 1 as uint8_t;
-                }
-            }
-            d = (*d).next as *mut dircache;
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    310 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
-        return 0 as uint8_t;
     }
+    0
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dcache_getattr(
-    mut ctx: *const fuse_ctx,
-    mut inode: uint32_t,
-    mut attr: *mut uint8_t,
+    ctx: *const fuse_ctx,
+    inode: uint32_t,
+    attr: *mut uint8_t,
 ) -> uint8_t {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    316 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
+    for h in registry_all_ctx(ctx) {
+        // SAFETY: live handle; blobs alive.
+        let d = unsafe { &*(h as *const DirCache) };
+        let mut inner = d.inner.lock().unwrap();
+        if let Some(rec) = unsafe { inodehash_get(&mut inner, d.attrsize, inode) } {
+            unsafe {
+                ::core::ptr::copy_nonoverlapping(rec.as_ptr(), attr, ATTR_RECORD_SIZE);
             }
-            abort();
+            return 1;
         }
-        d = head;
-        while !d.is_null() {
-            if (*ctx).pid == (*d).ctx.pid
-                && (*ctx).uid == (*d).ctx.uid
-                && (*ctx).gid == (*d).ctx.gid
-            {
-                if dcache_inodehash_get(d, inode, attr) != 0 {
-                    let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                        pthread_mutex_unlock(&raw mut glock);
-                    if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                        if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                            && *__errno_location() != 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                        } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                            && *__errno_location() == 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                        } else {
-                            let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                320 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&glock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                        }
-                        abort();
-                    }
-                    return 1 as uint8_t;
-                }
-            }
-            d = (*d).next as *mut dircache;
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    325 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
-        return 0 as uint8_t;
     }
+    0
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_setattr(mut inode: uint32_t, mut attr: *const uint8_t) {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    331 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        d = head;
-        while !d.is_null() {
-            dcache_inodehash_set(d, inode, attr);
-            d = (*d).next as *mut dircache;
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    335 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
+pub unsafe extern "C" fn dcache_setattr(inode: uint32_t, attr: *const uint8_t) {
+    let all: Vec<usize> = REGISTRY.lock().unwrap().clone();
+    for h in all {
+        // SAFETY: live handle; blobs alive.
+        let d = unsafe { &*(h as *const DirCache) };
+        let mut inner = d.inner.lock().unwrap();
+        unsafe {
+            inodehash_set(&mut inner, d.attrsize, inode, attr);
         }
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_invalidate_attr(mut inode: uint32_t) {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    340 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        d = head;
-        while !d.is_null() {
-            dcache_inodehash_invalidate_attr(d, inode);
-            d = (*d).next as *mut dircache;
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    344 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
+pub unsafe extern "C" fn dcache_invalidate_attr(inode: uint32_t) {
+    let all: Vec<usize> = REGISTRY.lock().unwrap().clone();
+    for h in all {
+        // SAFETY: live handle; blobs alive.
+        let d = unsafe { &*(h as *const DirCache) };
+        let mut inner = d.inner.lock().unwrap();
+        unsafe {
+            inodehash_invalidate_attr(&mut inner, d.attrsize, inode);
         }
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_invalidate_name(
-    mut parent: uint32_t,
-    mut nleng: uint8_t,
-    mut name: *const uint8_t,
-) {
-    unsafe {
-        let mut d: *mut dircache = ::core::ptr::null_mut::<dircache>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    349 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+pub unsafe extern "C" fn dcache_invalidate_name(parent: uint32_t, nleng: uint8_t, name: *const uint8_t) {
+    let all: Vec<usize> = {
+        let g = REGISTRY.lock().unwrap();
+        g.iter()
+            .copied()
+            .filter(|&h| {
+                // SAFETY: live handle.
+                let d = unsafe { &*(h as *const DirCache) };
+                d.parent == parent
+            })
+            .collect()
+    };
+    for h in all {
+        // SAFETY: live handle; blobs alive.
+        let d = unsafe { &*(h as *const DirCache) };
+        let mut inner = d.inner.lock().unwrap();
+        unsafe {
+            namehash_invalidate(&mut inner, d.attrsize, nleng, name);
         }
-        d = head;
-        while !d.is_null() {
-            if parent == (*d).parent {
-                dcache_namehash_invalidate(d, nleng, name);
-            }
-            d = (*d).next as *mut dircache;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::vec::Vec;
+
+    /// build a blob: entries [nleng][name][inode:4][attr:attrsize]
+    fn blob(entries: &[(&[u8], u32)], attrsize: u8) -> Vec<u8> {
+        let mut v = Vec::new();
+        for (name, inode) in entries {
+            v.push(name.len() as u8);
+            v.extend_from_slice(name);
+            v.extend_from_slice(&inode.to_be_bytes());
+            v.extend(std::iter::repeat(1u8).take(attrsize as usize));
         }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/dirattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    355 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
+        v
+    }
+
+    #[test]
+    fn elemcount_matches_walk() {
+        let b = blob(&[(b"aa", 1), (b"bbbb", 2), (b"c", 3)], 10);
+        assert_eq!(elemcount(&b, 10), 3);
+        // trailing partial entry: counted by C only if complete
+        let mut partial = blob(&[(b"aa", 1)], 10);
+        partial.extend_from_slice(&[3, b'x']); // claims nleng=3 but truncated
+        assert_eq!(elemcount(&partial, 10), 1);
+        // empty
+        assert_eq!(elemcount(&[], 10), 0);
+        // attrsize affects step
+        let b2 = blob(&[(b"aa", 1), (b"bb", 2)], 0);
+        assert_eq!(elemcount(&b2, 0), 2);
+        assert_eq!(elemcount(&b2, 10), 0); // steps overshoot
+    }
+
+    #[test]
+    fn fix_attr_copy_and_zerofill() {
+        let rec = [7u8; 10];
+        let out = fix_attr(&rec, 10);
+        assert_eq!(&out[..10], &[7u8; 10]);
+        assert_eq!(&out[10..], &[0u8; 26]);
+        let rec36 = [9u8; 36];
+        let out = fix_attr(&rec36, 36);
+        assert_eq!(out, [9u8; 36]);
+        // attrsize larger than record: C reads min(attrsize,36) — same here
+        let out = fix_attr(&rec36, 40);
+        assert_eq!(out, [9u8; 36]);
+    }
+
+    #[test]
+    fn ctx_matching() {
+        assert!(ctx_matches(1, 2, 3, 1, 2, 3));
+        assert!(!ctx_matches(1, 2, 3, 1, 2, 4));
+        assert!(!ctx_matches(0, 2, 3, 1, 2, 3));
     }
 }
