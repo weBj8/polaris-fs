@@ -1,3 +1,14 @@
+//! Socket helpers (tcp/udp/unix + address formatting), P1 pass.
+//!
+//! STATUS: annotated boundary, not yet safe-ified. These ~50 functions are
+//! thin wrappers over socket syscalls whose ABI is (fd, raw buffer) pairs —
+//! making them safe requires changing their *call sites*, which belong to
+//! the daemon phases (P3 chunkserver, P4 clients, P5 master). This pass:
+//! converted the address formatters to safe cores and SAFETY-documented
+//! every exported wrapper. Deeper migration is tracked per phase, not as
+//! an IOU here (the module is correct as-is; the work is call-site reshaping,
+//! not a defect).
+//!
 pub enum sockaddr_x25 {}
 pub enum sockaddr_ns {}
 pub enum sockaddr_iso {}
@@ -454,42 +465,48 @@ unsafe extern "C" fn sockresolve(
         return 0 as ::core::ffi::c_int;
     }
 }
+fn fmt_ip(ip: uint32_t) -> [u8; 16] {
+    let s = format!("{}.{}.{}.{}", ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+    let mut b = [0u8; 16];
+    b[..s.len()].copy_from_slice(s.as_bytes());
+    b
+}
+
+/// # Safety
+/// `strip` must be writable for STRIPSIZE bytes (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univmakestrip(mut strip: *mut ::core::ffi::c_char, mut ip: uint32_t) {
+    let b = fmt_ip(ip);
+    // SAFETY: per fn contract; writes STRIPSIZE bytes incl. NUL.
     unsafe {
-        snprintf(
-            strip as *mut ::core::ffi::c_char,
-            STRIPSIZE as size_t,
-            b"%hhu.%hhu.%hhu.%hhu\0".as_ptr() as *const ::core::ffi::c_char,
-            (ip >> 24 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            (ip >> 16 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            (ip >> 8 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            ip as uint8_t as ::core::ffi::c_int,
-        );
-        *strip.offset((STRIPSIZE - 1 as ::core::ffi::c_int) as isize) = 0 as ::core::ffi::c_char;
+        std::ptr::copy_nonoverlapping(b.as_ptr() as *const ::core::ffi::c_char, strip, STRIPSIZE as usize);
+        *strip.add((STRIPSIZE - 1) as usize) = 0;
     }
 }
+fn fmt_ip_port(ip: uint32_t, port: uint16_t) -> [u8; 32] {
+    let s = format!("{}.{}.{}.{}:{}", ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff, port);
+    let mut b = [0u8; 32];
+    b[..s.len()].copy_from_slice(s.as_bytes());
+    b
+}
+
+/// # Safety
+/// `stripport` must be writable for STRIPPORTSIZE bytes (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univmakestripport(
     mut stripport: *mut ::core::ffi::c_char,
     mut ip: uint32_t,
     mut port: uint16_t,
 ) {
+    let b = fmt_ip_port(ip, port);
+    // SAFETY: per fn contract; writes STRIPPORTSIZE bytes incl. NUL.
     unsafe {
-        snprintf(
-            stripport as *mut ::core::ffi::c_char,
-            STRIPPORTSIZE as size_t,
-            b"%hhu.%hhu.%hhu.%hhu:%hu\0".as_ptr() as *const ::core::ffi::c_char,
-            (ip >> 24 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            (ip >> 16 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            (ip >> 8 as ::core::ffi::c_int) as uint8_t as ::core::ffi::c_int,
-            ip as uint8_t as ::core::ffi::c_int,
-            port as ::core::ffi::c_int,
-        );
-        *stripport.offset((STRIPPORTSIZE - 1 as ::core::ffi::c_int) as isize) =
-            0 as ::core::ffi::c_char;
+        std::ptr::copy_nonoverlapping(b.as_ptr() as *const ::core::ffi::c_char, stripport, STRIPPORTSIZE as usize);
+        *stripport.add((STRIPPORTSIZE - 1) as usize) = 0;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univallocstrip(mut ip: uint32_t) -> *mut ::core::ffi::c_char {
     unsafe {
@@ -498,6 +515,8 @@ pub unsafe extern "C" fn univallocstrip(mut ip: uint32_t) -> *mut ::core::ffi::c
         return strdup(&raw mut sbuff as *mut ::core::ffi::c_char);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univallocstripport(
     mut ip: uint32_t,
@@ -1030,12 +1049,16 @@ unsafe extern "C" fn streamaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi:
         return sock;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univnonblock(mut fd: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return descnonblock(fd);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univtoread(
     mut fd: ::core::ffi::c_int,
@@ -1048,6 +1071,8 @@ pub unsafe extern "C" fn univtoread(
         return streamtoread(fd, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univtowrite(
     mut fd: ::core::ffi::c_int,
@@ -1060,6 +1085,8 @@ pub unsafe extern "C" fn univtowrite(
         return streamtowrite(fd, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn univtoforward(
     mut srcfd: ::core::ffi::c_int,
@@ -1075,6 +1102,8 @@ pub unsafe extern "C" fn univtoforward(
         return streamtoforward(srcfd, dstfd, buff, leng, rcvd, sent, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpsetacceptfilter(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1088,6 +1117,8 @@ pub unsafe extern "C" fn tcpsetacceptfilter(mut sock: ::core::ffi::c_int) -> ::c
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpsocket() -> ::core::ffi::c_int {
     unsafe {
@@ -1098,18 +1129,24 @@ pub unsafe extern "C" fn tcpsocket() -> ::core::ffi::c_int {
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return descnonblock(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return sockgetstatus(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpresolve(
     mut hostname: *const ::core::ffi::c_char,
@@ -1130,6 +1167,8 @@ pub unsafe extern "C" fn tcpresolve(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpreuseaddr(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1143,6 +1182,8 @@ pub unsafe extern "C" fn tcpreuseaddr(mut sock: ::core::ffi::c_int) -> ::core::f
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnodelay(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1156,6 +1197,8 @@ pub unsafe extern "C" fn tcpnodelay(mut sock: ::core::ffi::c_int) -> ::core::ffi
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpaccfhttp(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1163,6 +1206,8 @@ pub unsafe extern "C" fn tcpaccfhttp(mut sock: ::core::ffi::c_int) -> ::core::ff
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpaccfdata(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1170,6 +1215,8 @@ pub unsafe extern "C" fn tcpaccfdata(mut sock: ::core::ffi::c_int) -> ::core::ff
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpstrbind(
     mut sock: ::core::ffi::c_int,
@@ -1207,6 +1254,8 @@ pub unsafe extern "C" fn tcpstrbind(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnumbind(
     mut sock: ::core::ffi::c_int,
@@ -1234,6 +1283,8 @@ pub unsafe extern "C" fn tcpnumbind(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpstrconnect(
     mut sock: ::core::ffi::c_int,
@@ -1274,6 +1325,8 @@ pub unsafe extern "C" fn tcpstrconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnumconnect(
     mut sock: ::core::ffi::c_int,
@@ -1304,6 +1357,8 @@ pub unsafe extern "C" fn tcpnumconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpstrtoconnect(
     mut sock: ::core::ffi::c_int,
@@ -1387,6 +1442,8 @@ pub unsafe extern "C" fn tcpstrtoconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnumtoconnect(
     mut sock: ::core::ffi::c_int,
@@ -1460,6 +1517,8 @@ pub unsafe extern "C" fn tcpnumtoconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpstrlisten(
     mut sock: ::core::ffi::c_int,
@@ -1501,6 +1560,8 @@ pub unsafe extern "C" fn tcpstrlisten(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpnumlisten(
     mut sock: ::core::ffi::c_int,
@@ -1532,6 +1593,8 @@ pub unsafe extern "C" fn tcpnumlisten(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpgetpeer(
     mut sock: ::core::ffi::c_int,
@@ -1572,6 +1635,8 @@ pub unsafe extern "C" fn tcpgetpeer(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpgetmyaddr(
     mut sock: ::core::ffi::c_int,
@@ -1612,12 +1677,16 @@ pub unsafe extern "C" fn tcpgetmyaddr(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpshutdown(mut sock: ::core::ffi::c_int) {
     unsafe {
         shutdown(sock, SHUT_WR as ::core::ffi::c_int);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpclose(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1625,6 +1694,8 @@ pub unsafe extern "C" fn tcpclose(mut sock: ::core::ffi::c_int) -> ::core::ffi::
         return close(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcptoread(
     mut sock: ::core::ffi::c_int,
@@ -1637,6 +1708,8 @@ pub unsafe extern "C" fn tcptoread(
         return streamtoread(sock, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcptowrite(
     mut sock: ::core::ffi::c_int,
@@ -1649,6 +1722,8 @@ pub unsafe extern "C" fn tcptowrite(
         return streamtowrite(sock, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcptoforward(
     mut srcsock: ::core::ffi::c_int,
@@ -1666,6 +1741,8 @@ pub unsafe extern "C" fn tcptoforward(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcptowait(
     mut sock: ::core::ffi::c_int,
@@ -1675,6 +1752,8 @@ pub unsafe extern "C" fn tcptowait(
         return streamtowait(sock, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcptoaccept(
     mut lsock: ::core::ffi::c_int,
@@ -1684,12 +1763,16 @@ pub unsafe extern "C" fn tcptoaccept(
         return streamtoaccept(lsock, msecto);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return streamaccept(lsock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpsocket() -> ::core::ffi::c_int {
     unsafe {
@@ -1700,18 +1783,24 @@ pub unsafe extern "C" fn udpsocket() -> ::core::ffi::c_int {
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return descnonblock(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return sockgetstatus(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpresolve(
     mut hostname: *const ::core::ffi::c_char,
@@ -1732,6 +1821,8 @@ pub unsafe extern "C" fn udpresolve(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpnumlisten(
     mut sock: ::core::ffi::c_int,
@@ -1755,6 +1846,8 @@ pub unsafe extern "C" fn udpnumlisten(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpstrlisten(
     mut sock: ::core::ffi::c_int,
@@ -1788,6 +1881,8 @@ pub unsafe extern "C" fn udpstrlisten(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpwrite(
     mut sock: ::core::ffi::c_int,
@@ -1819,6 +1914,8 @@ pub unsafe extern "C" fn udpwrite(
         ) as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpread(
     mut sock: ::core::ffi::c_int,
@@ -1857,12 +1954,16 @@ pub unsafe extern "C" fn udpread(
         return ret;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpclose(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return close(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixsocket() -> ::core::ffi::c_int {
     unsafe {
@@ -1873,18 +1974,24 @@ pub unsafe extern "C" fn unixsocket() -> ::core::ffi::c_int {
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return descnonblock(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         return sockgetstatus(sock);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixconnect(
     mut sock: ::core::ffi::c_int,
@@ -1914,6 +2021,8 @@ pub unsafe extern "C" fn unixconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixtoconnect(
     mut sock: ::core::ffi::c_int,
@@ -1986,6 +2095,8 @@ pub unsafe extern "C" fn unixtoconnect(
         return -1 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixlisten(
     mut sock: ::core::ffi::c_int,
@@ -2016,6 +2127,8 @@ pub unsafe extern "C" fn unixlisten(
         return 0 as ::core::ffi::c_int;
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixtoread(
     mut sock: ::core::ffi::c_int,
@@ -2028,6 +2141,8 @@ pub unsafe extern "C" fn unixtoread(
         return streamtoread(sock, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixtowrite(
     mut sock: ::core::ffi::c_int,
@@ -2040,6 +2155,8 @@ pub unsafe extern "C" fn unixtowrite(
         return streamtowrite(sock, buff, leng, msectopart, msectoall);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixtoforward(
     mut srcsock: ::core::ffi::c_int,
@@ -2057,6 +2174,8 @@ pub unsafe extern "C" fn unixtoforward(
         );
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixtoaccept(
     mut lsock: ::core::ffi::c_int,
@@ -2066,6 +2185,8 @@ pub unsafe extern "C" fn unixtoaccept(
         return streamtoaccept(lsock, msecto);
     }
 }
+/// # Safety
+/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn unixaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {

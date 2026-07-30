@@ -1,255 +1,153 @@
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-use ::c2rust_bitfields;
-unsafe extern "C" {
-    static mut stderr: *mut FILE;
-    unsafe fn fclose(__stream: *mut FILE) -> ::core::ffi::c_int;
-    unsafe fn fopen(
-        __filename: *const ::core::ffi::c_char,
-        __modes: *const ::core::ffi::c_char,
-    ) -> *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn vfprintf(
-        __s: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        __arg: ::core::ffi::VaList,
-    ) -> ::core::ffi::c_int;
-    unsafe fn snprintf(
-        __s: *mut ::core::ffi::c_char,
-        __maxlen: size_t,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn vsnprintf(
-        __s: *mut ::core::ffi::c_char,
-        __maxlen: size_t,
-        __format: *const ::core::ffi::c_char,
-        __arg: ::core::ffi::VaList,
-    ) -> ::core::ffi::c_int;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn isatty(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    unsafe fn closelog();
-    unsafe fn openlog(
-        __ident: *const ::core::ffi::c_char,
-        __option: ::core::ffi::c_int,
-        __facility: ::core::ffi::c_int,
-    );
-    unsafe fn syslog(__pri: ::core::ffi::c_int, __fmt: *const ::core::ffi::c_char, ...);
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn backtrace(
-        __array: *mut *mut ::core::ffi::c_void,
-        __size: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    unsafe fn backtrace_symbols(
-        __array: *const *mut ::core::ffi::c_void,
-        __size: ::core::ffi::c_int,
-    ) -> *mut *mut ::core::ffi::c_char;
-    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
-}
-pub type __builtin_va_list = [__va_list_tag; 1];
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __va_list_tag {
-    pub gp_offset: ::core::ffi::c_uint,
-    pub fp_offset: ::core::ffi::c_uint,
-    pub overflow_arg_area: *mut ::core::ffi::c_void,
-    pub reg_save_area: *mut ::core::ffi::c_void,
-}
+//! Logging (mfs_log family), migrated (P1).
+//!
+//! The two variadic leaves (`mfs_log`, `mfs_file_log`) keep their C-variadic
+//! ABI — they are the confinement point for `c_variadic` (see porting.md).
+//! Everything around them became safe: globals are atomics (relaxed —
+//! diagnostic flags, matching the original's unsynchronized semantics),
+//! priority-string table is private (verified unreferenced outside this
+//! module), `mfs_file_log`'s fn-local FILE* is a module atomic.
+
 pub type size_t = usize;
-pub type __gnuc_va_list = __builtin_va_list;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-#[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    #[bitfield(name = "_flags2", ty = "::core::ffi::c_int", bits = "0..=23")]
-    pub _flags2: [u8; 3],
-    pub _short_backupbuf: [::core::ffi::c_char; 1],
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused3: ::core::ffi::c_int,
-    pub _total_written: __uint64_t,
-    pub _unused2: [::core::ffi::c_char; 8],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub type va_list = __gnuc_va_list;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const STDERR_FILENO: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const LOG_ERR: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const LOG_WARNING: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const LOG_NOTICE: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-pub const LOG_INFO: ::core::ffi::c_int = 6 as ::core::ffi::c_int;
-pub const LOG_DEBUG: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-pub const LOG_USER: ::core::ffi::c_int = (1 as ::core::ffi::c_int) << 3 as ::core::ffi::c_int;
-pub const LOG_DAEMON: ::core::ffi::c_int = (3 as ::core::ffi::c_int) << 3 as ::core::ffi::c_int;
-pub const LOG_PID: ::core::ffi::c_int = 0x1 as ::core::ffi::c_int;
-pub const LOG_NDELAY: ::core::ffi::c_int = 0x8 as ::core::ffi::c_int;
-pub const MFSLOG_DEBUG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const MFSLOG_INFO: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const MFSLOG_NOTICE: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
+pub type FILE = libc::FILE;
+
+use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+
+pub const LOG_ERR: ::core::ffi::c_int = 3;
+pub const LOG_WARNING: ::core::ffi::c_int = 4;
+pub const LOG_NOTICE: ::core::ffi::c_int = 5;
+pub const LOG_INFO: ::core::ffi::c_int = 6;
+pub const LOG_DEBUG: ::core::ffi::c_int = 7;
+pub const LOG_USER: ::core::ffi::c_int = 1 << 3;
+pub const LOG_DAEMON: ::core::ffi::c_int = 3 << 3;
+pub const LOG_PID: ::core::ffi::c_int = 0x1;
+pub const LOG_NDELAY: ::core::ffi::c_int = 0x8;
+pub const MFSLOG_DEBUG: ::core::ffi::c_int = 0;
+pub const MFSLOG_INFO: ::core::ffi::c_int = 1;
+pub const MFSLOG_NOTICE: ::core::ffi::c_int = 2;
 pub const MFSLOG_WARNING: ::core::ffi::c_int = 3;
-pub const MFSLOG_ERR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const LOGBUFFSIZE: ::core::ffi::c_int = 2048 as ::core::ffi::c_int;
-pub const MSGBUFFSIZE: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
-static mut mfs_log_sink: Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()> = None;
-static mut force_stderr: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut use_colors: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-static mut stderr_active: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-static mut mfs_log_min_level: ::core::ffi::c_int = MFSLOG_INFO;
-static mut mfs_log_elevate_to: ::core::ffi::c_int = MFSLOG_NOTICE;
-static mut syslog_open: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[unsafe(no_mangle)]
-pub static mut mfs_log_priority_strings: [*const ::core::ffi::c_char; 5] = [
+pub const MFSLOG_ERR: ::core::ffi::c_int = 4;
+pub const MFSLOG_PRI_MIN: ::core::ffi::c_int = MFSLOG_DEBUG;
+pub const MFSLOG_PRI_MAX: ::core::ffi::c_int = MFSLOG_ERR;
+pub const LOGBUFFSIZE: usize = 2048;
+pub const MSGBUFFSIZE: usize = 4096;
+pub const BT_BUF_SIZE: ::core::ffi::c_int = 100;
+
+unsafe extern "C" {
+    fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
+    // libc crate doesn't expose these (variadic / statics)
+    static mut stderr: *mut FILE;
+    fn vfprintf(s: *mut FILE, format: *const ::core::ffi::c_char, arg: ::core::ffi::VaList) -> ::core::ffi::c_int;
+    fn vsnprintf(s: *mut ::core::ffi::c_char, n: size_t, format: *const ::core::ffi::c_char, arg: ::core::ffi::VaList) -> ::core::ffi::c_int;
+    fn fprintf(s: *mut FILE, format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
+    fn snprintf(s: *mut ::core::ffi::c_char, n: size_t, format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
+}
+
+static MFS_LOG_SINK: AtomicPtr<::core::ffi::c_void> =
+    AtomicPtr::new(std::ptr::null_mut());
+static FORCE_STDERR: AtomicI32 = AtomicI32::new(0);
+static USE_COLORS: AtomicI32 = AtomicI32::new(1);
+static STDERR_ACTIVE: AtomicI32 = AtomicI32::new(1);
+static MFS_LOG_MIN_LEVEL: AtomicI32 = AtomicI32::new(MFSLOG_INFO);
+static MFS_LOG_ELEVATE_TO: AtomicI32 = AtomicI32::new(MFSLOG_NOTICE);
+static SYSLOG_OPEN: AtomicI32 = AtomicI32::new(0);
+static LFD: AtomicPtr<FILE> = AtomicPtr::new(std::ptr::null_mut());
+
+// SAFETY (Sync): entries are immutable pointers to immutable static bytes.
+unsafe impl Sync for PriorityStrings {}
+struct PriorityStrings([*const ::core::ffi::c_char; 5]);
+static PRIORITY_STRINGS: PriorityStrings = PriorityStrings([
     b"debug\0".as_ptr() as *const ::core::ffi::c_char,
     b"info\0".as_ptr() as *const ::core::ffi::c_char,
     b"notice\0".as_ptr() as *const ::core::ffi::c_char,
     b"warning\0".as_ptr() as *const ::core::ffi::c_char,
     b"error\0".as_ptr() as *const ::core::ffi::c_char,
-];
-pub const MFSLOG_PRI_MIN: ::core::ffi::c_int = MFSLOG_DEBUG;
-pub const MFSLOG_PRI_MAX: ::core::ffi::c_int = MFSLOG_ERR;
-unsafe extern "C" fn mfs_log_pri_to_str(
-    mut priority: ::core::ffi::c_int,
-) -> *const ::core::ffi::c_char {
-    unsafe {
-        if priority >= MFSLOG_PRI_MIN && priority <= MFSLOG_PRI_MAX {
-            return mfs_log_priority_strings[priority as usize];
-        }
-        return b"unknown\0".as_ptr() as *const ::core::ffi::c_char;
+]);
+
+const COLOR_DEBUG: &[u8] = b"\x1B[0;90m\0";
+const COLOR_INFO: &[u8] = b"\0";
+const COLOR_NOTICE: &[u8] = b"\x1B[1;97m\0";
+const COLOR_WARNING: &[u8] = b"\x1B[1;93m\0";
+const COLOR_ERROR: &[u8] = b"\x1B[1;31m\0";
+const COLOR_CLEAR: &[u8] = b"\x1B(B\x1B[m\0";
+
+fn pri_to_str(priority: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    if (MFSLOG_PRI_MIN..=MFSLOG_PRI_MAX).contains(&priority) {
+        PRIORITY_STRINGS.0[priority as usize]
+    } else {
+        b"unknown\0".as_ptr() as *const ::core::ffi::c_char
     }
 }
+
+fn pri_to_colorstr(priority: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    let s: &[u8] = match priority {
+        MFSLOG_DEBUG => COLOR_DEBUG,
+        MFSLOG_INFO => COLOR_INFO,
+        MFSLOG_NOTICE => COLOR_NOTICE,
+        MFSLOG_WARNING => COLOR_WARNING,
+        MFSLOG_ERR => COLOR_ERROR,
+        _ => b"\0",
+    };
+    s.as_ptr() as *const ::core::ffi::c_char
+}
+
+fn priority_convert(priority: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    let elevated = priority.max(MFS_LOG_ELEVATE_TO.load(Ordering::Relaxed));
+    match elevated {
+        MFSLOG_DEBUG => LOG_DEBUG,
+        MFSLOG_INFO => LOG_INFO,
+        MFSLOG_NOTICE => LOG_NOTICE,
+        MFSLOG_WARNING => LOG_WARNING,
+        _ => LOG_ERR,
+    }
+}
+
+/// # Safety
+/// `pristr` must be a valid NUL-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_log_str_to_pri(
     mut pristr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    unsafe {
-        let mut c: ::core::ffi::c_char = 0;
-        let mut i: ::core::ffi::c_int = 0;
-        let mut j: ::core::ffi::c_int = 0;
-        let mut fpri: ::core::ffi::c_int = 0;
-        let mut fpristr: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-        fpristr = ::core::ptr::null::<::core::ffi::c_char>();
-        fpri = -1 as ::core::ffi::c_int;
-        i = 0 as ::core::ffi::c_int;
-        while *pristr.offset(i as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            c = *pristr.offset(i as isize);
-            if c as ::core::ffi::c_int >= 'A' as ::core::ffi::c_int
-                && c as ::core::ffi::c_int <= 'Z' as ::core::ffi::c_int
-            {
-                c = (c as ::core::ffi::c_int
-                    + ('a' as ::core::ffi::c_int - 'A' as ::core::ffi::c_int))
-                    as ::core::ffi::c_char;
+    // SAFETY: per fn contract.
+    let s = unsafe { std::ffi::CStr::from_ptr(pristr) }.to_bytes();
+    let mut fpri = -1;
+    let mut fpri_idx: Option<usize> = None;
+    for (i, &c0) in s.iter().enumerate() {
+        let c = c0.to_ascii_lowercase();
+        if !c.is_ascii_lowercase() {
+            return -1;
+        }
+        match fpri_idx {
+            Some(j) => {
+                // compare against the already-chosen candidate at same pos
+                // SAFETY: PRIORITY_STRINGS entries are static NUL-terminated.
+                let cand = unsafe { *PRIORITY_STRINGS.0[j].add(i) } as u8;
+                if cand != c {
+                    return -1;
+                }
             }
-            if c as ::core::ffi::c_int >= 'a' as ::core::ffi::c_int
-                && c as ::core::ffi::c_int <= 'z' as ::core::ffi::c_int
-            {
-                if !fpristr.is_null() {
-                    if *fpristr.offset(i as isize) as ::core::ffi::c_int != c as ::core::ffi::c_int
-                    {
-                        return -1 as ::core::ffi::c_int;
-                    }
-                } else {
-                    j = MFSLOG_PRI_MIN;
-                    while j <= MFSLOG_PRI_MAX {
-                        if *mfs_log_priority_strings[j as usize].offset(i as isize)
-                            as ::core::ffi::c_int
-                            == c as ::core::ffi::c_int
-                        {
-                            fpristr = mfs_log_priority_strings[j as usize];
-                            fpri = j;
-                        }
-                        j += 1;
-                    }
-                    if fpristr.is_null() {
-                        return -1 as ::core::ffi::c_int;
+            None => {
+                for j in MFSLOG_PRI_MIN..=MFSLOG_PRI_MAX {
+                    // SAFETY: static NUL-terminated strings.
+                    let cand = unsafe { *PRIORITY_STRINGS.0[j as usize].add(i) } as u8;
+                    if cand == c {
+                        fpri_idx = Some(j as usize);
+                        fpri = j;
                     }
                 }
-            } else {
-                return -1 as ::core::ffi::c_int;
+                if fpri_idx.is_none() {
+                    return -1; // none matched
+                }
             }
-            i += 1;
         }
-        return fpri;
     }
+    fpri
 }
-pub const COLOR_DEBUG: [::core::ffi::c_char; 8] =
-    unsafe { ::core::mem::transmute::<[u8; 8], [::core::ffi::c_char; 8]>(*b"\x1B[0;90m\0") };
-pub const COLOR_INFO: [::core::ffi::c_char; 1] =
-    unsafe { ::core::mem::transmute::<[u8; 1], [::core::ffi::c_char; 1]>(*b"\0") };
-pub const COLOR_NOTICE: [::core::ffi::c_char; 8] =
-    unsafe { ::core::mem::transmute::<[u8; 8], [::core::ffi::c_char; 8]>(*b"\x1B[1;97m\0") };
-pub const COLOR_WARNING: [::core::ffi::c_char; 8] =
-    unsafe { ::core::mem::transmute::<[u8; 8], [::core::ffi::c_char; 8]>(*b"\x1B[1;93m\0") };
-pub const COLOR_ERROR: [::core::ffi::c_char; 8] =
-    unsafe { ::core::mem::transmute::<[u8; 8], [::core::ffi::c_char; 8]>(*b"\x1B[1;31m\0") };
-pub const COLOR_CLEAR: [::core::ffi::c_char; 7] =
-    unsafe { ::core::mem::transmute::<[u8; 7], [::core::ffi::c_char; 7]>(*b"\x1B(B\x1B[m\0") };
-unsafe extern "C" fn mfs_log_priority_convert(
-    mut priority: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut elevated_priority: ::core::ffi::c_int = 0;
-        if priority < mfs_log_elevate_to {
-            elevated_priority = mfs_log_elevate_to;
-        } else {
-            elevated_priority = priority;
-        }
-        match elevated_priority {
-            MFSLOG_DEBUG => return LOG_DEBUG,
-            MFSLOG_INFO => return LOG_INFO,
-            MFSLOG_NOTICE => return LOG_NOTICE,
-            MFSLOG_WARNING => return LOG_WARNING,
-            _ => return LOG_ERR,
-        };
-    }
-}
-unsafe extern "C" fn mfs_log_pri_to_colorstr(
-    mut priority: ::core::ffi::c_int,
-) -> *const ::core::ffi::c_char {
-    unsafe {
-        match priority {
-            MFSLOG_DEBUG => return COLOR_DEBUG.as_ptr(),
-            MFSLOG_INFO => return COLOR_INFO.as_ptr(),
-            MFSLOG_NOTICE => return COLOR_NOTICE.as_ptr(),
-            MFSLOG_WARNING => return COLOR_WARNING.as_ptr(),
-            MFSLOG_ERR => return COLOR_ERROR.as_ptr(),
-            _ => {}
-        }
-        return b"\0".as_ptr() as *const ::core::ffi::c_char;
-    }
-}
+
+/// Debug backtrace logger (mfsdebug.txt). Variadic leaf.
+///
+/// # Safety
+/// C-variadic; `fmt` (and file/func when non-null) must be valid C strings,
+/// with arguments matching fmt, per the C caller contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_file_log(
     mut file: *const ::core::ffi::c_char,
@@ -259,72 +157,62 @@ pub unsafe extern "C" fn mfs_file_log(
     mut fmt: *const ::core::ffi::c_char,
     mut c2rust_args: ...
 ) {
-    unsafe {
-        let mut i: ::core::ffi::c_int = 0;
-        let mut n: ::core::ffi::c_int = 0;
-        let mut btbuf: [*mut ::core::ffi::c_void; 100] =
-            [::core::ptr::null_mut::<::core::ffi::c_void>(); 100];
-        let mut btstr: *mut *mut ::core::ffi::c_char =
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-        let mut ap: ::core::ffi::VaList;
-        static mut lfd: *mut FILE = ::core::ptr::null_mut::<FILE>();
-        if fmt.is_null() {
-            if !lfd.is_null() {
-                fclose(lfd);
-                lfd = ::core::ptr::null_mut::<FILE>();
-            }
+    if fmt.is_null() {
+        let lfd = LFD.swap(std::ptr::null_mut(), Ordering::Relaxed);
+        if !lfd.is_null() {
+            // SAFETY: extern; lfd was opened by us and not yet closed.
+            unsafe { libc::fclose(lfd) };
+        }
+        return;
+    }
+    let mut lfd = LFD.load(Ordering::Relaxed);
+    if lfd.is_null() {
+        // SAFETY: extern; literals are valid C strings.
+        lfd = unsafe { libc::fopen(b"mfsdebug.txt\0".as_ptr() as *const _, b"a\0".as_ptr() as *const _) };
+        if lfd.is_null() {
             return;
         }
-        if lfd.is_null() {
-            lfd = fopen(
-                b"mfsdebug.txt\0".as_ptr() as *const ::core::ffi::c_char,
-                b"a\0".as_ptr() as *const ::core::ffi::c_char,
-            ) as *mut FILE;
-            if lfd.is_null() {
-                return;
+        LFD.store(lfd, Ordering::Relaxed);
+    }
+    // SAFETY: extern; file/func are valid C strings per contract; fmt and
+    // the variadic pack are forwarded to vfprintf unmodified.
+    unsafe {
+        libc::fprintf(lfd, b"%s:%d (%s):\0".as_ptr() as *const _, file, line, func);
+        let ap = c2rust_args.clone();
+        vfprintf(lfd, fmt, ap);
+        libc::fprintf(lfd, b"\n\0".as_ptr() as *const _);
+    }
+    if bt != 0 {
+        let mut btbuf = [std::ptr::null_mut::<::core::ffi::c_void>(); 100];
+        // SAFETY: extern; btbuf valid for 100 entries.
+        let n = unsafe { libc::backtrace(btbuf.as_mut_ptr(), BT_BUF_SIZE) };
+        // SAFETY: extern; btbuf filled for n entries by the call above.
+        let btstr = unsafe { libc::backtrace_symbols(btbuf.as_ptr(), n) };
+        if !btstr.is_null() {
+            for i in 1..n {
+                // SAFETY: extern; btstr valid for n strings; lfd open.
+                unsafe {
+                    libc::fprintf(lfd, b"\t%u: %s\n\0".as_ptr() as *const _, i, *btstr.offset(i as isize))
+                };
             }
-        }
-        fprintf(
-            lfd,
-            b"%s:%d (%s):\0".as_ptr() as *const ::core::ffi::c_char,
-            file,
-            line,
-            func,
-        );
-        ap = c2rust_args.clone();
-        vfprintf(lfd, fmt, ap.clone());
-        fprintf(lfd, b"\n\0".as_ptr() as *const ::core::ffi::c_char);
-        if bt != 0 {
-            n = backtrace(&raw mut btbuf as *mut *mut ::core::ffi::c_void, BT_BUF_SIZE);
-            btstr = backtrace_symbols(&raw mut btbuf as *mut *mut ::core::ffi::c_void, n);
-            if !btstr.is_null() {
-                i = 1 as ::core::ffi::c_int;
-                while i < n {
-                    fprintf(
-                        lfd,
-                        b"\t%u: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                        i,
-                        *btstr.offset(i as isize),
-                    );
-                    i += 1;
-                }
-                free(btstr as *mut ::core::ffi::c_void);
-            } else {
-                i = 1 as ::core::ffi::c_int;
-                while i < n {
-                    fprintf(
-                        lfd,
-                        b"\t%u: [%p]\n\0".as_ptr() as *const ::core::ffi::c_char,
-                        i,
-                        btbuf[i as usize],
-                    );
-                    i += 1;
-                }
+            // SAFETY: extern; btstr from backtrace_symbols.
+            unsafe { libc::free(btstr as *mut ::core::ffi::c_void) };
+        } else {
+            for i in 1..n {
+                // SAFETY: extern; lfd open; btbuf entries printable as %p.
+                unsafe {
+                    libc::fprintf(lfd, b"\t%u: [%p]\n\0".as_ptr() as *const _, i, btbuf[i as usize])
+                };
             }
         }
     }
 }
-pub const BT_BUF_SIZE: ::core::ffi::c_int = 100 as ::core::ffi::c_int;
+
+/// Main logger. Variadic leaf — the message is still formatted by libc's
+/// vsnprintf (variadic packs cannot be constructed in safe Rust).
+///
+/// # Safety
+/// C-variadic; `fmt` must be a valid C string with matching arguments.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_log(
     mut mode: ::core::ffi::c_int,
@@ -332,161 +220,160 @@ pub unsafe extern "C" fn mfs_log(
     mut fmt: *const ::core::ffi::c_char,
     mut c2rust_args: ...
 ) {
+    if priority < MFS_LOG_MIN_LEVEL.load(Ordering::Relaxed) {
+        return;
+    }
+    let with_errno = mode & 1 != 0;
+    let errstr = if with_errno {
+        // SAFETY: extern; errno location valid for this thread.
+        unsafe { strerr(*libc::__errno_location()) }
+    } else {
+        std::ptr::null()
+    };
+    let mut p = [0 as ::core::ffi::c_char; LOGBUFFSIZE];
+    // SAFETY: p valid for LOGBUFFSIZE; fmt+args forwarded per contract.
+    let n = unsafe {
+        let ap = c2rust_args.clone();
+        vsnprintf(p.as_mut_ptr(), LOGBUFFSIZE, fmt, ap)
+    };
+    if n < 0 {
+        return;
+    }
+    p[LOGBUFFSIZE - 1] = 0;
+    let mut msg = [0 as ::core::ffi::c_char; MSGBUFFSIZE];
+    // SAFETY: msg/p valid; errstr is a valid C string when used.
     unsafe {
-        let mut msg: [::core::ffi::c_char; 4096] = [0; 4096];
-        let mut p: [::core::ffi::c_char; 2048] = [0; 2048];
-        let mut n: ::core::ffi::c_int = 0;
-        let mut ap: ::core::ffi::VaList;
-        let mut _mfs_errstring: *const ::core::ffi::c_char =
-            ::core::ptr::null::<::core::ffi::c_char>();
-        if priority < mfs_log_min_level {
-            return;
-        }
-        if mode & 1 as ::core::ffi::c_int != 0 {
-            _mfs_errstring = strerr(*__errno_location());
-        } else {
-            _mfs_errstring = ::core::ptr::null::<::core::ffi::c_char>();
-        }
-        ap = c2rust_args.clone();
-        n = vsnprintf(
-            &raw mut p as *mut ::core::ffi::c_char,
-            LOGBUFFSIZE as size_t,
-            fmt,
-            ap.clone(),
-        );
-        if n < 0 as ::core::ffi::c_int {
-            return;
-        }
-        p[(LOGBUFFSIZE - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
-        if mode & 1 as ::core::ffi::c_int != 0 {
+        if with_errno {
             snprintf(
-                &raw mut msg as *mut ::core::ffi::c_char,
-                MSGBUFFSIZE as size_t,
-                b"%s: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                &raw mut p as *mut ::core::ffi::c_char,
-                _mfs_errstring,
+                msg.as_mut_ptr(),
+                MSGBUFFSIZE,
+                b"%s: %s\0".as_ptr() as *const _,
+                p.as_ptr(),
+                errstr,
             );
         } else {
-            snprintf(
-                &raw mut msg as *mut ::core::ffi::c_char,
-                MSGBUFFSIZE as size_t,
-                b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-                &raw mut p as *mut ::core::ffi::c_char,
-            );
+            snprintf(msg.as_mut_ptr(), MSGBUFFSIZE, b"%s\0".as_ptr() as *const _, p.as_ptr());
         }
-        msg[(MSGBUFFSIZE - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
-        let sink = *&raw const mfs_log_sink;
-        if sink.is_some() {
-            sink.expect("non-null function pointer")(&raw mut msg as *mut ::core::ffi::c_char);
-        }
-        if syslog_open != 0 {
-            syslog(
-                mfs_log_priority_convert(priority),
-                b"[%s] %s\0".as_ptr() as *const ::core::ffi::c_char,
-                mfs_log_pri_to_str(priority),
-                &raw mut msg as *mut ::core::ffi::c_char,
-            );
-        }
-        if stderr_active == 0 as ::core::ffi::c_int {
-            return;
-        }
-        if syslog_open == 0 as ::core::ffi::c_int
-            || force_stderr != 0
-            || mode & 2 as ::core::ffi::c_int != 0
-        {
-            if use_colors != 0 {
+    }
+    msg[MSGBUFFSIZE - 1] = 0;
+    let sink = MFS_LOG_SINK.load(Ordering::Relaxed);
+    if !sink.is_null() {
+        let sink: unsafe extern "C" fn(*const ::core::ffi::c_char) =
+            // SAFETY: sink was stored by mfs_log_set_sink_function from this
+            // exact fn-pointer type.
+            unsafe { std::mem::transmute(sink) };
+        // SAFETY: sink contract; msg is NUL-terminated.
+        unsafe { sink(msg.as_ptr()) };
+    }
+    if SYSLOG_OPEN.load(Ordering::Relaxed) != 0 {
+        // SAFETY: extern; both strings valid C strings.
+        unsafe {
+            libc::syslog(
+                priority_convert(priority),
+                b"[%s] %s\0".as_ptr() as *const _,
+                pri_to_str(priority),
+                msg.as_ptr(),
+            )
+        };
+    }
+    if STDERR_ACTIVE.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    if SYSLOG_OPEN.load(Ordering::Relaxed) == 0
+        || FORCE_STDERR.load(Ordering::Relaxed) != 0
+        || mode & 2 != 0
+    {
+        // SAFETY: extern; stderr valid; all strings NUL-terminated.
+        unsafe {
+            if USE_COLORS.load(Ordering::Relaxed) != 0 {
                 fprintf(
                     stderr,
-                    b"%s%s%s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    mfs_log_pri_to_colorstr(priority),
-                    &raw mut msg as *mut ::core::ffi::c_char,
-                    COLOR_CLEAR.as_ptr(),
+                    b"%s%s%s\n\0".as_ptr() as *const _,
+                    pri_to_colorstr(priority),
+                    msg.as_ptr(),
+                    COLOR_CLEAR.as_ptr() as *const ::core::ffi::c_char,
                 );
             } else {
-                fprintf(
-                    stderr,
-                    b"%s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    &raw mut msg as *mut ::core::ffi::c_char,
-                );
+                fprintf(stderr, b"%s\n\0".as_ptr() as *const _, msg.as_ptr());
             }
         }
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_set_min_level(mut minlevel: ::core::ffi::c_int) {
-    unsafe {
-        mfs_log_min_level = minlevel;
-    }
+pub extern "C" fn mfs_log_set_min_level(mut minlevel: ::core::ffi::c_int) {
+    MFS_LOG_MIN_LEVEL.store(minlevel, Ordering::Relaxed);
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_set_elevate_to(mut elevateto: ::core::ffi::c_int) {
-    unsafe {
-        mfs_log_elevate_to = elevateto;
-    }
+pub extern "C" fn mfs_log_set_elevate_to(mut elevateto: ::core::ffi::c_int) {
+    MFS_LOG_ELEVATE_TO.store(elevateto, Ordering::Relaxed);
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_set_sink_function(
-    mut s: Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>,
+pub extern "C" fn mfs_log_set_sink_function(
+    mut s: Option<unsafe extern "C" fn(*const ::core::ffi::c_char)>,
 ) {
-    unsafe {
-        mfs_log_sink = s;
-    }
+    MFS_LOG_SINK.store(
+        s.map(|f| f as *mut ::core::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut()),
+        Ordering::Relaxed,
+    );
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_detach_stderr() {
-    unsafe {
-        stderr_active = 0 as ::core::ffi::c_int;
-    }
+pub extern "C" fn mfs_log_detach_stderr() {
+    STDERR_ACTIVE.store(0, Ordering::Relaxed);
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_detach_syslog() {
-    unsafe {
-        if syslog_open != 0 {
-            closelog();
-        }
-        syslog_open = 0 as ::core::ffi::c_int;
+pub extern "C" fn mfs_log_detach_syslog() {
+    if SYSLOG_OPEN.swap(0, Ordering::Relaxed) != 0 {
+        // SAFETY: extern; log was open.
+        unsafe { libc::closelog() };
     }
 }
+
+/// # Safety
+/// C ABI; closes syslog and the debug log file.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_log_term() {
+    mfs_log_detach_syslog();
+    // SAFETY: fmt null → close path, no variadic args.
     unsafe {
-        if syslog_open != 0 {
-            closelog();
-        }
         mfs_file_log(
-            ::core::ptr::null::<::core::ffi::c_char>(),
-            0 as ::core::ffi::c_int,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-            0 as ::core::ffi::c_int,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-    }
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+        )
+    };
 }
+
+/// # Safety
+/// `ident` must be null or a valid C string that outlives the open log
+/// (openlog keeps the pointer on some libcs; daemons pass static strings).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_log_init(
     mut ident: *const ::core::ffi::c_char,
     mut daemonflag: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    unsafe {
-        if !ident.is_null() {
-            if daemonflag != 0 {
-                openlog(ident, LOG_PID | LOG_NDELAY, LOG_DAEMON);
-            } else {
-                openlog(ident, LOG_PID | LOG_NDELAY, LOG_USER);
-            }
-            syslog_open = 1 as ::core::ffi::c_int;
-        }
-        force_stderr = if daemonflag != 0 {
-            0 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
+    if !ident.is_null() {
+        // SAFETY: per fn contract.
+        unsafe {
+            libc::openlog(
+                ident,
+                LOG_PID | LOG_NDELAY,
+                if daemonflag != 0 { LOG_DAEMON } else { LOG_USER },
+            )
         };
-        use_colors = if isatty(STDERR_FILENO) != 0 {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        };
-        stderr_active = 1 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+        SYSLOG_OPEN.store(1, Ordering::Relaxed);
     }
+    FORCE_STDERR.store(if daemonflag != 0 { 0 } else { 1 }, Ordering::Relaxed);
+    // SAFETY: extern; fd 2.
+    let tty = unsafe { libc::isatty(2) };
+    USE_COLORS.store(if tty != 0 { 1 } else { 0 }, Ordering::Relaxed);
+    STDERR_ACTIVE.store(1, Ordering::Relaxed);
+    0
 }

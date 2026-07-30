@@ -1,3 +1,11 @@
+//! Chart data files (binary chart format + CGI rendering), P1 status.
+//!
+//! MIGRATION-IOU: blocked_on: mfscommon::charts
+//! Not migrated in P1: 5.2k lines of binary-format I/O and rendering where a
+//! subtle mistake corrupts statistics history. Named consumer phases:
+//! P2 (mfsgui — renders these charts) and P5 (mfsmaster — writes them via
+//! chartsdata). Until then the module stays verbatim c2rust with this note.
+//!
 pub enum _IO_wide_data {}
 pub enum _IO_codecvt {}
 pub enum _IO_marker {}

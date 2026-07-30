@@ -207,4 +207,4 @@ Columns: item · blocking crate/module · reason · created (phase) · consumed
 
 | item | blocked_on | reason | created | consumed | status |
 | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | — (empty as of P0 start) |
+| mfscommon::charts | P2 (mfsgui renders charts) + P5 (mfsmaster writes via chartsdata) | 5.2k lines of binary chart-format I/O + CGI rendering; subtle mistakes corrupt stats history; needs its owning daemons' phases for behavioral verification | P1 (2026-07-30) | — | open |
