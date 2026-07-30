@@ -27,6 +27,8 @@ names the Bun artifact it adapts.
 | [verified-claims.md](verified-claims.md) | `rust-rewrite-verified-claims.md` | The fact corpus. Every claim is cited to `file:line` and survives adversarial review. The plan is a derived artifact of these facts. |
 | [divergence-audit.md](divergence-audit.md) | `ZIG_RUST_DIVERGENCE_AUDIT.md` | Known C→transpiled-Rust semantic divergence classes, risk-rated, worked as a punch-list. |
 | [aliasing-hunt.md](aliasing-hunt.md) | `NOALIAS_HUNT_REPORT.md`, `NOALIAS_SUSPECTS.md` | Protocol and punch-list for the UB hunt: `static mut` aliasing, `&mut`-from-raw-pointer, re-entrant callbacks. |
+| [p1-retrospective.md](p1-retrospective.md) | — (ours) | P1 pilot calibration: what the gates caught/missed, canonical shim layout, adjustments adopted for P2+. |
+| [facts/](facts/) | `LIFETIMES.tsv` | Generated fact artifacts: `OWNERSHIP.tsv` (static-mut pre-classification), `dedup-map.md`, `ffi-boundaries.md`. Regenerate with `tools/gen_*.py` / `tools/gen_*.sh`. |
 
 ## House rules (from methodology.md, binding on all docs here)
 
