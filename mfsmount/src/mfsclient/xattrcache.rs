@@ -1,49 +1,22 @@
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-use ::c2rust_bitfields;
+//! xattr cache — safe Rust rewrite (P4).
+//!
+//! Original: MooseFS mfsclient/xattrcache.c. Cache of getxattr answers
+//! keyed by (node, uid, gid, name), absolute-expiry entries in an
+//! insertion-ordered LRU list, values refcounted (lcnt) so a caller can
+//! hold a value pointer across the get→rel window while the cache evicts.
+//!
+//! Safe core in `imp`: HashMap + insertion-ordered VecDeque (timestamps
+//! are monotonic so insertion order IS expiry order), values as
+//! Rc<XattrValue> — the C lcnt refcount maps 1:1 onto Rc: get clones into
+//! a raw token (Rc::into_raw), rel drops it (Rc::from_raw), eviction drops
+//! the cache's handle while readers keep theirs. All Rc traffic happens
+//! under the module mutex, so non-atomic refcounts are sound.
+
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn abort() -> !;
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memcmp(
-        __s1: *const ::core::ffi::c_void,
-        __s2: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const pthread_mutexattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    static mut stderr: *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn mfs_log(
-        mode: ::core::ffi::c_int,
-        priority: ::core::ffi::c_int,
-        fmt: *const ::core::ffi::c_char,
-        ...
-    );
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
-    unsafe fn monotonic_useconds() -> uint64_t;
+    unsafe fn monotonic_useconds() -> int64_t;
 }
-pub type size_t = usize;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-pub type int64_t = i64;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct __pthread_internal_list {
@@ -65,12 +38,6 @@ pub struct __pthread_mutex_s {
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub union pthread_mutexattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
 pub union pthread_mutex_t {
     pub __data: __pthread_mutex_s,
     pub __size: [::core::ffi::c_char; 40],
@@ -78,1706 +45,338 @@ pub union pthread_mutex_t {
 }
 pub type uint8_t = u8;
 pub type uint32_t = u32;
-pub type uint64_t = u64;
-#[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    #[bitfield(name = "_flags2", ty = "::core::ffi::c_int", bits = "0..=23")]
-    pub _flags2: [u8; 3],
-    pub _short_backupbuf: [::core::ffi::c_char; 1],
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused3: ::core::ffi::c_int,
-    pub _total_written: __uint64_t,
-    pub _unused2: [::core::ffi::c_char; 8],
+pub type int64_t = i64;
+pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
+
+#[deny(unsafe_code)]
+pub mod imp {
+    use std::collections::{HashMap, VecDeque};
+    use std::rc::Rc;
+
+    /// One cached xattr answer; the Rc replaces C's lcnt refcount.
+    pub struct XattrValue {
+        pub value: Option<Box<[u8]>>,
+        pub vleng: u32,
+        pub status: i32,
+    }
+
+    struct Entry {
+        value: Rc<XattrValue>,
+        utimestamp: i64, // absolute expiry, microseconds
+    }
+
+    type Key = (u32, u32, u32, Box<[u8]>); // (node, uid, gid, name)
+
+    pub struct XattrCache {
+        map: HashMap<Key, Entry>,
+        /// insertion order == expiry order (monotonic clock)
+        lru: VecDeque<Key>,
+        timeout_us: i64,
+    }
+
+    impl XattrCache {
+        pub fn new(timeout_us: i64) -> Self {
+            XattrCache {
+                map: HashMap::new(),
+                lru: VecDeque::new(),
+                timeout_us,
+            }
+        }
+
+        /// drop entries with utimestamp < now (LRU head walk, as C)
+        fn invalidate(&mut self, now: i64) {
+            while let Some(k) = self.lru.front() {
+                let expired = match self.map.get(k) {
+                    Some(e) => e.utimestamp < now,
+                    None => true, // stale node (deleted/overwritten)
+                };
+                if !expired {
+                    break;
+                }
+                let k = self.lru.pop_front().unwrap();
+                if let Some(e) = self.map.get(&k) {
+                    if e.utimestamp < now {
+                        self.map.remove(&k);
+                    }
+                }
+            }
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        pub fn get(
+            &mut self,
+            node: u32,
+            uid: u32,
+            gid: u32,
+            name: &[u8],
+            now: i64,
+        ) -> Option<Rc<XattrValue>> {
+            self.invalidate(now);
+            let key: Key = (node, uid, gid, name.into());
+            self.map.get(&key).map(|e| Rc::clone(&e.value))
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        pub fn set(
+            &mut self,
+            node: u32,
+            uid: u32,
+            gid: u32,
+            name: &[u8],
+            value: Option<&[u8]>,
+            status: i32,
+            now: i64,
+        ) {
+            let key: Key = (node, uid, gid, name.into());
+            if self.map.remove(&key).is_some() {
+                // old LRU node goes stale; dropped at the head walk
+            }
+            let v = XattrValue {
+                vleng: value.as_ref().map_or(0, |v| v.len()) as u32,
+                value: value.map(|v| v.to_vec().into_boxed_slice()),
+                status,
+            };
+            self.map.insert(
+                key.clone(),
+                Entry {
+                    value: Rc::new(v),
+                    utimestamp: now + self.timeout_us,
+                },
+            );
+            self.lru.push_back(key);
+        }
+
+        /// delete ALL uid/gid variants of (node, name)
+        pub fn del(&mut self, node: u32, name: &[u8]) {
+            self.map
+                .retain(|(n, _, _, nm), _| !(*n == node && nm.as_ref() == name));
+            // their LRU nodes go stale
+        }
+
+        pub fn term(&mut self) {
+            self.map.clear();
+            self.lru.clear();
+        }
+
+        #[cfg(test)]
+        pub fn len(&self) -> usize {
+            self.map.len()
+        }
+    }
 }
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _xattr_cache_value {
-    pub lcnt: uint32_t,
-    pub value: *const uint8_t,
-}
-pub type xattr_cache_value = _xattr_cache_value;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _xattr_cache_entry {
-    pub hash: uint32_t,
-    pub node: uint32_t,
-    pub uid: uint32_t,
-    pub gid: uint32_t,
-    pub nleng: uint32_t,
-    pub vleng: uint32_t,
-    pub status: ::core::ffi::c_int,
-    pub name: *const uint8_t,
-    pub value: *mut xattr_cache_value,
-    pub utimestamp: int64_t,
-    pub hashnext: *mut _xattr_cache_entry,
-    pub hashprev: *mut *mut _xattr_cache_entry,
-    pub lrunext: *mut _xattr_cache_entry,
-    pub lruprev: *mut *mut _xattr_cache_entry,
-}
-pub type xattr_cache_entry = _xattr_cache_entry;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const MFSLOG_ERR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const HASHSIZE: ::core::ffi::c_int = 65536 as ::core::ffi::c_int;
-static mut lruhead: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-static mut lrutail: *mut *mut xattr_cache_entry = ::core::ptr::null_mut::<*mut xattr_cache_entry>();
-static mut hashtab: *mut *mut xattr_cache_entry = ::core::ptr::null_mut::<*mut xattr_cache_entry>();
-static mut xattr_cache_timeout: int64_t = 0;
+
+// ---------------------------------------------------------------------------
+// Boundary: module mutex + Rc↔raw-token conversion (C lcnt contract).
+// ---------------------------------------------------------------------------
+
+use imp::{XattrCache, XattrValue};
+use std::rc::Rc;
+
 static mut glock: pthread_mutex_t = pthread_mutex_t {
     __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
+        __lock: 0 as ::core::ffi::c_int,
+        __count: 0 as ::core::ffi::c_uint,
+        __owner: 0 as ::core::ffi::c_int,
+        __nusers: 0 as ::core::ffi::c_uint,
+        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
+        __spins: 0 as ::core::ffi::c_short,
+        __glibc_reserved: 0 as ::core::ffi::c_short,
+        __list: __pthread_internal_list {
             __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
             __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
         },
     },
 };
-#[inline]
-unsafe extern "C" fn xattr_cache_hash(
-    mut node: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-) -> uint32_t {
-    unsafe {
-        let mut hash: uint32_t = 0;
-        let mut i: uint32_t = 0;
-        hash = node
-            .wrapping_mul(0x5f2318bd as uint32_t)
-            .wrapping_add(nleng);
-        i = 0 as uint32_t;
-        while i < nleng {
-            hash = hash
-                .wrapping_mul(33 as uint32_t)
-                .wrapping_add(*name.offset(i as isize) as uint32_t);
-            i = i.wrapping_add(1);
-        }
-        return hash;
-    }
+static mut CACHE: Option<XattrCache> = None;
+
+/// SAFETY: set in xattr_cache_init before FUSE threads; accessed only with
+/// glock held afterwards.
+unsafe fn cache() -> &'static mut XattrCache {
+    unsafe { (*(&raw mut CACHE)).as_mut().unwrap_unchecked() }
 }
-#[inline]
-unsafe extern "C" fn xattr_cache_value_alloc() -> *mut xattr_cache_value {
-    unsafe {
-        let mut v: *mut xattr_cache_value = ::core::ptr::null_mut::<xattr_cache_value>();
-        v = malloc(::core::mem::size_of::<xattr_cache_value>()) as *mut xattr_cache_value;
-        if v.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                72 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"v\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                72 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"v\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if v
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut xattr_cache_value
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                72 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"v\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                72 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"v\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        (*v).lcnt = 1 as uint32_t;
-        (*v).value = ::core::ptr::null::<uint8_t>();
-        return v;
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_value_inc(mut v: *mut xattr_cache_value) {
-    unsafe {
-        (*v).lcnt = (*v).lcnt.wrapping_add(1);
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_value_dec(mut v: *mut xattr_cache_value) {
-    unsafe {
-        (*v).lcnt = (*v).lcnt.wrapping_sub(1);
-        if (*v).lcnt == 0 as uint32_t {
-            if !(*v).value.is_null() {
-                free((*v).value as *mut uint8_t as *mut ::core::ffi::c_void);
-            }
-            free(v as *mut ::core::ffi::c_void);
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_remove_entry(mut xce: *mut xattr_cache_entry) {
-    unsafe {
-        if !(*xce).hashnext.is_null() {
-            (*(*xce).hashnext).hashprev = (*xce).hashprev;
-        }
-        *(*xce).hashprev = (*xce).hashnext;
-        if !(*xce).lrunext.is_null() {
-            (*(*xce).lrunext).lruprev = (*xce).lruprev;
-        } else {
-            lrutail = (*xce).lruprev as *mut *mut xattr_cache_entry;
-        }
-        *(*xce).lruprev = (*xce).lrunext;
-        if !(*xce).name.is_null() {
-            free((*xce).name as *mut uint8_t as *mut ::core::ffi::c_void);
-        }
-        xattr_cache_value_dec((*xce).value);
-        free(xce as *mut ::core::ffi::c_void);
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_new(
-    mut node: uint32_t,
-    mut uid: uint32_t,
-    mut gid: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-    mut value: *const uint8_t,
-    mut vleng: uint32_t,
-    mut status: ::core::ffi::c_int,
-    mut utimestamp: int64_t,
-) {
-    unsafe {
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        let mut hash: uint32_t = 0;
-        hash = xattr_cache_hash(node, nleng, name);
-        xce = malloc(::core::mem::size_of::<xattr_cache_entry>()) as *mut xattr_cache_entry;
-        if xce.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                115 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"xce\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                115 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"xce\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if xce
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut xattr_cache_entry
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                115 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"xce\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr() as *const ::core::ffi::c_char,
-                115 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"xce\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        (*xce).hash = hash;
-        (*xce).node = node;
-        (*xce).uid = uid;
-        (*xce).gid = gid;
-        (*xce).nleng = nleng;
-        if nleng > 0 as uint32_t {
-            (*xce).name = malloc(nleng as size_t) as *const uint8_t;
-            if (*xce).name.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->name\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->name\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*xce).name
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *const uint8_t
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->name\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    123 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->name\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
-            memcpy(
-                (*xce).name as *mut uint8_t as *mut ::core::ffi::c_void,
-                name as *const ::core::ffi::c_void,
-                nleng as size_t,
-            );
-        } else {
-            (*xce).name = ::core::ptr::null::<uint8_t>();
-        }
-        (*xce).vleng = vleng;
-        (*xce).value = xattr_cache_value_alloc();
-        if vleng > 0 as uint32_t {
-            (*(*xce).value).value = malloc(vleng as size_t) as *const uint8_t;
-            if (*(*xce).value).value.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    132 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->value->value\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    132 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->value->value\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*(*xce).value).value
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *const uint8_t
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    132 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->value->value\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    132 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"xce->value->value\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_1,
-                );
-                abort();
-            }
-            memcpy(
-                (*(*xce).value).value as *mut uint8_t as *mut ::core::ffi::c_void,
-                value as *const ::core::ffi::c_void,
-                vleng as size_t,
-            );
-        }
-        (*xce).status = status;
-        (*xce).utimestamp = utimestamp;
-        (*xce).hashnext = *hashtab.offset(hash.wrapping_rem(HASHSIZE as uint32_t) as isize)
-            as *mut _xattr_cache_entry;
-        (*xce).hashprev = hashtab.offset(hash.wrapping_rem(HASHSIZE as uint32_t) as isize)
-            as *mut *mut _xattr_cache_entry;
-        if !(*xce).hashnext.is_null() {
-            (*(*xce).hashnext).hashprev = &raw mut (*xce).hashnext;
-        }
-        *hashtab.offset(hash.wrapping_rem(HASHSIZE as uint32_t) as isize) = xce;
-        (*xce).lrunext = ::core::ptr::null_mut::<_xattr_cache_entry>();
-        (*xce).lruprev = lrutail as *mut *mut _xattr_cache_entry;
-        *lrutail = xce;
-        lrutail = &raw mut (*xce).lrunext as *mut *mut xattr_cache_entry;
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_find(
-    mut node: uint32_t,
-    mut uid: uint32_t,
-    mut gid: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-) -> *mut xattr_cache_entry {
-    unsafe {
-        let mut hash: uint32_t = 0;
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        hash = xattr_cache_hash(node, nleng, name);
-        xce = *hashtab.offset(hash.wrapping_rem(HASHSIZE as uint32_t) as isize);
-        while !xce.is_null() {
-            if (*xce).hash == hash
-                && (*xce).node == node
-                && (*xce).uid == uid
-                && (*xce).gid == gid
-                && (*xce).nleng == nleng
-                && (nleng == 0 as uint32_t
-                    || nleng > 0 as uint32_t
-                        && memcmp(
-                            (*xce).name as *const ::core::ffi::c_void,
-                            name as *const ::core::ffi::c_void,
-                            nleng as size_t,
-                        ) == 0 as ::core::ffi::c_int)
-            {
-                return xce;
-            }
-            xce = (*xce).hashnext as *mut xattr_cache_entry;
-        }
-        return ::core::ptr::null_mut::<xattr_cache_entry>();
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_delete(
-    mut node: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-) {
-    unsafe {
-        let mut hash: uint32_t = 0;
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        let mut nxce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        hash = xattr_cache_hash(node, nleng, name);
-        xce = *hashtab.offset(hash.wrapping_rem(HASHSIZE as uint32_t) as isize);
-        while !xce.is_null() {
-            nxce = (*xce).hashnext as *mut xattr_cache_entry;
-            if (*xce).hash == hash
-                && (*xce).node == node
-                && (*xce).nleng == nleng
-                && (nleng == 0 as uint32_t
-                    || nleng > 0 as uint32_t
-                        && memcmp(
-                            (*xce).name as *const ::core::ffi::c_void,
-                            name as *const ::core::ffi::c_void,
-                            nleng as size_t,
-                        ) == 0 as ::core::ffi::c_int)
-            {
-                xattr_cache_remove_entry(xce);
-            }
-            xce = nxce;
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn xattr_cache_invalidate(mut utimestamp: int64_t) {
-    unsafe {
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        let mut nxce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        xce = lruhead;
-        while !xce.is_null() && (*xce).utimestamp < utimestamp {
-            nxce = (*xce).lrunext as *mut xattr_cache_entry;
-            xattr_cache_remove_entry(xce);
-            xce = nxce;
-        }
-        if lruhead.is_null() {
-            lrutail = &raw mut lruhead;
-        }
-    }
-}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_get(
-    mut node: uint32_t,
-    mut uid: uint32_t,
-    mut gid: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-    mut value: *mut *const uint8_t,
-    mut vleng: *mut uint32_t,
-    mut status: *mut ::core::ffi::c_int,
+    node: uint32_t,
+    uid: uint32_t,
+    gid: uint32_t,
+    nleng: uint32_t,
+    name: *const uint8_t,
+    value: *mut *const uint8_t,
+    vleng: *mut uint32_t,
+    status: *mut ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        let mut v: *mut xattr_cache_value = ::core::ptr::null_mut::<xattr_cache_value>();
-        let mut utimestamp: int64_t = monotonic_useconds() as int64_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
+        let now = monotonic_useconds();
+        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        // SAFETY: name points at nleng bytes per C contract.
+        let key = ::core::slice::from_raw_parts(name, nleng as usize);
+        let hit = cache().get(node, uid, gid, key, now);
+        let token = match hit {
+            Some(v) => {
+                if !value.is_null() {
+                    *value = match &v.value {
+                        Some(b) => b.as_ptr(),
+                        None => ::core::ptr::null(),
+                    };
+                }
+                if !vleng.is_null() {
+                    *vleng = v.vleng;
+                }
+                if !status.is_null() {
+                    *status = v.status;
+                }
+                // hand one ref to the caller (C: lcnt++)
+                Rc::into_raw(v) as *mut ::core::ffi::c_void
             }
-            abort();
-        }
-        xattr_cache_invalidate(utimestamp);
-        xce = xattr_cache_find(node, uid, gid, nleng, name);
-        if xce.is_null() {
-            v = ::core::ptr::null_mut::<xattr_cache_value>();
-        } else {
-            if !value.is_null() {
-                *value = (*(*xce).value).value;
-            }
-            if !vleng.is_null() {
-                *vleng = (*xce).vleng;
-            }
-            if !status.is_null() {
-                *status = (*xce).status;
-            }
-            v = (*xce).value;
-            xattr_cache_value_inc(v);
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    211 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        return v as *mut ::core::ffi::c_void;
+            None => ::core::ptr::null_mut(),
+        };
+        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
+        token
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_set(
-    mut node: uint32_t,
-    mut uid: uint32_t,
-    mut gid: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-    mut value: *const uint8_t,
-    mut vleng: uint32_t,
-    mut status: ::core::ffi::c_int,
+    node: uint32_t,
+    uid: uint32_t,
+    gid: uint32_t,
+    nleng: uint32_t,
+    name: *const uint8_t,
+    value: *const uint8_t,
+    vleng: uint32_t,
+    status: ::core::ffi::c_int,
 ) {
     unsafe {
-        let mut utimestamp: int64_t = monotonic_useconds() as int64_t;
-        let mut xce: *mut xattr_cache_entry = ::core::ptr::null_mut::<xattr_cache_entry>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    218 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        xce = xattr_cache_find(node, uid, gid, nleng, name);
-        if !xce.is_null() {
-            xattr_cache_remove_entry(xce);
-        }
-        xattr_cache_new(
-            node,
-            uid,
-            gid,
-            nleng,
-            name,
-            value,
-            vleng,
-            status,
-            utimestamp + xattr_cache_timeout,
-        );
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    224 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
+        let now = monotonic_useconds();
+        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        // SAFETY: name/value point at nleng/vleng bytes per C contract.
+        let key = ::core::slice::from_raw_parts(name, nleng as usize);
+        let v = if value.is_null() || vleng == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(value, vleng as usize))
+        };
+        cache().set(node, uid, gid, key, v, status, now);
+        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn xattr_cache_del(
-    mut node: uint32_t,
-    mut nleng: uint32_t,
-    mut name: *const uint8_t,
-) {
+pub unsafe extern "C" fn xattr_cache_del(node: uint32_t, nleng: uint32_t, name: *const uint8_t) {
     unsafe {
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    228 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        xattr_cache_delete(node, nleng, name);
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    230 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
+        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        // SAFETY: name points at nleng bytes per C contract.
+        let key = ::core::slice::from_raw_parts(name, nleng as usize);
+        cache().del(node, key);
+        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn xattr_cache_rel(mut vv: *mut ::core::ffi::c_void) {
+pub unsafe extern "C" fn xattr_cache_rel(vv: *mut ::core::ffi::c_void) {
+    if vv.is_null() {
+        return;
+    }
     unsafe {
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    234 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        xattr_cache_value_dec(vv as *mut xattr_cache_value);
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    236 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
+        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        // SAFETY: token from xattr_cache_get (Rc::into_raw), released at
+        // most once — the C lcnt-- contract.
+        drop(Rc::<XattrValue>::from_raw(vv as *const XattrValue));
+        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_term() {
     unsafe {
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut glock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    243 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        if let Some(c) = (&mut *(&raw mut CACHE)).as_mut() {
+            c.term();
         }
-        while !lruhead.is_null() {
-            xattr_cache_remove_entry(lruhead);
-        }
-        free(hashtab as *mut ::core::ffi::c_void);
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut glock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    256 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut glock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    257 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&glock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
+        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn xattr_cache_init(mut timeout: ::core::ffi::c_double) {
+pub unsafe extern "C" fn xattr_cache_init(timeout: ::core::ffi::c_double) {
     unsafe {
-        let mut i: uint32_t = 0;
-        lruhead = ::core::ptr::null_mut::<xattr_cache_entry>();
-        lrutail = &raw mut lruhead;
-        hashtab = malloc(
-            ::core::mem::size_of::<*mut xattr_cache_entry>().wrapping_mul(HASHSIZE as size_t),
-        ) as *mut *mut xattr_cache_entry;
-        i = 0 as uint32_t;
-        while i < HASHSIZE as uint32_t {
-            *hashtab.offset(i as isize) = ::core::ptr::null_mut::<xattr_cache_entry>();
-            i = i.wrapping_add(1);
-        }
-        xattr_cache_timeout = (1000000.0f64 * timeout) as int64_t;
-        let mut _mfs_assert_ret: ::core::ffi::c_int =
-            pthread_mutex_init(&raw mut glock, ::core::ptr::null::<pthread_mutexattr_t>());
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/xattrcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    269 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&glock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
+        CACHE = Some(XattrCache::new((1_000_000.0 * timeout) as int64_t));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::rc::Rc;
+    use std::vec;
+
+    #[test]
+    fn set_get_hit_and_fields() {
+        let mut c = XattrCache::new(1_000_000);
+        c.set(1, 10, 20, b"user.k", Some(b"val42"), 0, 1_000_000);
+        let v = c.get(1, 10, 20, b"user.k", 1_500_000).unwrap();
+        assert_eq!(v.value.as_deref(), Some(&b"val42"[..]));
+        assert_eq!(v.vleng, 5);
+        assert_eq!(v.status, 0);
+        // wrong uid/gid/name miss
+        assert!(c.get(1, 11, 20, b"user.k", 1_500_000).is_none());
+        assert!(c.get(1, 10, 20, b"user.x", 1_500_000).is_none());
+        // negative-answer caching (no value)
+        c.set(2, 10, 20, b"user.no", None, 61, 1_000_000);
+        let v = c.get(2, 10, 20, b"user.no", 1_500_000).unwrap();
+        assert!(v.value.is_none());
+        assert_eq!(v.status, 61);
+    }
+
+    #[test]
+    fn expiry_by_absolute_utimestamp() {
+        let mut c = XattrCache::new(1_000_000);
+        c.set(1, 0, 0, b"a", None, 0, 1_000_000); // expires at 2_000_000
+        assert!(c.get(1, 0, 0, b"a", 2_000_000).is_some()); // < not <=
+        assert!(c.get(1, 0, 0, b"a", 2_000_001).is_none());
+    }
+
+    #[test]
+    fn held_ref_survives_eviction() {
+        let mut c = XattrCache::new(1_000_000);
+        c.set(1, 0, 0, b"a", Some(b"data"), 0, 1_000_000);
+        let held: Rc<XattrValue> = c.get(1, 0, 0, b"a", 1_000_000).unwrap();
+        // overwrite (evicts old entry) then expire everything
+        c.set(1, 0, 0, b"a", Some(b"new!"), 0, 1_500_000);
+        let _ = c.get(9, 9, 9, b"zz", 9_999_999); // invalidate far future: clears cache
+        assert_eq!(c.len(), 0);
+        // held ref still valid (C: lcnt>0 kept the value alive)
+        assert_eq!(held.value.as_deref(), Some(&b"data"[..]));
+        assert_eq!(Rc::strong_count(&held), 1);
+    }
+
+    #[test]
+    fn del_removes_all_uidgid_variants() {
+        let mut c = XattrCache::new(1_000_000);
+        c.set(1, 10, 20, b"k", None, 0, 1_000_000);
+        c.set(1, 30, 40, b"k", None, 0, 1_000_000);
+        c.set(1, 10, 20, b"other", None, 0, 1_000_000);
+        c.del(1, b"k");
+        assert!(c.get(1, 10, 20, b"k", 1_000_000).is_none());
+        assert!(c.get(1, 30, 40, b"k", 1_000_000).is_none());
+        assert!(c.get(1, 10, 20, b"other", 1_000_000).is_some());
+    }
+
+    #[test]
+    fn lru_head_walk_stops_at_first_live() {
+        let mut c = XattrCache::new(1_000_000);
+        c.set(1, 0, 0, b"a", None, 0, 1_000_000); // ts 2M
+        c.set(1, 0, 0, b"b", None, 0, 1_500_000); // ts 2.5M
+        c.set(1, 0, 0, b"c", None, 0, 2_000_000); // ts 3M
+        let _ = c.get(9, 9, 9, b"zz", 2_200_000); // invalidate at 2.2M
+        assert!(c.get(1, 0, 0, b"a", 1_000_000).is_none()); // a (2M) gone
+        // head walk stops at first live entry: b (2.5M) and c survive
+        assert!(c.get(1, 0, 0, b"b", 1_000_000).is_some());
+        assert!(c.get(1, 0, 0, b"c", 1_000_000).is_some());
+        let _ = c.get(9, 9, 9, b"zz", 2_600_000); // now b goes too
+        assert!(c.get(1, 0, 0, b"b", 1_000_000).is_none());
+        assert!(c.get(1, 0, 0, b"c", 1_000_000).is_some());
     }
 }
