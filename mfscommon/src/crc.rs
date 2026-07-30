@@ -1,261 +1,217 @@
+//! CRC32 (zlib poly) with slicing-by-16 and combine tables, migrated to safe
+//! Rust (P1). Tables moved from `static mut` + explicit init to `LazyLock`
+//! (identical contents, computed on first use); `mycrc32_init` remains as an
+//! exported no-op because consumers call it by symbol.
+//!
+//! PORT NOTE: the original aligned the data pointer to 4 before the u32
+//! block loop. That was a performance detail, not semantics — CRC output
+//! depends only on the byte sequence — so the safe version uses
+//! `u32::from_le_bytes` over chunks (x86_64 little-endian target).
+
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub const CRC_POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
-static mut crc_table: [[uint32_t; 256]; 16] = [[0; 256]; 16];
-unsafe extern "C" fn crc_generate_main_tables() {
-    unsafe {
-        let mut c: uint32_t = 0;
-        let mut poly: uint32_t = 0;
-        let mut i: uint32_t = 0;
-        let mut j: uint32_t = 0;
-        poly = CRC_POLY as uint32_t;
-        i = 0 as uint32_t;
-        while i < 256 as uint32_t {
-            c = i;
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            c = if c & 1 as uint32_t != 0 {
-                poly ^ c >> 1 as ::core::ffi::c_int
-            } else {
-                c >> 1 as ::core::ffi::c_int
-            };
-            crc_table[0 as usize][i as usize] = c;
-            i = i.wrapping_add(1);
-        }
-        i = 0 as uint32_t;
-        while i < 256 as uint32_t {
-            c = crc_table[0 as usize][i as usize];
-            j = 1 as uint32_t;
-            while j < 16 as uint32_t {
-                c = crc_table[0 as usize][(c & 0xff as uint32_t) as usize]
-                    ^ c >> 8 as ::core::ffi::c_int;
-                crc_table[j as usize][i as usize] = c;
-                j = j.wrapping_add(1);
+
+use std::sync::LazyLock;
+
+type MainTables = [[uint32_t; 256]; 16];
+type CombineTables = [[[uint32_t; 256]; 4]; 32];
+
+#[deny(unsafe_code)]
+mod imp {
+    use super::{CombineTables, MainTables, CRC_POLY};
+
+    pub fn generate_main_tables() -> MainTables {
+        let mut t = [[0u32; 256]; 16];
+        let poly = CRC_POLY;
+        for (i, e) in t[0].iter_mut().enumerate() {
+            let mut c = i as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { poly ^ (c >> 1) } else { c >> 1 };
             }
-            i = i.wrapping_add(1);
+            *e = c;
         }
+        let row0 = t[0]; // copy lets us mutate later rows while reading row 0
+        for i in 0..256 {
+            let mut c = row0[i];
+            for row in t.iter_mut().skip(1) {
+                c = row0[(c & 0xff) as usize] ^ (c >> 8);
+                row[i] = c;
+            }
+        }
+        t
+    }
+
+    fn matrix_square(m: &[u32; 32]) -> [u32; 32] {
+        let mut sqr = [0u32; 32];
+        for (i, &v0) in m.iter().enumerate() {
+            let mut s = 0u32;
+            let mut v = v0;
+            let mut j = 0;
+            while v != 0 && j < 32 {
+                if v & 1 != 0 {
+                    s ^= m[j];
+                }
+                j += 1;
+                v >>= 1;
+            }
+            sqr[i] = s;
+        }
+        sqr
+    }
+
+    pub fn generate_combine_tables() -> CombineTables {
+        let mut ct = [[[0u32; 256]; 4]; 32];
+        let mut m1 = [0u32; 32];
+        m1[0] = CRC_POLY;
+        let mut j = 1u32;
+        for e in m1.iter_mut().skip(1) {
+            *e = j;
+            j <<= 1;
+        }
+        let m2 = matrix_square(&m1);
+        let mut m1 = matrix_square(&m2);
+        let mut m2 = m2;
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..32 {
+            let mc = if i & 1 != 0 {
+                m1 = matrix_square(&m2);
+                &m1
+            } else {
+                m2 = matrix_square(&m1);
+                &m2
+            };
+            for j in 0..4 {
+                for k in 0..256 {
+                    let mut sum = 0u32;
+                    let mut l = k as u32;
+                    let mut m = j * 8;
+                    while l != 0 {
+                        if l & 1 != 0 {
+                            sum ^= mc[m];
+                        }
+                        l >>= 1;
+                        m += 1;
+                    }
+                    ct[i][j][k] = sum;
+                }
+            }
+        }
+        ct
+    }
+
+    pub fn crc_compute(mut crc: u32, data: &[u8], t: &MainTables) -> u32 {
+        crc = !crc;
+        let mut chunks = data.chunks_exact(16);
+        for b in &mut chunks {
+            let d0 = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) ^ crc;
+            let d1 = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+            let d2 = u32::from_le_bytes([b[8], b[9], b[10], b[11]]);
+            let d3 = u32::from_le_bytes([b[12], b[13], b[14], b[15]]);
+            crc = t[0][((d3 >> 24) & 0xff) as usize]
+                ^ t[1][((d3 >> 16) & 0xff) as usize]
+                ^ t[2][((d3 >> 8) & 0xff) as usize]
+                ^ t[3][(d3 & 0xff) as usize]
+                ^ t[4][((d2 >> 24) & 0xff) as usize]
+                ^ t[5][((d2 >> 16) & 0xff) as usize]
+                ^ t[6][((d2 >> 8) & 0xff) as usize]
+                ^ t[7][(d2 & 0xff) as usize]
+                ^ t[8][((d1 >> 24) & 0xff) as usize]
+                ^ t[9][((d1 >> 16) & 0xff) as usize]
+                ^ t[10][((d1 >> 8) & 0xff) as usize]
+                ^ t[11][(d1 & 0xff) as usize]
+                ^ t[12][((d0 >> 24) & 0xff) as usize]
+                ^ t[13][((d0 >> 16) & 0xff) as usize]
+                ^ t[14][((d0 >> 8) & 0xff) as usize]
+                ^ t[15][(d0 & 0xff) as usize];
+        }
+        for &byte in chunks.remainder() {
+            crc = (crc >> 8) ^ t[0][((crc & 0xff) ^ byte as u32) as usize];
+        }
+        !crc
     }
 }
+
+static CRC_TABLE: LazyLock<MainTables> = LazyLock::new(imp::generate_main_tables);
+static CRC_COMBINE_TABLE: LazyLock<CombineTables> =
+    LazyLock::new(imp::generate_combine_tables);
+
+/// # Safety
+/// `data` must be readable for `leng` bytes (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mycrc32(
-    mut crc: uint32_t,
-    mut data: *const ::core::ffi::c_void,
-    mut leng: uint32_t,
+    crc: uint32_t,
+    data: *const ::core::ffi::c_void,
+    leng: uint32_t,
 ) -> uint32_t {
-    unsafe {
-        let mut data4: *const uint32_t = ::core::ptr::null::<uint32_t>();
-        let mut data1: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut d0: uint32_t = 0;
-        let mut d1: uint32_t = 0;
-        let mut d2: uint32_t = 0;
-        let mut d3: uint32_t = 0;
-        crc = !crc;
-        data1 = data as *const uint8_t;
-        while data1.expose_provenance() as ::core::ffi::c_ulong & 0x3 as ::core::ffi::c_ulong != 0
-            && leng != 0 as uint32_t
-        {
-            let c2rust_fresh0 = data1;
-            data1 = data1.offset(1);
-            crc = crc >> 8 as ::core::ffi::c_int
-                ^ crc_table[0 as usize]
-                    [(crc & 0xff as uint32_t ^ *c2rust_fresh0 as uint32_t) as usize];
-            leng = leng.wrapping_sub(1);
-        }
-        data4 = data1 as *const uint32_t;
-        while leng >= 16 as uint32_t {
-            let c2rust_fresh1 = data4;
-            data4 = data4.offset(1);
-            d0 = *c2rust_fresh1 ^ crc;
-            let c2rust_fresh2 = data4;
-            data4 = data4.offset(1);
-            d1 = *c2rust_fresh2;
-            let c2rust_fresh3 = data4;
-            data4 = data4.offset(1);
-            d2 = *c2rust_fresh3;
-            let c2rust_fresh4 = data4;
-            data4 = data4.offset(1);
-            d3 = *c2rust_fresh4;
-            crc = crc_table[0 as usize]
-                [(d3 >> 24 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[1 as usize]
-                    [(d3 >> 16 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[2 as usize]
-                    [(d3 >> 8 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[3 as usize][(d3 & 0xff as uint32_t) as usize]
-                ^ crc_table[4 as usize]
-                    [(d2 >> 24 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[5 as usize]
-                    [(d2 >> 16 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[6 as usize]
-                    [(d2 >> 8 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[7 as usize][(d2 & 0xff as uint32_t) as usize]
-                ^ crc_table[8 as usize]
-                    [(d1 >> 24 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[9 as usize]
-                    [(d1 >> 16 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[10 as usize]
-                    [(d1 >> 8 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[11 as usize][(d1 & 0xff as uint32_t) as usize]
-                ^ crc_table[12 as usize]
-                    [(d0 >> 24 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[13 as usize]
-                    [(d0 >> 16 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[14 as usize]
-                    [(d0 >> 8 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                ^ crc_table[15 as usize][(d0 & 0xff as uint32_t) as usize];
-            leng = leng.wrapping_sub(16 as uint32_t);
-        }
-        data1 = data4 as *const uint8_t;
-        while leng != 0 as uint32_t {
-            let c2rust_fresh5 = data1;
-            data1 = data1.offset(1);
-            crc = crc >> 8 as ::core::ffi::c_int
-                ^ crc_table[0 as usize]
-                    [(crc & 0xff as uint32_t ^ *c2rust_fresh5 as uint32_t) as usize];
-            leng = leng.wrapping_sub(1);
-        }
-        return !crc;
+    if leng == 0 {
+        return imp::crc_compute(crc, &[], &CRC_TABLE);
     }
+    // SAFETY: per fn contract; leng>0 here, data valid for leng bytes.
+    let buf = unsafe { std::slice::from_raw_parts(data as *const u8, leng as usize) };
+    imp::crc_compute(crc, buf, &CRC_TABLE)
 }
-static mut crc_combine_table: [[[uint32_t; 256]; 4]; 32] = [[[0; 256]; 4]; 32];
-unsafe extern "C" fn crc_matrix_square(mut sqr: *mut uint32_t, mut m: *mut uint32_t) {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut j: uint32_t = 0;
-        let mut s: uint32_t = 0;
-        let mut v: uint32_t = 0;
-        i = 0 as uint32_t;
-        while i < 32 as uint32_t {
-            j = 0 as uint32_t;
-            s = 0 as uint32_t;
-            v = *m.offset(i as isize);
-            while v != 0 && j < 32 as uint32_t {
-                if v & 1 as uint32_t != 0 {
-                    s ^= *m.offset(j as isize);
-                }
-                j = j.wrapping_add(1);
-                v >>= 1 as ::core::ffi::c_int;
-            }
-            *sqr.offset(i as isize) = s;
-            i = i.wrapping_add(1);
-        }
-    }
-}
-unsafe extern "C" fn crc_generate_combine_tables() {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut j: uint32_t = 0;
-        let mut k: uint32_t = 0;
-        let mut l: uint32_t = 0;
-        let mut sum: uint32_t = 0;
-        let mut m1: [uint32_t; 32] = [0; 32];
-        let mut m2: [uint32_t; 32] = [0; 32];
-        let mut mc: *mut uint32_t = ::core::ptr::null_mut::<uint32_t>();
-        let mut m: *mut uint32_t = ::core::ptr::null_mut::<uint32_t>();
-        m1[0 as usize] = CRC_POLY as uint32_t;
-        j = 1 as uint32_t;
-        i = 1 as uint32_t;
-        while i < 32 as uint32_t {
-            m1[i as usize] = j;
-            j <<= 1 as ::core::ffi::c_int;
-            i = i.wrapping_add(1);
-        }
-        crc_matrix_square(&raw mut m2 as *mut uint32_t, &raw mut m1 as *mut uint32_t);
-        crc_matrix_square(&raw mut m1 as *mut uint32_t, &raw mut m2 as *mut uint32_t);
-        i = 0 as uint32_t;
-        while i < 32 as uint32_t {
-            if i & 1 as uint32_t != 0 {
-                crc_matrix_square(&raw mut m1 as *mut uint32_t, &raw mut m2 as *mut uint32_t);
-                mc = &raw mut m1 as *mut uint32_t;
-            } else {
-                crc_matrix_square(&raw mut m2 as *mut uint32_t, &raw mut m1 as *mut uint32_t);
-                mc = &raw mut m2 as *mut uint32_t;
-            }
-            j = 0 as uint32_t;
-            while j < 4 as uint32_t {
-                k = 0 as uint32_t;
-                while k < 256 as uint32_t {
-                    sum = 0 as uint32_t;
-                    l = k;
-                    m = mc.offset(j.wrapping_mul(8 as uint32_t) as isize);
-                    while l != 0 {
-                        if l & 1 as uint32_t != 0 {
-                            sum ^= *m;
-                        }
-                        l >>= 1 as ::core::ffi::c_int;
-                        m = m.offset(1);
-                    }
-                    crc_combine_table[i as usize][j as usize][k as usize] = sum;
-                    k = k.wrapping_add(1);
-                }
-                j = j.wrapping_add(1);
-            }
-            i = i.wrapping_add(1);
-        }
-    }
-}
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mycrc32_combine(
+pub extern "C" fn mycrc32_combine(
     mut crc1: uint32_t,
-    mut crc2: uint32_t,
+    crc2: uint32_t,
     mut leng2: uint32_t,
 ) -> uint32_t {
-    unsafe {
-        let mut i: uint8_t = 0;
-        i = 0 as uint8_t;
-        while leng2 != 0 {
-            if leng2 & 1 as uint32_t != 0 {
-                crc1 = crc_combine_table[i as usize][3 as usize]
-                    [(crc1 >> 24 as ::core::ffi::c_int) as usize]
-                    ^ crc_combine_table[i as usize][2 as usize]
-                        [(crc1 >> 16 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                    ^ crc_combine_table[i as usize][1 as usize]
-                        [(crc1 >> 8 as ::core::ffi::c_int & 0xff as uint32_t) as usize]
-                    ^ crc_combine_table[i as usize][0 as usize][(crc1 & 0xff as uint32_t) as usize];
-            }
-            i = i.wrapping_add(1);
-            leng2 >>= 1 as ::core::ffi::c_int;
+    let ct = &*CRC_COMBINE_TABLE;
+    let mut i: uint8_t = 0;
+    while leng2 != 0 {
+        if leng2 & 1 != 0 {
+            crc1 = ct[i as usize][3][(crc1 >> 24) as usize]
+                ^ ct[i as usize][2][((crc1 >> 16) & 0xff) as usize]
+                ^ ct[i as usize][1][((crc1 >> 8) & 0xff) as usize]
+                ^ ct[i as usize][0][(crc1 & 0xff) as usize];
         }
-        return crc1 ^ crc2;
+        i = i.wrapping_add(1);
+        leng2 >>= 1;
     }
+    crc1 ^ crc2
 }
+
+/// Exported no-op: tables are lazy now. Kept because consumers call it by
+/// symbol at startup; calling it still forces table generation (harmless).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mycrc32_init() {
-    unsafe {
-        crc_generate_main_tables();
-        crc_generate_combine_tables();
+pub extern "C" fn mycrc32_init() {
+    LazyLock::force(&CRC_TABLE);
+    LazyLock::force(&CRC_COMBINE_TABLE);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_vectors() {
+        // zlib crc32 reference values
+        assert_eq!(imp::crc_compute(0, b"123456789", &CRC_TABLE), 0xCBF43926);
+        assert_eq!(imp::crc_compute(0, b"", &CRC_TABLE), 0);
+        assert_eq!(
+            imp::crc_compute(0xdeadbeef, b"hello world", &CRC_TABLE),
+            imp::crc_compute(0xdeadbeef, b"hello ", &CRC_TABLE).pipe(|c| {
+                imp::crc_compute(c, b"world", &CRC_TABLE)
+            })
+        );
     }
+
+    #[test]
+    fn combine_matches_concat() {
+        let a = b"the quick brown fox ";
+        let b = b"jumps over the lazy dog";
+        let whole = imp::crc_compute(0, &[&a[..], &b[..]].concat(), &CRC_TABLE);
+        let ca = imp::crc_compute(0, a, &CRC_TABLE);
+        let cb = imp::crc_compute(0, b, &CRC_TABLE);
+        assert_eq!(mycrc32_combine(ca, cb, b.len() as u32), whole);
+    }
+
+    trait Pipe: Sized {
+        fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R {
+            f(self)
+        }
+    }
+    impl Pipe for u32 {}
 }

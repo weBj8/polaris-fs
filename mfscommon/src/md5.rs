@@ -1,15 +1,8 @@
-unsafe extern "C" {
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-}
+//! MD5 (RFC 1321 reference implementation), migrated to safe Rust (P1).
+//! The compression-round body is verbatim from the c2rust original (already
+//! value arithmetic); only pointer plumbing became slices. ABI preserved:
+//! md5ctx stays #[repr(C)], init/update/final keep their C symbols.
+
 pub type size_t = usize;
 pub type uint8_t = u8;
 pub type uint32_t = u32;
@@ -21,7 +14,7 @@ pub struct _md5ctx {
     pub buffer: [uint8_t; 64],
 }
 pub type md5ctx = _md5ctx;
-static mut padding: [uint8_t; 64] = [
+const PADDING: [uint8_t; 64] = [
     0x80 as uint8_t,
     0 as uint8_t,
     0 as uint8_t,
@@ -87,67 +80,23 @@ static mut padding: [uint8_t; 64] = [
     0 as uint8_t,
     0 as uint8_t,
 ];
-unsafe extern "C" fn md5_encode(
-    mut output: *mut uint8_t,
-    mut input: *const uint32_t,
-    mut len: uint32_t,
-) {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut j: uint32_t = 0;
-        i = 0 as uint32_t;
-        j = 0 as uint32_t;
-        while i < len {
-            *output.offset(j as isize) = (*input.offset(i as isize) & 0xff as uint32_t) as uint8_t;
-            *output.offset(j.wrapping_add(1 as uint32_t) as isize) =
-                (*input.offset(i as isize) >> 8 as ::core::ffi::c_int & 0xff as uint32_t)
-                    as uint8_t;
-            *output.offset(j.wrapping_add(2 as uint32_t) as isize) =
-                (*input.offset(i as isize) >> 16 as ::core::ffi::c_int & 0xff as uint32_t)
-                    as uint8_t;
-            *output.offset(j.wrapping_add(3 as uint32_t) as isize) =
-                (*input.offset(i as isize) >> 24 as ::core::ffi::c_int & 0xff as uint32_t)
-                    as uint8_t;
-            i = i.wrapping_add(1);
-            j = j.wrapping_add(4 as uint32_t);
-        }
+fn md5_encode(output: &mut [uint8_t], input: &[uint32_t]) {
+    for (i, &v) in input.iter().enumerate() {
+        output[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
     }
 }
-unsafe extern "C" fn md5_decode(
-    mut output: *mut uint32_t,
-    mut input: *const uint8_t,
-    mut len: uint32_t,
-) {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut j: uint32_t = 0;
-        i = 0 as uint32_t;
-        j = 0 as uint32_t;
-        while i < len {
-            *output.offset(i as isize) = *input.offset(j as isize) as uint32_t
-                | (*input.offset(j.wrapping_add(1 as uint32_t) as isize) as uint32_t)
-                    << 8 as ::core::ffi::c_int
-                | (*input.offset(j.wrapping_add(2 as uint32_t) as isize) as uint32_t)
-                    << 16 as ::core::ffi::c_int
-                | (*input.offset(j.wrapping_add(3 as uint32_t) as isize) as uint32_t)
-                    << 24 as ::core::ffi::c_int;
-            i = i.wrapping_add(1);
-            j = j.wrapping_add(4 as uint32_t);
-        }
+fn md5_decode(output: &mut [uint32_t], input: &[uint8_t]) {
+    for (i, e) in output.iter_mut().enumerate() {
+        *e = u32::from_le_bytes([input[4 * i], input[4 * i + 1], input[4 * i + 2], input[4 * i + 3]]);
     }
 }
-unsafe extern "C" fn md5_transform(mut state: *mut uint32_t, mut block: *const uint8_t) {
-    unsafe {
-        let mut a: uint32_t = *state.offset(0 as isize);
-        let mut b: uint32_t = *state.offset(1 as isize);
-        let mut c: uint32_t = *state.offset(2 as isize);
-        let mut d: uint32_t = *state.offset(3 as isize);
+fn md5_transform(state: &mut [uint32_t; 4], block: &[uint8_t]) {
+        let mut a: uint32_t = state[0];
+        let mut b: uint32_t = state[1];
+        let mut c: uint32_t = state[2];
+        let mut d: uint32_t = state[3];
         let mut x: [uint32_t; 16] = [0; 16];
-        md5_decode(
-            &raw mut x as *mut uint32_t,
-            block as *const uint8_t,
-            16 as uint32_t,
-        );
+        md5_decode(&mut x, block);
         a = a.wrapping_add(
             (b & c | !b & d)
                 .wrapping_add(x[0 as usize])
@@ -640,106 +589,111 @@ unsafe extern "C" fn md5_transform(mut state: *mut uint32_t, mut block: *const u
         b = b << 21 as ::core::ffi::c_int
             | b >> 32 as ::core::ffi::c_int - 21 as ::core::ffi::c_int;
         b = b.wrapping_add(c);
-        *state.offset(0 as isize) = (*state.offset(0 as isize)).wrapping_add(a);
-        *state.offset(1 as isize) = (*state.offset(1 as isize)).wrapping_add(b);
-        *state.offset(2 as isize) = (*state.offset(2 as isize)).wrapping_add(c);
-        *state.offset(3 as isize) = (*state.offset(3 as isize)).wrapping_add(d);
-        memset(
-            &raw mut x as *mut uint32_t as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<[uint32_t; 16]>(),
-        );
-    }
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        x.fill(0); // hygiene: clear the block copy, as the original memset did
 }
+fn md5_init_imp(ctx: &mut md5ctx) {
+    ctx.count = [0, 0];
+    ctx.state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
+}
+
+/// # Safety
+/// `ctx` must point to a valid, writable md5ctx (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn md5_init(mut ctx: *mut md5ctx) {
-    unsafe {
-        (*ctx).count[1 as usize] = 0 as uint32_t;
-        (*ctx).count[0 as usize] = (*ctx).count[1 as usize];
-        (*ctx).state[0 as usize] = 0x67452301 as ::core::ffi::c_uint as uint32_t;
-        (*ctx).state[1 as usize] = 0xefcdab89 as ::core::ffi::c_uint as uint32_t;
-        (*ctx).state[2 as usize] = 0x98badcfe as ::core::ffi::c_uint as uint32_t;
-        (*ctx).state[3 as usize] = 0x10325476 as ::core::ffi::c_uint as uint32_t;
-    }
+    // SAFETY: per fn contract.
+    unsafe { md5_init_imp(&mut *ctx) }
 }
+
+fn md5_update_imp(ctx: &mut md5ctx, buff: &[uint8_t]) {
+    let leng = buff.len() as uint32_t;
+    let mut indx = (ctx.count[0] >> 3) & 0x3f;
+    ctx.count[0] = ctx.count[0].wrapping_add(leng << 3);
+    if ctx.count[0] < leng << 3 {
+        ctx.count[1] = ctx.count[1].wrapping_add(1);
+    }
+    ctx.count[1] = ctx.count[1].wrapping_add(leng >> 29);
+    let partleng = 64u32.wrapping_sub(indx);
+    let mut i = 0usize;
+    if leng >= partleng {
+        ctx.buffer[indx as usize..64].copy_from_slice(&buff[..partleng as usize]);
+        let block = ctx.buffer;
+        md5_transform(&mut ctx.state, &block);
+        i = partleng as usize;
+        while i + 63 < leng as usize {
+            md5_transform(&mut ctx.state, &buff[i..i + 64]);
+            i += 64;
+        }
+        indx = 0;
+    }
+    ctx.buffer[indx as usize..indx as usize + (leng as usize - i)]
+        .copy_from_slice(&buff[i..]);
+}
+
+/// # Safety
+/// `ctx` must point to a valid, writable md5ctx; `buff` readable for `leng`
+/// bytes (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn md5_update(
     mut ctx: *mut md5ctx,
     mut buff: *const uint8_t,
     mut leng: uint32_t,
 ) {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut indx: uint32_t = 0;
-        let mut partleng: uint32_t = 0;
-        indx = (*ctx).count[0 as usize] >> 3 as ::core::ffi::c_int & 0x3f as uint32_t;
-        (*ctx).count[0 as usize] =
-            (*ctx).count[0 as usize].wrapping_add(leng << 3 as ::core::ffi::c_int);
-        if (*ctx).count[0 as usize] < leng << 3 as ::core::ffi::c_int {
-            (*ctx).count[1 as usize] = (*ctx).count[1 as usize].wrapping_add(1);
-        }
-        (*ctx).count[1 as usize] =
-            (*ctx).count[1 as usize].wrapping_add(leng >> 29 as ::core::ffi::c_int);
-        partleng = (64 as uint32_t).wrapping_sub(indx);
-        if leng >= partleng {
-            memcpy(
-                (&raw mut (*ctx).buffer as *mut uint8_t).offset(indx as isize)
-                    as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-                buff as *const ::core::ffi::c_char as *const ::core::ffi::c_void,
-                partleng as size_t,
-            );
-            md5_transform(
-                &raw mut (*ctx).state as *mut uint32_t,
-                &raw mut (*ctx).buffer as *mut uint8_t as *const uint8_t,
-            );
-            i = partleng;
-            while i.wrapping_add(63 as uint32_t) < leng {
-                md5_transform(
-                    &raw mut (*ctx).state as *mut uint32_t,
-                    buff.offset(i as isize),
-                );
-                i = i.wrapping_add(64 as uint32_t);
-            }
-            indx = 0 as uint32_t;
-        } else {
-            i = 0 as uint32_t;
-        }
-        memcpy(
-            (&raw mut (*ctx).buffer as *mut uint8_t).offset(indx as isize)
-                as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-            buff.offset(i as isize) as *const ::core::ffi::c_char as *const ::core::ffi::c_void,
-            leng.wrapping_sub(i) as size_t,
-        );
-    }
+    // SAFETY: per fn contract.
+    unsafe { md5_update_imp(&mut *ctx, std::slice::from_raw_parts(buff, leng as usize)) }
 }
+
+fn md5_final_imp(digest: &mut [uint8_t; 16], ctx: &mut md5ctx) {
+    let mut bits = [0u8; 8];
+    md5_encode(&mut bits, &ctx.count);
+    let indx = (ctx.count[0] >> 3) & 0x3f;
+    let padleng = if indx < 56 { 56 - indx } else { 120 - indx };
+    md5_update_imp(ctx, &PADDING[..padleng as usize]);
+    md5_update_imp(ctx, &bits);
+    md5_encode(&mut digest[..], &ctx.state);
+    *ctx = md5ctx {
+        state: [0; 4],
+        count: [0; 2],
+        buffer: [0; 64],
+    };
+}
+
+/// # Safety
+/// `digest` must be writable for 16 bytes; `ctx` a valid md5ctx (C caller
+/// contract). ctx is zeroed before return, as the original did.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn md5_final(mut digest: *mut uint8_t, mut ctx: *mut md5ctx) {
-    unsafe {
-        let mut bits: [uint8_t; 8] = [0; 8];
-        let mut indx: uint32_t = 0;
-        let mut padleng: uint32_t = 0;
-        md5_encode(
-            &raw mut bits as *mut uint8_t,
-            &raw mut (*ctx).count as *mut uint32_t,
-            2 as uint32_t,
-        );
-        indx = (*ctx).count[0 as usize] >> 3 as ::core::ffi::c_int & 0x3f as uint32_t;
-        padleng = if indx < 56 as uint32_t {
-            (56 as uint32_t).wrapping_sub(indx)
-        } else {
-            (120 as uint32_t).wrapping_sub(indx)
-        };
-        md5_update(ctx, &raw const padding as *const uint8_t, padleng);
-        md5_update(ctx, &raw mut bits as *mut uint8_t, 8 as uint32_t);
-        md5_encode(
-            digest as *mut uint8_t,
-            &raw mut (*ctx).state as *mut uint32_t,
-            4 as uint32_t,
-        );
-        memset(
-            ctx as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<md5ctx>(),
-        );
+    // SAFETY: per fn contract.
+    unsafe { md5_final_imp(&mut *(digest as *mut [uint8_t; 16]), &mut *ctx) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn md5_of(data: &[u8]) -> [u8; 16] {
+        let mut ctx = md5ctx { state: [0; 4], count: [0; 2], buffer: [0; 64] };
+        md5_init_imp(&mut ctx);
+        md5_update_imp(&mut ctx, data);
+        let mut d = [0u8; 16];
+        md5_final_imp(&mut d, &mut ctx);
+        d
+    }
+
+    #[test]
+    fn rfc1321_vectors() {
+        assert_eq!(md5_of(b""), [0xd4,0x1d,0x8c,0xd9,0x8f,0x00,0xb2,0x04,0xe9,0x80,0x09,0x98,0xec,0xf8,0x42,0x7e]);
+        assert_eq!(md5_of(b"abc"), [0x90,0x01,0x50,0x98,0x3c,0xd2,0x4f,0xb0,0xd6,0x96,0x3f,0x7d,0x28,0xe1,0x7f,0x72]);
+        // split updates must equal one-shot
+        let mut ctx = md5ctx { state: [0; 4], count: [0; 2], buffer: [0; 64] };
+        md5_init_imp(&mut ctx);
+        md5_update_imp(&mut ctx, b"message ");
+        md5_update_imp(&mut ctx, b"digest");
+        let mut d = [0u8; 16];
+        md5_final_imp(&mut d, &mut ctx);
+        assert_eq!(d, md5_of(b"message digest"));
     }
 }
