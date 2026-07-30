@@ -1,0 +1,8 @@
+polaris-fs is a Rust translation of MooseFS 4.59.2
+(https://moosefs.com), which is licensed under the GNU General Public
+License version 2 (only). The original C sources carry:
+
+    Copyright (C) 2026 Jakub Kruszona-Zawadzki, Saglabs SA
+
+As a derivative work, this Rust translation is distributed under the
+same license. See LICENSE for the full GPLv2 text.
