@@ -1,88 +1,4 @@
 # crate	file	line	item	transpiled_type	class	safe_type	evidence
-mfsbdev	mfsbdev/src/mfsclient/chunkrwlock.rs	172	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunkrwlock.rs	187	hashtab	[*mut chunkrec; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunkrwlock.rs	188	freeblocks	*mut chunkrec	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunkrwlock.rs	189	freeblockscnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunkrwlock.rs	22	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunksdatacache.rs	145	chunks_inode_hash	*mut *mut chunks_inode_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunksdatacache.rs	147	chunks_data_hash	*mut *mut chunks_data_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunksdatacache.rs	149	lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/chunksdatacache.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/csdb.rs	59	csdbhtab	[*mut csdbentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/csdb.rs	60	csdblock	*mut pthread_mutex_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/csorder.rs	111	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/csorder.rs	85	pd	parser_data	BUF	Mutex<parser_data> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	200	ep_tail	*mut *mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	201	ep_head	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	202	ep_unused	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	203	ep_unused_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	204	ep_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	219	ep_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	231	ep_worker	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/extrapackets.rs	30	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/heapsorter.rs	10	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/heapsorter.rs	85	heap	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/heapsorter.rs	86	heapsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/heapsorter.rs	87	heapelements	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	200	ileng_used	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	201	ileng_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	26	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	337	ileng_allocated	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	338	ileng_free_head	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	339	ileng_buckets_head	*mut ileng_bucket	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	340	inolenghashtab	[*mut ileng; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/inoleng.rs	341	hashlock	[pthread_mutex_t; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	1002	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	1868	notsup	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	2417	trycnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	703	threchash	[*mut threc; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	704	threcfree	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	705	threcnextid	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	708	amtime_hash	[*mut amtime_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	712	af_hash	[*mut acquired_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	713	af_lrutail	*mut *mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	714	af_lruhead	*mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	715	af_lru_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	716	timediffusec	int64_t	STATIC	AtomicI64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	719	sock_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	720	recv_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	721	send_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	722	fd	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	723	disconnect	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	724	donotsendsustainedinodes	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	725	lastwrite	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	726	sessionlost	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	727	lastsyncsend	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	728	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	729	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	732	rcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	733	wcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	734	fcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	735	rbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	736	wbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	737	rpthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	738	npthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	739	reclock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	754	aflock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	769	fdlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	784	amtimelock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	799	reckey	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	800	mainrec	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	801	sessionid	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	802	metaid	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	803	masterversion	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	804	masterprocessid	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	805	attrsize	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	806	masterstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	807	masterip	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	808	masterport	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	809	srcstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	810	srcip	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	811	fterm	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	812	working_flags	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	910	statsptr	[*mut ::core::ffi::c_void; 7] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/mastercomm.rs	912	connect_args	connect_args_t	BUF	Mutex<connect_args_t> or thread_local	auto:type-shape
 mfsbdev	mfsbdev/src/mfsclient/mfsbdev.rs	107	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsbdev	mfsbdev/src/mfsclient/mfsbdev.rs	1503	term	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfsbdev	mfsbdev/src/mfsclient/mfsbdev.rs	19	stdout	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -112,99 +28,7 @@ mfsbdev	mfsbdev/src/mfsclient/mfsioint.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonN
 mfsbdev	mfsbdev/src/mfsclient/mfsioint_lookupcache.rs	145	lcache	[[path_lookup_cache; 8]; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsbdev	mfsbdev/src/mfsclient/mfsioint_lookupcache.rs	173	lcache_lock	[pthread_mutex_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsbdev	mfsbdev/src/mfsclient/mfsioint_lookupcache.rs	188	lcache_retention	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	1849	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	20416	total_bytes_rcvd	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	633	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	786	rangesstorage	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	787	readahead_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	788	readahead_trigger	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	789	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	790	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	791	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	792	maxreadaheadsize	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	793	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	794	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	795	reqbufftotalsize	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	796	indhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	797	inode_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	812	workers_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	827	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	828	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	829	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	841	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/readdata.rs	842	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/stats.rs	80	firstnode	*mut statsnode	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/stats.rs	81	allactiveplengs	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/stats.rs	82	activenodes	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/stats.rs	83	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	14698	total_bytes_sent	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	4196	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	539	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	638	fcblock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	653	fcbcond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	665	fcbwaiting	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	666	cacheblocks	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	667	freecblockshead	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	668	freecacheblocks	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	669	cacheblockcount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	670	optimeout	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	671	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	672	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	673	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	674	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	675	idhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	676	hashlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	691	workerslock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	706	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	707	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	708	worker_term_waiting	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	709	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	721	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfsclient/writedata.rs	722	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	208	main_thread	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	209	keep_alive	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	210	conncachetab	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	211	conncachehash	[*mut connentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	212	capacity	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	213	lruhead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	214	lrutail	*mut *mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	215	freehead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	216	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/conncache.rs	37	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	235	heap	*mut heapelem	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	236	heapelements	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	237	heapsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	238	exitflag	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	239	waiting	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	240	dlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	255	dcond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	267	delay_th	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/delayrun.rs	61	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/labelparser.rs	1356	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/lwthread.rs	170	thattr	*mut pthread_attr_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/lwthread.rs	171	thattr_detached	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/lwthread.rs	33	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsbdev	mfsbdev/src/mfscommon/pcqueue.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsbdev	mfsbdev/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsbdev	mfsbdev/src/mfscommon/squeue.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsbdev	mfsbdev/src/mfscommon/strerr.rs	15	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsbdev	mfsbdev/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -377,64 +201,6 @@ mfschunkserver	mfschunkserver/src/mfscommon/cfg.rs	203	usedhead	*mut paramstr	UN
 mfschunkserver	mfschunkserver/src/mfscommon/cfg.rs	204	logundefined	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/cfg.rs	205	dangerous	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/cfg.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	1251	png_tailer	[uint8_t; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	1269	png_1x1	[uint8_t; 68]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	13	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	1339	font	[[uint8_t; 9]; 25]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	329	calcdefs	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	330	calcstartpos	*mut *mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	331	calcdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	332	statdefs	*mut statdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	333	statdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	334	estatdefs	*mut estatdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	335	estatdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	336	statsfilename	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	337	series	*mut stat_record	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	338	pointers	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	339	timepoint	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	340	monotonic	*mut uint64_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	341	shhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	342	shmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	343	medhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	344	medmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	345	lngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	346	lngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	347	lnghalfhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	348	lngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	349	vlngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	350	vlngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	351	vlngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	352	chart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	353	rawchart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	354	compbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	355	rawchartsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	356	compbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	357	compsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	358	zstr	z_stream	BUF	Mutex<z_stream> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	3723	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	382	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/charts.rs	402	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	208	main_thread	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	209	keep_alive	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	210	conncachetab	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	211	conncachehash	[*mut connentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	212	capacity	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	213	lruhead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	214	lrutail	*mut *mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	215	freehead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	216	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/conncache.rs	37	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	146	it_set	itimerval	BUF	Mutex<itimerval> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	156	addusec	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	157	addsec	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	158	lastautime	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	159	lastastime	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/cpuusage.rs	160	lastget	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/lwthread.rs	170	thattr	*mut pthread_attr_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/lwthread.rs	171	thattr_detached	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/lwthread.rs	33	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	2528	firstflag	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	33	stdout	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	34	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -473,23 +239,7 @@ mfschunkserver	mfschunkserver/src/mfscommon/main.rs	821	loop_start	::core::ffi::
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	822	signalpipe	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	97	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/main.rs	98	optind	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/pcqueue.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/random.rs	52	i	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/random.rs	53	j	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/random.rs	54	p	[uint8_t; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -499,10 +249,184 @@ mfschunkserver	mfschunkserver/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	B
 mfschunkserver	mfschunkserver/src/mfscommon/strerr.rs	769	errhash	*mut errent	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/strerr.rs	770	errhsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfschunkserver	mfschunkserver/src/mfscommon/strerr.rs	772	strerrstorage	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/timeparser.rs	294	timetab	[uint32_t; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/timeparser.rs	301	timesym	[::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/timeparser.rs	334	timetab	[uint32_t; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfschunkserver	mfschunkserver/src/mfscommon/timeparser.rs	335	timesym	[::core::ffi::c_char; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/chunkrwlock.rs	172	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/chunkrwlock.rs	187	hashtab	[*mut chunkrec; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/chunkrwlock.rs	188	freeblocks	*mut chunkrec	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/chunkrwlock.rs	189	freeblockscnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/chunkrwlock.rs	22	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/chunksdatacache.rs	145	chunks_inode_hash	*mut *mut chunks_inode_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/chunksdatacache.rs	147	chunks_data_hash	*mut *mut chunks_data_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/chunksdatacache.rs	149	lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/chunksdatacache.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/csdb.rs	59	csdbhtab	[*mut csdbentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/csdb.rs	60	csdblock	*mut pthread_mutex_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/csorder.rs	111	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/csorder.rs	85	pd	parser_data	BUF	Mutex<parser_data> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	200	ep_tail	*mut *mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	201	ep_head	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	202	ep_unused	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	203	ep_unused_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	204	ep_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	219	ep_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	231	ep_worker	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/extrapackets.rs	30	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/heapsorter.rs	10	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/heapsorter.rs	85	heap	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/heapsorter.rs	86	heapsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/heapsorter.rs	87	heapelements	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	200	ileng_used	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	201	ileng_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	26	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	337	ileng_allocated	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	338	ileng_free_head	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	339	ileng_buckets_head	*mut ileng_bucket	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	340	inolenghashtab	[*mut ileng; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/inoleng.rs	341	hashlock	[pthread_mutex_t; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	1002	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	1868	notsup	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	2417	trycnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	703	threchash	[*mut threc; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	704	threcfree	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	705	threcnextid	uint16_t	STATIC	AtomicU16	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	708	amtime_hash	[*mut amtime_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	712	af_hash	[*mut acquired_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	713	af_lrutail	*mut *mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	714	af_lruhead	*mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	715	af_lru_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	716	timediffusec	int64_t	STATIC	AtomicI64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	719	sock_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	720	recv_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	721	send_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	722	fd	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	723	disconnect	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	724	donotsendsustainedinodes	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	725	lastwrite	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	726	sessionlost	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	727	lastsyncsend	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	728	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	729	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	732	rcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	733	wcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	734	fcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	735	rbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	736	wbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	737	rpthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	738	npthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	739	reclock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	754	aflock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	769	fdlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	784	amtimelock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	799	reckey	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	800	mainrec	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	801	sessionid	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	802	metaid	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	803	masterversion	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	804	masterprocessid	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	805	attrsize	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	806	masterstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	807	masterip	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	808	masterport	uint16_t	STATIC	AtomicU16	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	809	srcstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	810	srcip	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	811	fterm	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	812	working_flags	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	910	statsptr	[*mut ::core::ffi::c_void; 7] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/mastercomm.rs	912	connect_args	connect_args_t	BUF	Mutex<connect_args_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	1849	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	20416	total_bytes_rcvd	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	633	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	786	rangesstorage	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	787	readahead_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	788	readahead_trigger	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	789	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	790	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	791	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	792	maxreadaheadsize	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	793	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	794	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	795	reqbufftotalsize	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	796	indhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	797	inode_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	812	workers_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	827	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	828	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	829	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	841	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/readdata.rs	842	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/stats.rs	80	firstnode	*mut statsnode	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/stats.rs	81	allactiveplengs	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/stats.rs	82	activenodes	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/stats.rs	83	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	14698	total_bytes_sent	uint64_t	STATIC	AtomicU64	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	4196	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	539	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	638	fcblock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	653	fcbcond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	665	fcbwaiting	uint16_t	STATIC	AtomicU16	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	666	cacheblocks	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	667	freecblockshead	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	668	freecacheblocks	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	669	cacheblockcount	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	670	optimeout	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	671	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	672	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	673	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	674	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	675	idhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	676	hashlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	691	workerslock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	706	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	707	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	708	worker_term_waiting	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	709	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	721	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
+mfsclient	mfsclient/src/writedata.rs	722	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	1259	png_tailer	[uint8_t; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	1277	png_1x1	[uint8_t; 68]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	1347	font	[[uint8_t; 9]; 25]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	337	calcdefs	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	338	calcstartpos	*mut *mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	339	calcdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	340	statdefs	*mut statdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	341	statdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	342	estatdefs	*mut estatdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	343	estatdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	344	statsfilename	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	345	series	*mut stat_record	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	346	pointers	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	347	timepoint	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	348	monotonic	*mut uint64_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	349	shhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	350	shmin	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	351	medhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	352	medmin	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	353	lngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	354	lngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	355	lnghalfhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	356	lngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	357	vlngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	358	vlngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	359	vlngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	360	chart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	361	rawchart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	362	compbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	363	rawchartsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	364	compbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	365	compsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	366	zstr	z_stream	BUF	Mutex<z_stream> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	3731	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	390	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/charts.rs	410	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+mfscommon	mfscommon/src/mfslog.rs	38	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/processname.rs	26	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/processname.rs	27	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
+mfscommon	mfscommon/src/processname.rs	28	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+mfscommon	mfscommon/src/processname.rs	42	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/cfg.rs	1077	usedvalue	[::core::ffi::c_char; 1000]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/cfg.rs	1158	usedvalue	[::core::ffi::c_char; 1000]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/cfg.rs	1189	usedvalue	[::core::ffi::c_char; 1000]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -522,8 +446,6 @@ mfsgui	mfsgui/src/mfscommon/cfg.rs	203	usedhead	*mut paramstr	UNKNOWN	Option<Non
 mfsgui	mfsgui/src/mfscommon/cfg.rs	204	logundefined	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/cfg.rs	205	dangerous	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/cfg.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/main.rs	1670	firstflag	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/main.rs	2295	termsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/main.rs	2296	reloadsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -561,31 +483,11 @@ mfsgui	mfsgui/src/mfscommon/main.rs	711	loop_start	::core::ffi::c_double	BUF	Mut
 mfsgui	mfsgui/src/mfscommon/main.rs	712	signalpipe	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/main.rs	93	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/main.rs	94	optind	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/strerr.rs	15	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/strerr.rs	769	errhash	*mut errent	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/strerr.rs	770	errhsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsgui	mfsgui/src/mfscommon/strerr.rs	772	strerrstorage	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/timeparser.rs	294	timetab	[uint32_t; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/timeparser.rs	301	timesym	[::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/timeparser.rs	334	timetab	[uint32_t; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsgui	mfsgui/src/mfscommon/timeparser.rs	335	timesym	[::core::ffi::c_char; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfsgui/mfsgui.rs	34	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsgui	mfsgui/src/mfsgui/mfsgui.rs	429	mimes	[mimetype; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsgui	mfsgui/src/mfsgui/mfsgui.rs	465	chldhash	[*mut chld; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -625,51 +527,6 @@ mfsmaster	mfsmaster/src/mfscommon/cfg.rs	203	usedhead	*mut paramstr	UNKNOWN	Opti
 mfsmaster	mfsmaster/src/mfscommon/cfg.rs	204	logundefined	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/cfg.rs	205	dangerous	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/cfg.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	1251	png_tailer	[uint8_t; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	1269	png_1x1	[uint8_t; 68]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	13	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	1339	font	[[uint8_t; 9]; 25]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	329	calcdefs	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	330	calcstartpos	*mut *mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	331	calcdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	332	statdefs	*mut statdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	333	statdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	334	estatdefs	*mut estatdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	335	estatdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	336	statsfilename	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	337	series	*mut stat_record	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	338	pointers	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	339	timepoint	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	340	monotonic	*mut uint64_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	341	shhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	342	shmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	343	medhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	344	medmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	345	lngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	346	lngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	347	lnghalfhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	348	lngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	349	vlngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	350	vlngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	351	vlngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	352	chart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	353	rawchart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	354	compbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	355	rawchartsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	356	compbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	357	compsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	358	zstr	z_stream	BUF	Mutex<z_stream> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	3723	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	382	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/charts.rs	402	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	146	it_set	itimerval	BUF	Mutex<itimerval> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	156	addusec	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	157	addsec	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	158	lastautime	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	159	lastastime	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/cpuusage.rs	160	lastget	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/cuckoohash.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/dictionary.rs	180	dicthashtab	[*mut *mut dictentry; 2048] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/dictionary.rs	182	dictrehashpos	uint32_t	STATIC	AtomicU32	auto:type-shape
@@ -678,7 +535,6 @@ mfsmaster	mfsmaster/src/mfscommon/dictionary.rs	184	dicthashelem	uint32_t	STATIC
 mfsmaster	mfsmaster/src/mfscommon/dictionary.rs	33	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/globengine.rs	140	globtab	[globcache; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/globengine.rs	25	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/labelparser.rs	1356	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/main.rs	1759	firstflag	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/main.rs	2389	termsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/main.rs	2390	reloadsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -716,23 +572,7 @@ mfsmaster	mfsmaster/src/mfscommon/main.rs	800	loop_start	::core::ffi::c_double	B
 mfsmaster	mfsmaster/src/mfscommon/main.rs	801	signalpipe	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/main.rs	93	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/main.rs	94	optind	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/pcqueue.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/random.rs	14	i	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/random.rs	15	j	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/random.rs	16	p	[uint8_t; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -741,10 +581,6 @@ mfsmaster	mfsmaster/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	BUF	Mutex<[
 mfsmaster	mfsmaster/src/mfscommon/strerr.rs	769	errhash	*mut errent	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/strerr.rs	770	errhsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsmaster	mfsmaster/src/mfscommon/strerr.rs	772	strerrstorage	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/timeparser.rs	294	timetab	[uint32_t; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/timeparser.rs	301	timesym	[::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/timeparser.rs	334	timetab	[uint32_t; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmaster	mfsmaster/src/mfscommon/timeparser.rs	335	timesym	[::core::ffi::c_char; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfsmaster/appendres.rs	18	appendreshash	[*mut appendreservation; 1024] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmaster	mfsmaster/src/mfsmaster/bgsaver.rs	1417	readbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmaster	mfsmaster/src/mfsmaster/bgsaver.rs	1418	readbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
@@ -1352,8 +1188,6 @@ mfsmetalogger	mfsmetalogger/src/mfscommon/cfg.rs	203	usedhead	*mut paramstr	UNKN
 mfsmetalogger	mfsmetalogger/src/mfscommon/cfg.rs	204	logundefined	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/cfg.rs	205	dangerous	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/cfg.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	1671	firstflag	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	2301	termsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	2302	reloadsignal	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
@@ -1391,31 +1225,11 @@ mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	712	loop_start	::core::ffi::c_
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	713	signalpipe	[::core::ffi::c_int; 2]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	93	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/main.rs	94	optind	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/strerr.rs	15	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/strerr.rs	769	errhash	*mut errent	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/strerr.rs	770	errhsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfscommon/strerr.rs	772	strerrstorage	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/timeparser.rs	294	timetab	[uint32_t; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/timeparser.rs	301	timesym	[::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/timeparser.rs	334	timetab	[uint32_t; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmetalogger	mfsmetalogger/src/mfscommon/timeparser.rs	335	timesym	[::core::ffi::c_char; 3]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	1761	readbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	1762	readbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	38	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -1431,19 +1245,6 @@ mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	474	download_hook	*m
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	475	lastlogversion	uint64_t	STATIC	AtomicU64	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	476	stats_bytesout	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsmetalogger	mfsmetalogger/src/mfsmetalogger/masterconn.rs	477	stats_bytesin	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunkrwlock.rs	172	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunkrwlock.rs	187	hashtab	[*mut chunkrec; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunkrwlock.rs	188	freeblocks	*mut chunkrec	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunkrwlock.rs	189	freeblockscnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunkrwlock.rs	22	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunksdatacache.rs	145	chunks_inode_hash	*mut *mut chunks_inode_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunksdatacache.rs	147	chunks_data_hash	*mut *mut chunks_data_entry =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunksdatacache.rs	149	lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/chunksdatacache.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/csdb.rs	59	csdbhtab	[*mut csdbentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/csdb.rs	60	csdblock	*mut pthread_mutex_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/csorder.rs	111	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/csorder.rs	85	pd	parser_data	BUF	Mutex<parser_data> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/dentry_invalidator.rs	192	hashtab	*mut *mut dinval_element	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/dentry_invalidator.rs	193	elementcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/dentry_invalidator.rs	194	queue_prev	*mut *mut dinval_element	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -1454,14 +1255,6 @@ mfsmount	mfsmount/src/mfsclient/dentry_invalidator.rs	29	stderr	*mut FILE	UNKNOW
 mfsmount	mfsmount/src/mfsclient/dirattrcache.rs	198	head	*mut dircache	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/dirattrcache.rs	199	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/dirattrcache.rs	38	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	200	ep_tail	*mut *mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	201	ep_head	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	202	ep_unused	*mut extra_packets	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	203	ep_unused_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	204	ep_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	219	ep_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	231	ep_worker	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/extrapackets.rs	30	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/fdcache.rs	182	fdcachee_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/fdcache.rs	197	fdcachee_used	uint64_t	STATIC	AtomicU64	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/fdcache.rs	198	fdcachee_buckets_head	*mut fdcachee_bucket	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -1478,69 +1271,6 @@ mfsmount	mfsmount/src/mfsclient/getgroups.rs	237	to	::core::ffi::c_double	BUF	Mu
 mfsmount	mfsmount/src/mfsclient/getgroups.rs	238	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/getgroups.rs	253	debug_mode	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/getgroups.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/heapsorter.rs	10	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/heapsorter.rs	85	heap	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/heapsorter.rs	86	heapsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/heapsorter.rs	87	heapelements	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	200	ileng_used	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	201	ileng_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	26	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	337	ileng_allocated	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	338	ileng_free_head	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	339	ileng_buckets_head	*mut ileng_bucket	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	340	inolenghashtab	[*mut ileng; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/inoleng.rs	341	hashlock	[pthread_mutex_t; 1024]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	1002	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	1868	notsup	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	2417	trycnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	703	threchash	[*mut threc; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	704	threcfree	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	705	threcnextid	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	708	amtime_hash	[*mut amtime_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	712	af_hash	[*mut acquired_file; 4096]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	713	af_lrutail	*mut *mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	714	af_lruhead	*mut acquired_file	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	715	af_lru_cnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	716	timediffusec	int64_t	STATIC	AtomicI64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	719	sock_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	720	recv_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	721	send_timeout	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	722	fd	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	723	disconnect	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	724	donotsendsustainedinodes	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	725	lastwrite	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	726	sessionlost	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	727	lastsyncsend	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	728	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	729	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	732	rcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	733	wcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	734	fcnt	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	735	rbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	736	wbyt	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	737	rpthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	738	npthid	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	739	reclock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	754	aflock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	769	fdlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	784	amtimelock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	799	reckey	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	800	mainrec	*mut threc	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	801	sessionid	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	802	metaid	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	803	masterversion	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	804	masterprocessid	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	805	attrsize	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	806	masterstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	807	masterip	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	808	masterport	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	809	srcstrip	[::core::ffi::c_char; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	810	srcip	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	811	fterm	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	812	working_flags	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	910	statsptr	[*mut ::core::ffi::c_void; 7] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/mastercomm.rs	912	connect_args	connect_args_t	BUF	Mutex<connect_args_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/masterproxy.rs	342	lsock	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/masterproxy.rs	343	proxythread	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/masterproxy.rs	344	terminate	uint8_t	STATIC	AtomicU8	auto:type-shape
@@ -1650,32 +1380,6 @@ mfsmount	mfsmount/src/mfsclient/oplog.rs	214	nodata	pthread_cond_t	BUF	Mutex<pth
 mfsmount	mfsmount/src/mfsclient/oplog.rs	215	convts	time_t	STATIC	AtomicI64	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/oplog.rs	216	convtm	tm	BUF	Mutex<tm> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/oplog.rs	229	timelock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	1849	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	20416	total_bytes_rcvd	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	633	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	786	rangesstorage	pthread_key_t	BUF	Mutex<pthread_key_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	787	readahead_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	788	readahead_trigger	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	789	usectimeout	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	790	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	791	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	792	maxreadaheadsize	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	793	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	794	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	795	reqbufftotalsize	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	796	indhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	797	inode_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	812	workers_lock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	827	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	828	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	829	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	841	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/readdata.rs	842	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/stats.rs	80	firstnode	*mut statsnode	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/stats.rs	81	allactiveplengs	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/stats.rs	82	activenodes	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/stats.rs	83	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/sustained_inodes.rs	137	clthread	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/sustained_inodes.rs	138	term	uint8_t	STATIC	AtomicU8	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/sustained_inodes.rs	139	lastlist	*mut sinodes_ino	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -1698,79 +1402,13 @@ mfsmount	mfsmount/src/mfsclient/symlinkcache.rs	144	slcachelock	pthread_mutex_t	
 mfsmount	mfsmount/src/mfsclient/symlinkcache.rs	159	timeout	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/symlinkcache.rs	160	statsptr	[*mut ::core::ffi::c_void; 4] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/symlinkcache.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	14698	total_bytes_sent	uint64_t	STATIC	AtomicU64	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	4196	lastnotify	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	539	errtab	[*const ::core::ffi::c_char; 65]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	638	fcblock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	653	fcbcond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	665	fcbwaiting	uint16_t	STATIC	AtomicU16	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	666	cacheblocks	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	667	freecblockshead	*mut cblock	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	668	freecacheblocks	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	669	cacheblockcount	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	670	optimeout	::core::ffi::c_double	BUF	Mutex<::core::ffi::c_double> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	671	maxretries	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	672	minlogretry	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	673	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	674	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	675	idhash	*mut *mut inodedata	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	676	hashlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	691	workerslock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	706	workers_avail	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	707	workers_total	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	708	worker_term_waiting	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	709	worker_term_cond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	721	worker_thattr	pthread_attr_t	BUF	Mutex<pthread_attr_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfsclient/writedata.rs	722	jqueue	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	151	lruhead	*mut xattr_cache_entry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	152	lrutail	*mut *mut xattr_cache_entry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	153	hashtab	*mut *mut xattr_cache_entry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	154	xattr_cache_timeout	int64_t	STATIC	AtomicI64	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	155	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfsclient/xattrcache.rs	26	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	208	main_thread	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	209	keep_alive	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	210	conncachetab	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	211	conncachehash	[*mut connentry; 256]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	212	capacity	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	213	lruhead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	214	lrutail	*mut *mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	215	freehead	*mut connentry	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	216	glock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/conncache.rs	37	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/crc.rs	153	crc_combine_table	[[[uint32_t; 256]; 4]; 32]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/crc.rs	4	crc_table	[[uint32_t; 256]; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	235	heap	*mut heapelem	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	236	heapelements	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	237	heapsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	238	exitflag	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	239	waiting	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	240	dlock	pthread_mutex_t	BUF	Mutex<pthread_mutex_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	255	dcond	pthread_cond_t	BUF	Mutex<pthread_cond_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	267	delay_th	pthread_t	BUF	Mutex<pthread_t> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/delayrun.rs	61	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/labelparser.rs	1356	stack	[uint8_t; 128]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/lwthread.rs	170	thattr	*mut pthread_attr_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/lwthread.rs	171	thattr_detached	uint8_t	STATIC	AtomicU8	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/lwthread.rs	33	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/md5.rs	24	padding	[uint8_t; 64]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	126	mfs_log_sink	Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>	BUF	Mutex<Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	127	force_stderr	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	128	use_colors	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	129	stderr_active	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	130	mfs_log_min_level	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	131	mfs_log_elevate_to	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	132	syslog_open	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	134	mfs_log_priority_strings	[*const ::core::ffi::c_char; 5]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	270	lfd	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/mfslog.rs	6	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfscommon/pcqueue.rs	28	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/processname.rs	21	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/processname.rs	22	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/processname.rs	23	myenvcpy	*mut *mut ::core::ffi::c_char =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-mfsmount	mfsmount/src/mfscommon/processname.rs	33	environ_0	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfscommon/strerr.rs	15	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 mfsmount	mfsmount/src/mfscommon/strerr.rs	218	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 mfsmount	mfsmount/src/mfscommon/strerr.rs	769	errhash	*mut errent	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
