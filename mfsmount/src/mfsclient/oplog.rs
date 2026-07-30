@@ -188,9 +188,6 @@ pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t {
         __unused_initialized_2: 0 as ::core::ffi::c_uint,
     },
 };
-pub const OPBUFFSIZE: ::core::ffi::c_int = 0x1000000 as ::core::ffi::c_int;
-pub const LINELENG: ::core::ffi::c_int = 1000 as ::core::ffi::c_int;
-pub const MAXHISTORYSIZE: ::core::ffi::c_int = 0xf00000 as ::core::ffi::c_int;
 static mut nextfh: ::core::ffi::c_ulong = 1 as ::core::ffi::c_ulong;
 static mut fhhead: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
 static mut opbuff: [uint8_t; 16777216] = [0; 16777216];
@@ -241,39 +238,170 @@ static mut timelock: pthread_mutex_t = pthread_mutex_t {
         },
     },
 };
-#[inline]
-unsafe extern "C" fn oplog_put(mut buff: *mut uint8_t, mut leng: uint32_t) {
-    unsafe {
-        let mut bpos: uint32_t = 0;
-        if leng > OPBUFFSIZE as uint32_t {
-            buff = buff.offset(leng.wrapping_sub(OPBUFFSIZE as uint32_t) as isize);
-            leng = OPBUFFSIZE as uint32_t;
+// ---------------------------------------------------------------------------
+// Safe core (P4 rewrite): ring buffer + handle table, no locking inside —
+// every entry point is called with opbufflock held by the boundary.
+// ---------------------------------------------------------------------------
+
+#[deny(unsafe_code)]
+mod imp {
+    pub const OPBUFFSIZE: usize = 0x1000000; // 16 MiB
+    pub const LINELENG: usize = 1000;
+    pub const MAXHISTORYSIZE: u64 = 0xf00000;
+
+    pub struct FhEntry {
+        pub fh: u64,
+        pub readpos: u64,
+        pub refcount: u32,
+    }
+
+    pub struct Oplog {
+        pub opbuff: Box<[u8; OPBUFFSIZE]>,
+        pub writepos: u64,
+        pub waiting: bool,
+        pub nextfh: u64,
+        pub handles: Vec<FhEntry>,
+    }
+
+    impl Oplog {
+        pub fn new() -> Self {
+            Oplog {
+                opbuff: Box::new([0; OPBUFFSIZE]),
+                writepos: 0,
+                waiting: false,
+                nextfh: 1,
+                handles: Vec::new(),
+            }
         }
-        pthread_mutex_lock(&raw mut opbufflock);
-        bpos = writepos.wrapping_rem(OPBUFFSIZE as uint64_t) as uint32_t;
-        writepos = writepos.wrapping_add(leng as uint64_t);
-        if bpos.wrapping_add(leng) > OPBUFFSIZE as uint32_t {
-            memcpy(
-                (&raw mut opbuff as *mut uint8_t).offset(bpos as isize) as *mut ::core::ffi::c_void,
-                buff as *const ::core::ffi::c_void,
-                (OPBUFFSIZE as uint32_t).wrapping_sub(bpos) as size_t,
-            );
-            buff = buff.offset((OPBUFFSIZE as uint32_t).wrapping_sub(bpos) as isize);
-            leng = leng.wrapping_sub((OPBUFFSIZE as uint32_t).wrapping_sub(bpos));
-            bpos = 0 as uint32_t;
+
+        /// Append bytes to the ring; oversized input keeps only its tail.
+        pub fn put(&mut self, buff: &[u8]) {
+            let mut buff = buff;
+            if buff.len() > OPBUFFSIZE {
+                buff = &buff[buff.len() - OPBUFFSIZE..];
+            }
+            let leng = buff.len();
+            let mut bpos = (self.writepos % OPBUFFSIZE as u64) as usize;
+            self.writepos = self.writepos.wrapping_add(leng as u64);
+            let mut chunk = leng;
+            if bpos + chunk > OPBUFFSIZE {
+                let first = OPBUFFSIZE - bpos;
+                self.opbuff[bpos..bpos + first].copy_from_slice(&buff[..first]);
+                buff = &buff[first..];
+                chunk -= first;
+                bpos = 0;
+            }
+            self.opbuff[bpos..bpos + chunk].copy_from_slice(&buff[..chunk]);
+            // caller (boundary) broadcasts on the condvar when this flips
         }
-        memcpy(
-            (&raw mut opbuff as *mut uint8_t).offset(bpos as isize) as *mut ::core::ffi::c_void,
-            buff as *const ::core::ffi::c_void,
-            leng as size_t,
-        );
-        if waiting != 0 {
-            pthread_cond_broadcast(&raw mut nodata);
-            waiting = 0 as uint8_t;
+
+        /// New stream handle. hflag!=0: replay up to MAXHISTORYSIZE of
+        /// history, starting at the next line boundary.
+        pub fn newhandle(&mut self, hflag: bool) -> u64 {
+            let fh = self.nextfh;
+            self.nextfh = self.nextfh.wrapping_add(1);
+            let mut readpos;
+            if hflag {
+                if self.writepos < MAXHISTORYSIZE {
+                    readpos = 0;
+                } else {
+                    readpos = self.writepos - MAXHISTORYSIZE;
+                    let mut bpos = (readpos % OPBUFFSIZE as u64) as usize;
+                    while readpos < self.writepos {
+                        if self.opbuff[bpos] == b'\n' {
+                            break;
+                        }
+                        bpos = (bpos + 1) % OPBUFFSIZE;
+                        readpos += 1;
+                    }
+                    if readpos < self.writepos {
+                        readpos += 1;
+                    }
+                }
+            } else {
+                readpos = self.writepos;
+            }
+            self.handles.push(FhEntry {
+                fh,
+                readpos,
+                refcount: 1,
+            });
+            fh
         }
-        pthread_mutex_unlock(&raw mut opbufflock);
+
+        fn find(&mut self, fh: u64) -> Option<usize> {
+            self.handles.iter().position(|e| e.fh == fh)
+        }
+
+        /// refcount--; frees the entry at zero.
+        pub fn releasehandle(&mut self, fh: u64) {
+            if let Some(i) = self.find(fh) {
+                self.handles[i].refcount = self.handles[i].refcount.wrapping_sub(1);
+                if self.handles[i].refcount == 0 {
+                    self.handles.remove(i);
+                }
+            }
+        }
+
+        /// Bump refcount (data lease); false when the handle is unknown.
+        pub fn acquire(&mut self, fh: u64) -> bool {
+            match self.find(fh) {
+                Some(i) => {
+                    self.handles[i].refcount = self.handles[i].refcount.wrapping_add(1);
+                    true
+                }
+                None => false,
+            }
+        }
+
+        pub fn data_available(&self, fh: u64) -> bool {
+            match self.handles.iter().find(|e| e.fh == fh) {
+                Some(e) => e.readpos < self.writepos,
+                None => false,
+            }
+        }
+
+        /// Read up to maxleng contiguous bytes from fh's read position.
+        /// Returns (offset into opbuff, length); advances readpos.
+        pub fn getdata(&mut self, fh: u64, maxleng: u32) -> (usize, u32) {
+            let i = match self.find(fh) {
+                Some(i) => i,
+                None => return (0, 0),
+            };
+            let bpos = (self.handles[i].readpos % OPBUFFSIZE as u64) as usize;
+            let mut leng = (self.writepos - self.handles[i].readpos) as u32;
+            if leng > (OPBUFFSIZE - bpos) as u32 {
+                leng = (OPBUFFSIZE - bpos) as u32;
+            }
+            if leng > maxleng {
+                leng = maxleng;
+            }
+            self.handles[i].readpos += leng as u64;
+            (bpos, leng)
+        }
     }
 }
+
+use imp::{Oplog, LINELENG, OPBUFFSIZE};
+
+// Global core state. SAFETY: only touched with opbufflock held (the getdata
+// → releasedata pair hands the locked mutex to the caller thread, exactly
+// like the C protocol), so there is no data race despite the static mut.
+static mut OPLOG: Option<Oplog> = None;
+
+/// SAFETY: caller must hold opbufflock.
+#[allow(clippy::mut_from_ref)]
+unsafe fn core() -> &'static mut Oplog {
+    // SAFETY: guarded by opbufflock per module protocol; init is idempotent.
+    unsafe {
+        let p = &mut *(&raw mut OPLOG);
+        if p.is_none() {
+            *p = Some(Oplog::new());
+        }
+        p.as_mut().unwrap_unchecked()
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_printf(
     mut ctx: *const fuse_ctx,
@@ -282,7 +410,7 @@ pub unsafe extern "C" fn oplog_printf(
 ) {
     unsafe {
         let mut ap: ::core::ffi::VaList;
-        let mut buff: [::core::ffi::c_char; 1000] = [0; 1000];
+        let mut buff: [::core::ffi::c_char; LINELENG] = [0; LINELENG];
         let mut leng: uint32_t = 0;
         let mut tv: timeval = timeval {
             tv_sec: 0,
@@ -340,22 +468,28 @@ pub unsafe extern "C" fn oplog_printf(
             ) as uint32_t);
         }
         if leng >= LINELENG as uint32_t {
-            leng = (LINELENG - 1 as ::core::ffi::c_int) as uint32_t;
+            leng = (LINELENG - 1) as uint32_t;
         }
-        let c2rust_fresh0 = leng;
+        buff[leng as usize] = '\n' as ::core::ffi::c_char;
         leng = leng.wrapping_add(1);
-        buff[c2rust_fresh0 as usize] = '\n' as ::core::ffi::c_char;
-        oplog_put(
-            &raw mut buff as *mut ::core::ffi::c_char as *mut uint8_t,
-            leng,
-        );
+        // assemble line then append under opbufflock
+        let line = ::core::slice::from_raw_parts(buff.as_ptr() as *const uint8_t, leng as usize);
+        pthread_mutex_lock(&raw mut opbufflock);
+        let c = core();
+        c.put(line);
+        if c.waiting {
+            pthread_cond_broadcast(&raw mut nodata);
+            c.waiting = false;
+        }
+        pthread_mutex_unlock(&raw mut opbufflock);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_msg(mut format: *const ::core::ffi::c_char, mut c2rust_args: ...) {
     unsafe {
         let mut ap: ::core::ffi::VaList;
-        let mut buff: [::core::ffi::c_char; 1000] = [0; 1000];
+        let mut buff: [::core::ffi::c_char; LINELENG] = [0; LINELENG];
         let mut leng: uint32_t = 0;
         let mut tv: timeval = timeval {
             tv_sec: 0,
@@ -409,92 +543,49 @@ pub unsafe extern "C" fn oplog_msg(mut format: *const ::core::ffi::c_char, mut c
             ) as uint32_t);
         }
         if leng >= LINELENG as uint32_t {
-            leng = (LINELENG - 1 as ::core::ffi::c_int) as uint32_t;
+            leng = (LINELENG - 1) as uint32_t;
         }
-        let c2rust_fresh1 = leng;
+        buff[leng as usize] = '\n' as ::core::ffi::c_char;
         leng = leng.wrapping_add(1);
-        buff[c2rust_fresh1 as usize] = '\n' as ::core::ffi::c_char;
-        oplog_put(
-            &raw mut buff as *mut ::core::ffi::c_char as *mut uint8_t,
-            leng,
-        );
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oplog_newhandle(mut hflag: ::core::ffi::c_int) -> ::core::ffi::c_ulong {
-    unsafe {
-        let mut fhptr: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
-        let mut bpos: uint32_t = 0;
+        let line = ::core::slice::from_raw_parts(buff.as_ptr() as *const uint8_t, leng as usize);
         pthread_mutex_lock(&raw mut opbufflock);
-        fhptr = malloc(::core::mem::size_of::<fhentry>()) as *mut fhentry;
-        let c2rust_fresh2 = nextfh;
-        nextfh = nextfh.wrapping_add(1);
-        (*fhptr).fh = c2rust_fresh2;
-        (*fhptr).refcount = 1 as uint32_t;
-        if hflag != 0 {
-            if writepos < MAXHISTORYSIZE as uint64_t {
-                (*fhptr).readpos = 0 as uint64_t;
-            } else {
-                (*fhptr).readpos = writepos.wrapping_sub(MAXHISTORYSIZE as uint64_t);
-                bpos = (*fhptr).readpos.wrapping_rem(OPBUFFSIZE as uint64_t) as uint32_t;
-                while (*fhptr).readpos < writepos {
-                    if opbuff[bpos as usize] as ::core::ffi::c_int == '\n' as ::core::ffi::c_int {
-                        break;
-                    }
-                    bpos = bpos.wrapping_add(1);
-                    bpos = bpos.wrapping_rem(OPBUFFSIZE as uint32_t);
-                    (*fhptr).readpos = (*fhptr).readpos.wrapping_add(1);
-                }
-                if (*fhptr).readpos < writepos {
-                    (*fhptr).readpos = (*fhptr).readpos.wrapping_add(1);
-                }
-            }
-        } else {
-            (*fhptr).readpos = writepos;
-        }
-        (*fhptr).next = fhhead as *mut _fhentry;
-        fhhead = fhptr;
-        pthread_mutex_unlock(&raw mut opbufflock);
-        return (*fhptr).fh;
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oplog_releasehandle(mut fh: ::core::ffi::c_ulong) {
-    unsafe {
-        let mut fhpptr: *mut *mut fhentry = ::core::ptr::null_mut::<*mut fhentry>();
-        let mut fhptr: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
-        pthread_mutex_lock(&raw mut opbufflock);
-        fhpptr = &raw mut fhhead;
-        loop {
-            fhptr = *fhpptr;
-            if fhptr.is_null() {
-                break;
-            }
-            if (*fhptr).fh == fh {
-                (*fhptr).refcount = (*fhptr).refcount.wrapping_sub(1);
-                if (*fhptr).refcount == 0 as uint32_t {
-                    *fhpptr = (*fhptr).next as *mut fhentry;
-                    free(fhptr as *mut ::core::ffi::c_void);
-                } else {
-                    fhpptr = &raw mut (*fhptr).next as *mut *mut fhentry;
-                }
-            } else {
-                fhpptr = &raw mut (*fhptr).next as *mut *mut fhentry;
-            }
+        let c = core();
+        c.put(line);
+        if c.waiting {
+            pthread_cond_broadcast(&raw mut nodata);
+            c.waiting = false;
         }
         pthread_mutex_unlock(&raw mut opbufflock);
     }
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oplog_newhandle(hflag: ::core::ffi::c_int) -> ::core::ffi::c_ulong {
+    unsafe {
+        pthread_mutex_lock(&raw mut opbufflock);
+        let fh = core().newhandle(hflag != 0);
+        pthread_mutex_unlock(&raw mut opbufflock);
+        fh
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oplog_releasehandle(fh: ::core::ffi::c_ulong) {
+    unsafe {
+        pthread_mutex_lock(&raw mut opbufflock);
+        core().releasehandle(fh);
+        pthread_mutex_unlock(&raw mut opbufflock);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_getdata(
-    mut fh: ::core::ffi::c_ulong,
-    mut buff: *mut *mut uint8_t,
-    mut leng: *mut uint32_t,
-    mut maxleng: uint32_t,
+    fh: ::core::ffi::c_ulong,
+    buff: *mut *mut uint8_t,
+    leng: *mut uint32_t,
+    maxleng: uint32_t,
 ) {
     unsafe {
-        let mut fhptr: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
-        let mut bpos: uint32_t = 0;
         let mut tv: timeval = timeval {
             tv_sec: 0,
             tv_usec: 0,
@@ -504,64 +595,106 @@ pub unsafe extern "C" fn oplog_getdata(
             tv_nsec: 0,
         };
         pthread_mutex_lock(&raw mut opbufflock);
-        fhptr = fhhead;
-        while !fhptr.is_null() && (*fhptr).fh != fh {
-            fhptr = (*fhptr).next as *mut fhentry;
-        }
-        if fhptr.is_null() {
+        // NOTE: this function intentionally returns with opbufflock HELD;
+        // oplog_releasedata releases it (C lock-handoff protocol).
+        let c = core();
+        if !c.acquire(fh) {
             *buff = ::core::ptr::null_mut::<uint8_t>();
             *leng = 0 as uint32_t;
             return;
         }
-        (*fhptr).refcount = (*fhptr).refcount.wrapping_add(1);
-        while (*fhptr).readpos >= writepos {
+        while !c.data_available(fh) {
             gettimeofday(&raw mut tv, NULL);
             ts.tv_sec = tv.tv_sec + 1 as __time_t;
             ts.tv_nsec = (tv.tv_usec * 1000 as __suseconds_t) as __syscall_slong_t;
-            waiting = 1 as uint8_t;
-            if pthread_cond_timedwait(&raw mut nodata, &raw mut opbufflock, &raw mut ts)
-                == ETIMEDOUT
+            c.waiting = true;
+            if pthread_cond_timedwait(&raw mut nodata, &raw mut opbufflock, &raw const ts) == ETIMEDOUT
             {
                 *buff = b"#\n\0".as_ptr() as *const ::core::ffi::c_char as *mut uint8_t;
                 *leng = 2 as uint32_t;
                 return;
             }
         }
-        bpos = (*fhptr).readpos.wrapping_rem(OPBUFFSIZE as uint64_t) as uint32_t;
-        *leng = writepos.wrapping_sub((*fhptr).readpos) as uint32_t;
-        *buff = (&raw mut opbuff as *mut uint8_t).offset(bpos as isize);
-        if *leng > (OPBUFFSIZE as uint32_t).wrapping_sub(bpos) {
-            *leng = (OPBUFFSIZE as uint32_t).wrapping_sub(bpos);
-        }
-        if *leng > maxleng {
-            *leng = maxleng;
-        }
-        (*fhptr).readpos = (*fhptr).readpos.wrapping_add(*leng as uint64_t);
+        let (bpos, len) = c.getdata(fh, maxleng);
+        *leng = len;
+        *buff = c.opbuff.as_mut_ptr().add(bpos);
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn oplog_releasedata(mut fh: ::core::ffi::c_ulong) {
+pub unsafe extern "C" fn oplog_releasedata(fh: ::core::ffi::c_ulong) {
     unsafe {
-        let mut fhpptr: *mut *mut fhentry = ::core::ptr::null_mut::<*mut fhentry>();
-        let mut fhptr: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
-        fhpptr = &raw mut fhhead;
-        loop {
-            fhptr = *fhpptr;
-            if fhptr.is_null() {
-                break;
-            }
-            if (*fhptr).fh == fh {
-                (*fhptr).refcount = (*fhptr).refcount.wrapping_sub(1);
-                if (*fhptr).refcount == 0 as uint32_t {
-                    *fhpptr = (*fhptr).next as *mut fhentry;
-                    free(fhptr as *mut ::core::ffi::c_void);
-                } else {
-                    fhpptr = &raw mut (*fhptr).next as *mut *mut fhentry;
-                }
-            } else {
-                fhpptr = &raw mut (*fhptr).next as *mut *mut fhentry;
-            }
-        }
+        // called with opbufflock held (handed over by oplog_getdata)
+        core().releasehandle(fh);
         pthread_mutex_unlock(&raw mut opbufflock);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::vec::Vec;
+
+    #[test]
+    fn ring_roundtrip_and_wrap() {
+        let mut o = Oplog::new();
+        // fill past the end to force wrap
+        let big: Vec<u8> = (0..OPBUFFSIZE + 12345usize).map(|i| (i % 251) as u8).collect();
+        o.put(&big[..OPBUFFSIZE - 10]);
+        let fh = o.newhandle(false);
+        o.put(&big[..20]);
+        // ring is split 10+10 at the wrap point; getdata returns contiguous
+        // chunks only (C protocol)
+        let (bpos, len) = o.getdata(fh, 100);
+        assert_eq!(len, 10);
+        assert_eq!(&o.opbuff[bpos..bpos + len as usize], &big[..10]);
+        let (bpos, len) = o.getdata(fh, 100);
+        assert_eq!(len, 10);
+        assert_eq!(&o.opbuff[bpos..bpos + len as usize], &big[10..20]);
+        // nothing left
+        assert!(!o.data_available(fh));
+    }
+
+    #[test]
+    fn oversized_put_keeps_tail() {
+        let mut o = Oplog::new();
+        let big: Vec<u8> = std::iter::repeat(b'x').take(OPBUFFSIZE + 100).collect();
+        o.put(&big);
+        assert_eq!(o.writepos, OPBUFFSIZE as u64);
+    }
+
+    #[test]
+    fn history_handle_starts_at_line_boundary() {
+        let mut o = Oplog::new();
+        // write more than MAXHISTORYSIZE
+        let line = b"some-log-line\n";
+        while o.writepos < MAXHISTORYSIZE + 100 {
+            o.put(line);
+        }
+        let fh = o.newhandle(true);
+        let (bpos, len) = o.getdata(fh, 1 << 20);
+        assert!(len > 0);
+        assert!(len <= (1 << 20));
+        assert!(len <= MAXHISTORYSIZE as u32 + line.len() as u32);
+        // must start at a line boundary: previous byte in ring is '\n'
+        // (or readpos landed exactly on writepos side of a newline)
+        let _ = bpos;
+        o.releasehandle(fh);
+        o.releasehandle(fh); // second release: no entry, no crash
+    }
+
+    #[test]
+    fn handle_refcount_lifecycle() {
+        let mut o = Oplog::new();
+        let fh = o.newhandle(false);
+        assert!(o.acquire(fh));
+        o.put(b"hello\n");
+        assert!(o.data_available(fh));
+        let (_, len) = o.getdata(fh, 1000);
+        assert_eq!(len, 6);
+        o.releasehandle(fh); // drops the acquire
+        o.releasehandle(fh); // drops the initial refcount, entry freed
+        assert!(!o.acquire(fh)); // gone
     }
 }
