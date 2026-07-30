@@ -144,91 +144,140 @@ unsafe extern "C" fn sinodes_close(mut inode: uint32_t) {
         fs_forget_entry(inode);
     }
 }
-#[inline]
-unsafe extern "C" fn sinodes_open(mut inode: uint32_t) {
-    unsafe {
-        fs_add_entry(inode);
+// ---------------------------------------------------------------------------
+// Safe core (P4 rewrite): sorted inode table + merge-diff. The C kept two
+// malloc'd sorted linked lists (current/last) and diffed them in sinodes_end;
+// here they are sorted Vecs with identical merge semantics.
+// ---------------------------------------------------------------------------
+
+#[deny(unsafe_code)]
+pub mod imp {
+    #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+    pub struct InodeEntry {
+        pub inode: u32,
+        pub parent: u32,
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sinodes_process_inode(mut inode: uint32_t) {
-    unsafe {
-        let mut ril: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-        let mut rilp: *mut *mut sinodes_ino = ::core::ptr::null_mut::<*mut sinodes_ino>();
-        let mut parent: uint32_t = 0;
-        rilp = &raw mut currentlist;
-        loop {
-            ril = *rilp;
-            if ril.is_null() {
-                break;
-            }
-            if inode > (*ril).inode {
-                rilp = &raw mut (*ril).next as *mut *mut sinodes_ino;
-            } else {
-                if inode != (*ril).inode {
-                    break;
+
+    #[derive(Default)]
+    pub struct Sinodes {
+        last: Vec<InodeEntry>,
+        current: Vec<InodeEntry>,
+    }
+
+    impl Sinodes {
+        /// Record `inode` in the current scan (sorted insert/update).
+        /// `parent_of` resolves an inode's parent (sparents_get at the
+        /// boundary); parent 0 = unknown.
+        pub fn process_inode(&mut self, inode: u32, parent_of: &dyn Fn(u32) -> u32) {
+            match self.current.binary_search_by_key(&inode, |e| e.inode) {
+                Ok(i) => {
+                    let parent = parent_of(inode);
+                    if parent != 0 {
+                        self.current[i].parent = parent;
+                    }
                 }
-                parent = sparents_get(inode);
-                if parent != 0 as uint32_t {
-                    (*ril).parent = parent;
+                Err(i) => {
+                    self.current.insert(
+                        i,
+                        InodeEntry {
+                            inode,
+                            parent: parent_of(inode),
+                        },
+                    );
                 }
-                return;
             }
         }
-        ril = malloc(::core::mem::size_of::<sinodes_ino>()) as *mut sinodes_ino;
-        (*ril).inode = inode;
-        (*ril).parent = sparents_get(inode);
-        (*ril).next = *rilp as *mut _sinodes_ino;
-        *rilp = ril;
+
+        /// Diff current scan against the previous one; `open`/`close` are
+        /// fs_add_entry/fs_forget_entry at the boundary. Ends with
+        /// last = current, current cleared (exact C merge order).
+        pub fn end(
+            &mut self,
+            open: &mut dyn FnMut(u32),
+            close: &mut dyn FnMut(u32),
+        ) {
+            let mut l = 0usize; // cursor into last
+            let mut c = 0usize; // cursor into current
+            while l < self.last.len() || c < self.current.len() {
+                if c >= self.current.len()
+                    || (l < self.last.len() && self.last[l].inode < self.current[c].inode)
+                {
+                    let e = self.last[l];
+                    if e.parent != 0 {
+                        close(e.parent);
+                    }
+                    close(e.inode);
+                    l += 1;
+                } else if l >= self.last.len() || self.last[l].inode > self.current[c].inode {
+                    let e = self.current[c];
+                    open(e.inode);
+                    if e.parent != 0 {
+                        open(e.parent);
+                    }
+                    c += 1;
+                } else {
+                    let lp = self.last[l].parent;
+                    let cp = self.current[c].parent;
+                    if lp != cp {
+                        if lp != 0 {
+                            if cp == 0 {
+                                self.current[c].parent = lp;
+                            } else {
+                                close(lp);
+                            }
+                        }
+                        if self.current[c].parent != 0 {
+                            open(self.current[c].parent);
+                        }
+                    }
+                    l += 1;
+                    c += 1;
+                }
+            }
+            ::core::mem::swap(&mut self.last, &mut self.current);
+            self.current.clear();
+        }
     }
 }
+
+// SAFETY: module is single-init; scan thread + FUSE threads call these
+// functions under the mount's own serialization assumptions (same as C —
+// the original had no locking here either). ponytail: global state mirrors
+// the C design; per-instance state if a second consumer ever appears.
+static mut SINODES: Option<imp::Sinodes> = None;
+
+/// SAFETY: same serialization assumptions as the C original.
+unsafe fn sinodes() -> &'static mut imp::Sinodes {
+    unsafe {
+        let p = &mut *(&raw mut SINODES);
+        if p.is_none() {
+            *p = Some(imp::Sinodes::default());
+        }
+        p.as_mut().unwrap_unchecked()
+    }
+}
+
+/// SAFETY: boundary wrapper for sparents_get.
+unsafe fn parent_of(inode: uint32_t) -> uint32_t {
+    unsafe { sparents_get(inode) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sinodes_process_inode(inode: uint32_t) {
+    unsafe {
+        sinodes().process_inode(inode, &|i| parent_of(i));
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_end() {
     unsafe {
-        let mut rill: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-        let mut ricl: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-        rill = lastlist;
-        ricl = currentlist;
-        while !rill.is_null() || !ricl.is_null() {
-            if ricl.is_null() || !rill.is_null() && (*rill).inode < (*ricl).inode {
-                if (*rill).parent != 0 as uint32_t {
-                    sinodes_close((*rill).parent);
-                }
-                sinodes_close((*rill).inode);
-                rill = (*rill).next as *mut sinodes_ino;
-            } else if rill.is_null() || (*rill).inode > (*ricl).inode {
-                sinodes_open((*ricl).inode);
-                if (*ricl).parent != 0 as uint32_t {
-                    sinodes_open((*ricl).parent);
-                }
-                ricl = (*ricl).next as *mut sinodes_ino;
-            } else {
-                if (*rill).parent != (*ricl).parent {
-                    if (*rill).parent != 0 as uint32_t {
-                        if (*ricl).parent == 0 as uint32_t {
-                            (*ricl).parent = (*rill).parent;
-                        } else {
-                            sinodes_close((*rill).parent);
-                        }
-                    }
-                    if (*ricl).parent != 0 as uint32_t {
-                        sinodes_open((*ricl).parent);
-                    }
-                }
-                rill = (*rill).next as *mut sinodes_ino;
-                ricl = (*ricl).next as *mut sinodes_ino;
-            }
-        }
-        rill = lastlist;
-        while !rill.is_null() {
-            ricl = (*rill).next as *mut sinodes_ino;
-            free(rill as *mut ::core::ffi::c_void);
-            rill = ricl;
-        }
-        lastlist = currentlist;
-        currentlist = ::core::ptr::null_mut::<sinodes_ino>();
+        let mut open = |i: uint32_t| fs_add_entry(i);
+        let mut close = |i: uint32_t| fs_forget_entry(i);
+        sinodes().end(&mut open, &mut close);
     }
 }
+
 static mut mydevid: uint32_t = 0;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_pid_inodes(mut pid: pid_t) {
@@ -314,6 +363,10 @@ pub unsafe extern "C" fn sinodes_all_pids() {
         closedir(dd);
     }
 }
+
+// term flag as a real atomic (replaces core::intrinsics::atomic_or reads)
+static TERM: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_scanthread(
     mut arg: *mut ::core::ffi::c_void,
@@ -360,12 +413,7 @@ pub unsafe extern "C" fn sinodes_scanthread(
                 st.st_ino = 1 as __ino_t;
             }
             sleep(1 as ::core::ffi::c_uint);
-            if ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
-                &raw mut term,
-                0 as uint8_t,
-            ) as ::core::ffi::c_int
-                == 1 as ::core::ffi::c_int
-            {
+            if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
                 free(arg);
                 return NULL;
             }
@@ -389,12 +437,7 @@ pub unsafe extern "C" fn sinodes_scanthread(
                 i = i.wrapping_add(1);
             }
             portable_usleep(100000 as uint64_t);
-            if ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
-                &raw mut term,
-                0 as uint8_t,
-            ) as ::core::ffi::c_int
-                == 1 as ::core::ffi::c_int
-            {
+            if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
                 return NULL;
             }
         }
@@ -403,10 +446,7 @@ pub unsafe extern "C" fn sinodes_scanthread(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_term() {
     unsafe {
-        ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
-            &raw mut term,
-            1 as uint8_t,
-        );
+        TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
         pthread_join(
             clthread,
             ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
@@ -417,10 +457,7 @@ pub unsafe extern "C" fn sinodes_term() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_init(mut mp: *const ::core::ffi::c_char) {
     unsafe {
-        ::core::intrinsics::atomic_and::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
-            &raw mut term,
-            0 as uint8_t,
-        );
+        TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
         lwt_minthread_create(
             &raw mut clthread,
             0 as uint8_t,
@@ -430,5 +467,140 @@ pub unsafe extern "C" fn sinodes_init(mut mp: *const ::core::ffi::c_char) {
             ),
             strdup(mp) as *mut ::core::ffi::c_void,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::collections::HashMap;
+    use std::vec::Vec;
+
+    struct Mock {
+        parents: HashMap<u32, u32>,
+        log: std::cell::RefCell<Vec<(bool, u32)>>, // (open?, inode)
+    }
+    impl Mock {
+        fn parent_of(&self, i: u32) -> u32 {
+            *self.parents.get(&i).unwrap_or(&0)
+        }
+        fn open(&self, i: u32) {
+            self.log.borrow_mut().push((true, i));
+        }
+        fn close(&self, i: u32) {
+            self.log.borrow_mut().push((false, i));
+        }
+    }
+
+    #[test]
+    fn first_scan_opens_all() {
+        let mut s = Sinodes::default();
+        let mut m = Mock {
+            parents: HashMap::from([(1, 100), (2, 100), (3, 0)]),
+            log: std::cell::RefCell::new(Vec::new()),
+        };
+        for i in [3u32, 1, 2] {
+            // unsorted insertion order on purpose
+            let mo = &m;
+            s.process_inode(i, &|x| mo.parent_of(x));
+        }
+        let mut open = |i: u32| (&m).open(i);
+        let mut close = |i: u32| (&m).close(i);
+        s.end(&mut open, &mut close);
+        // sorted order: inode 1 (open, parent 100), 2 (open, parent 100), 3
+        assert_eq!(
+            *m.log.borrow(),
+            std::vec![
+                (true, 1),
+                (true, 100),
+                (true, 2),
+                (true, 100),
+                (true, 3)
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_closes_vanished_and_opens_new() {
+        let mut s = Sinodes::default();
+        let mut m = Mock {
+            parents: HashMap::from([(1, 100), (2, 100), (4, 200)]),
+            log: std::cell::RefCell::new(Vec::new()),
+        };
+        for i in [1u32, 2, 3] {
+            let mo = &m;
+            s.process_inode(i, &|x| mo.parent_of(x));
+        }
+        {
+            let mut open = |i: u32| (&m).open(i);
+            let mut close = |i: u32| (&m).close(i);
+            s.end(&mut open, &mut close);
+        }
+        m.log.borrow_mut().clear();
+        // second scan: 1 stays, 2 vanishes, 4 appears
+        for i in [1u32, 4] {
+            let mo = &m;
+            s.process_inode(i, &|x| mo.parent_of(x));
+        }
+        {
+            let mut open = |i: u32| (&m).open(i);
+            let mut close = |i: u32| (&m).close(i);
+            s.end(&mut open, &mut close);
+        }
+        // C merge order: 1 equal (parent 100 == 100, nothing), 2 closed
+        // (parent 100 closed first), 3 closed, 4 opened (+parent 200)
+        assert_eq!(
+            *m.log.borrow(),
+            std::vec![
+                (false, 100),
+                (false, 2),
+                (false, 3),
+                (true, 4),
+                (true, 200)
+            ]
+        );
+    }
+
+    #[test]
+    fn parent_transition_semantics() {
+        let mut s = Sinodes::default();
+        let mut m = Mock {
+            parents: HashMap::from([(1, 100)]),
+            log: std::cell::RefCell::new(Vec::new()),
+        };
+        s.process_inode(1, &|x| m.parent_of(x));
+        {
+            let mut open = |i: u32| (&m).open(i);
+            let mut close = |i: u32| (&m).close(i);
+            s.end(&mut open, &mut close);
+        }
+        m.log.borrow_mut().clear();
+        // parent changes 100 -> 200
+        m.parents.insert(1, 200);
+        {
+            let mo = &m;
+            s.process_inode(1, &|x| mo.parent_of(x));
+        }
+        {
+            let mut open = |i: u32| (&m).open(i);
+            let mut close = |i: u32| (&m).close(i);
+            s.end(&mut open, &mut close);
+        }
+        assert_eq!(*m.log.borrow(), std::vec![(false, 100), (true, 200)]);
+        // parent becomes unknown (0): new entry inserts with parent 0,
+        // merge inherits the old parent 200 and re-opens it (C quirk)
+        m.log.borrow_mut().clear();
+        m.parents.insert(1, 0);
+        {
+            let mo = &m;
+            s.process_inode(1, &|x| mo.parent_of(x));
+        }
+        {
+            let mut open = |i: u32| (&m).open(i);
+            let mut close = |i: u32| (&m).close(i);
+            s.end(&mut open, &mut close);
+        }
+        assert_eq!(*m.log.borrow(), std::vec![(true, 200)]);
     }
 }
