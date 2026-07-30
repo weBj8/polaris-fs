@@ -20,7 +20,6 @@ unsafe extern "C" {
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-    unsafe fn portable_usleep(usec: uint64_t);
     unsafe fn fs_isopen(inode: uint32_t) -> ::core::ffi::c_int;
     unsafe fn mfs_dentry_invalidate(
         parent: uint32_t,
@@ -28,6 +27,44 @@ unsafe extern "C" {
         name: *const ::core::ffi::c_char,
     );
 }
+
+// local copy, mirroring the C static-inline portable_usleep (each TU had
+// its own; cross-module private symbols do not survive clean LTO builds)
+#[derive(Copy, Clone)]
+#[repr(C)]
+struct portable_timespec {
+    tv_sec: ::core::ffi::c_long,
+    tv_nsec: ::core::ffi::c_long,
+}
+unsafe extern "C" {
+    fn nanosleep(
+        __requested_time: *const portable_timespec,
+        __remaining: *mut portable_timespec,
+    ) -> ::core::ffi::c_int;
+}
+#[inline]
+fn portable_usleep(usec: uint64_t) {
+    let mut req = portable_timespec {
+        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
+        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
+    };
+    let mut rem = portable_timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: req/rem are valid stack structs.
+    unsafe {
+        loop {
+            let s = nanosleep(&req, &mut rem);
+            if s < 0 {
+                req = rem;
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
