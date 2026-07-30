@@ -19,7 +19,7 @@
 unsafe_sites	mfsmaster	le	3007
 unsafe_sites	mfschunkserver	le	1002
 unsafe_sites	mfsmetalogger	le	302
-unsafe_sites	mfsmount	le	868
+unsafe_sites	mfsmount	le	866
 unsafe_sites	mfsbdev	le	570
 unsafe_sites	mfsgui	le	307
 unsafe_sites	mfsnetdump	le	44
@@ -39,7 +39,7 @@ wrapping_ops	mfsclient	ge	796
 wrapping_ops	mfsmaster	ge	4068
 wrapping_ops	mfschunkserver	ge	1316
 wrapping_ops	mfsmetalogger	ge	151
-wrapping_ops	mfsmount	ge	486
+wrapping_ops	mfsmount	ge	452
 wrapping_ops	mfsbdev	ge	240
 wrapping_ops	mfsgui	ge	149
 wrapping_ops	mfsnetdump	ge	68
