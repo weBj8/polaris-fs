@@ -477,201 +477,553 @@ static mut masterinfoattr: [uint8_t; 36] = [
     0,
 ];
 pub const MIN_SPECIAL_INODE: ::core::ffi::c_int = 0x7fff0000 as ::core::ffi::c_int;
-pub const PKGVERSION: ::core::ffi::c_int =
-    VERSMAJ * 1000000 as ::core::ffi::c_int + VERSMID * 1000 as ::core::ffi::c_int + VERSMIN;
-static mut debug_mode: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut flat_trash: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut entry_cache_timeout: ::core::ffi::c_double = 0.0f64;
-static mut attr_cache_timeout: ::core::ffi::c_double = 1.0f64;
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_name_to_inode(mut name: *const ::core::ffi::c_char) -> uint32_t {
-    unsafe {
-        let mut inode: uint32_t = 0 as uint32_t;
-        let mut end: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        inode = strtoul(name, &raw mut end, 16 as ::core::ffi::c_int) as uint32_t;
-        if *end as ::core::ffi::c_int == '|' as ::core::ffi::c_int
-            && *end.offset(1 as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-        {
-            return inode;
+// ---------------------------------------------------------------------------
+// Safe core (P4 rewrite): all pure conversion/serialization logic of the
+// meta filesystem. FUSE reply calls and fs_* master traffic stay at the
+// boundary below.
+// ---------------------------------------------------------------------------
+
+#[deny(unsafe_code)]
+pub mod imp {
+    pub const MIN_SPECIAL_INODE: u32 = 0x7FFF0000;
+    pub const META_ROOT_INODE: u32 = 1;
+    pub const META_TRASH_INODE: u32 = 0x7ffffff8;
+    pub const META_UNDEL_INODE: u32 = 0x7ffffff9;
+    pub const META_SUSTAINED_INODE: u32 = 0x7ffffffa;
+    pub const MASTERINFO_INODE: u32 = 0x7fffffff;
+    pub const META_SUBTRASH_INODE_MIN: u32 = 0x7fff0000;
+    pub const TRASH_BUCKETS: u32 = 4096;
+    pub const META_SUBTRASH_INODE_MAX: u32 = META_SUBTRASH_INODE_MIN + TRASH_BUCKETS - 1;
+    pub const META_TRASH_NAME: &[u8] = b"trash";
+    pub const META_UNDEL_NAME: &[u8] = b"undel";
+    pub const META_SUSTAINED_NAME: &[u8] = b"sustained";
+    pub const MASTERINFO_NAME: &[u8] = b".masterinfo";
+    pub const VERSION_3_0_64: u32 = 3_000_064;
+    pub const MFSBLOCKSIZE: u32 = 0x10000;
+
+    pub const TYPE_FILE: u8 = 1;
+    pub const TYPE_DIRECTORY: u8 = 2;
+    pub const TYPE_SYMLINK: u8 = 3;
+    pub const TYPE_FIFO: u8 = 4;
+    pub const TYPE_BLOCKDEV: u8 = 5;
+    pub const TYPE_CHARDEV: u8 = 6;
+    pub const TYPE_SOCKET: u8 = 7;
+    pub const TYPE_TRASH: u8 = 8;
+    pub const TYPE_SUSTAINED: u8 = 9;
+
+    pub const DISP_TYPE_DIRECTORY: u8 = 100; // 'd'
+    pub const DISP_TYPE_FILE: u8 = 102; // 'f'
+    pub const DISP_TYPE_SYMLINK: u8 = 108; // 'l'
+    pub const DISP_TYPE_FIFO: u8 = 113; // 'q'
+    pub const DISP_TYPE_BLOCKDEV: u8 = 98; // 'b'
+    pub const DISP_TYPE_CHARDEV: u8 = 99; // 'c'
+    pub const DISP_TYPE_SOCKET: u8 = 115; // 's'
+    pub const DISP_TYPE_TRASH: u8 = 116; // 't'
+    pub const DISP_TYPE_SUSTAINED: u8 = 114; // 'r'
+
+    pub const S_IFIFO: u32 = 0o10000;
+    pub const S_IFCHR: u32 = 0o20000;
+    pub const S_IFDIR: u32 = 0o40000;
+    pub const S_IFBLK: u32 = 0o60000;
+    pub const S_IFREG: u32 = 0o100000;
+    pub const S_IFLNK: u32 = 0o120000;
+    pub const S_IFSOCK: u32 = 0o140000;
+
+    pub fn is_special_inode(ino: u32) -> bool {
+        ino >= MIN_SPECIAL_INODE || ino == META_ROOT_INODE
+    }
+
+    /// "HEX|rest" → inode; 0 when not in meta-name form (C: strtoul hex,
+    /// then '|' with a non-NUL follower required)
+    pub fn name_to_inode(name: &[u8]) -> u32 {
+        let mut inode: u32 = 0;
+        let mut i = 0usize;
+        let mut any = false;
+        while i < name.len() {
+            let d = match name[i] {
+                b'0'..=b'9' => (name[i] - b'0') as u32,
+                b'a'..=b'f' => (name[i] - b'a') as u32 + 10,
+                b'A'..=b'F' => (name[i] - b'A') as u32 + 10,
+                _ => break,
+            };
+            // strtoul would wrap on overflow; names here are short
+            inode = inode.wrapping_mul(16).wrapping_add(d);
+            any = true;
+            i += 1;
+        }
+        if any && i < name.len() && name[i] == b'|' && i + 1 < name.len() && name[i + 1] != 0 {
+            inode
         } else {
-            return 0 as uint32_t;
+            0
+        }
+    }
+
+    /// MFS status → errno (mfs_errorconv)
+    pub fn errorconv(status: i32) -> i32 {
+        match status {
+            0 => 0,               // MFS_STATUS_OK
+            1 => 1,               // EPERM
+            2 => 20,              // ENOTDIR
+            3 => 2,               // ENOENT
+            4 => 13,              // EACCES
+            5 => 17,              // EEXIST
+            6 => 22,              // EINVAL
+            7 => 39,              // ENOTEMPTY
+            8 => 5,               // EIO (MFS_ERROR_IO)
+            33 => 30,             // EROFS
+            40 => 122,            // EDQUOT (MFS_ERROR_QUOTA)
+            _ => 22,              // EINVAL
+        }
+    }
+
+    /// DISP_TYPE_* → TYPE_* (fsnodes_type_convert)
+    pub fn fsnodes_type_convert(t: u8) -> u8 {
+        match t {
+            DISP_TYPE_FILE => TYPE_FILE,
+            DISP_TYPE_DIRECTORY => TYPE_DIRECTORY,
+            DISP_TYPE_SYMLINK => TYPE_SYMLINK,
+            DISP_TYPE_FIFO => TYPE_FIFO,
+            DISP_TYPE_BLOCKDEV => TYPE_BLOCKDEV,
+            DISP_TYPE_CHARDEV => TYPE_CHARDEV,
+            DISP_TYPE_SOCKET => TYPE_SOCKET,
+            DISP_TYPE_TRASH => TYPE_TRASH,
+            DISP_TYPE_SUSTAINED => TYPE_SUSTAINED,
+            _ => 0,
+        }
+    }
+
+    /// st_mode for a meta entry type byte (mfs_meta_type_to_stat)
+    pub fn type_to_mode(t: u8) -> u32 {
+        match t & 0x7F {
+            DISP_TYPE_DIRECTORY | TYPE_DIRECTORY => S_IFDIR,
+            DISP_TYPE_SYMLINK | TYPE_SYMLINK => S_IFLNK,
+            DISP_TYPE_FILE | TYPE_FILE => S_IFREG,
+            DISP_TYPE_FIFO | TYPE_FIFO => S_IFIFO,
+            DISP_TYPE_SOCKET | TYPE_SOCKET => S_IFSOCK,
+            DISP_TYPE_BLOCKDEV | TYPE_BLOCKDEV => S_IFBLK,
+            DISP_TYPE_CHARDEV | TYPE_CHARDEV => S_IFCHR,
+            _ => 0,
+        }
+    }
+
+    /// stat fields the FUSE boundary needs (struct stat stays C-side)
+    #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
+    pub struct StatFields {
+        pub ino: u32,
+        pub mode: u32,
+        pub size: u64,
+        pub blocks: u64,
+        pub blksize: u32,
+        pub uid: u32,
+        pub gid: u32,
+        pub atime: u32,
+        pub mtime: u32,
+        pub ctime: u32,
+        pub nlink: u32,
+    }
+
+    fn get16(b: &[u8]) -> u16 {
+        u16::from_be_bytes([b[0], b[1]])
+    }
+    fn get32(b: &[u8]) -> u32 {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    }
+    fn get64(b: &[u8]) -> u64 {
+        u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+    }
+
+    /// mfs_attr_to_stat: parse a 36-byte attr record into stat fields.
+    /// Layout (1.7.29+, attr[0]<64): [flags:1][mode+type:2BE][uid:4][gid:4]
+    /// [atime:4][mtime:4][ctime:4][nlink:4][length:8]
+    /// Legacy (attr[0]>=64): [disptype:1][mode:2BE] then same tail.
+    pub fn attr_to_stat(inode: u32, attr: &[u8; 36]) -> StatFields {
+        let (attrmode, attrtype);
+        if attr[0] < 64 {
+            let m = get16(&attr[1..]);
+            attrmode = m & 0x0FFF;
+            attrtype = (m >> 12) as u8;
+        } else {
+            attrtype = fsnodes_type_convert(attr[0] & 0x7F);
+            attrmode = get16(&attr[1..]) & 0x0FFF;
+        }
+        let uid = get32(&attr[3..]);
+        let gid = get32(&attr[7..]);
+        let atime = get32(&attr[11..]);
+        let mtime = get32(&attr[15..]);
+        let ctime = get32(&attr[19..]);
+        let nlink = get32(&attr[23..]);
+        let length = get64(&attr[27..]);
+        let mode = if attrtype == TYPE_FILE || attrtype == TYPE_TRASH || attrtype == TYPE_SUSTAINED
+        {
+            S_IFREG | (attrmode as u32 & 0o7777)
+        } else {
+            0
         };
+        StatFields {
+            ino: inode,
+            mode,
+            size: length,
+            blocks: (length + 511) / 512,
+            blksize: MFSBLOCKSIZE,
+            uid,
+            gid,
+            atime,
+            mtime,
+            ctime,
+            nlink,
+        }
     }
-}
-unsafe extern "C" fn mfs_errorconv(mut status: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    match status {
-        MFS_STATUS_OK => return 0 as ::core::ffi::c_int,
-        MFS_ERROR_EPERM => return EPERM,
-        MFS_ERROR_ENOTDIR => return ENOTDIR,
-        MFS_ERROR_ENOENT => return ENOENT,
-        MFS_ERROR_EACCES => return EACCES,
-        MFS_ERROR_EEXIST => return EEXIST,
-        MFS_ERROR_EINVAL => return EINVAL,
-        MFS_ERROR_ENOTEMPTY => return ENOTEMPTY,
-        MFS_ERROR_IO => return EIO,
-        MFS_ERROR_EROFS => return EROFS,
-        MFS_ERROR_QUOTA => return EDQUOT,
-        _ => return EINVAL,
-    };
-}
-#[inline]
-unsafe extern "C" fn fsnodes_type_convert(mut r#type: uint8_t) -> uint8_t {
-    match r#type as ::core::ffi::c_int {
-        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-        _ => {}
-    }
-    return 0 as uint8_t;
-}
-unsafe extern "C" fn mfs_meta_type_to_stat(
-    mut inode: uint32_t,
-    mut r#type: uint8_t,
-    mut stbuf: *mut stat,
-) {
-    unsafe {
-        memset(
-            stbuf as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<stat>(),
-        );
-        (*stbuf).st_ino = inode as __ino_t;
-        match r#type as ::core::ffi::c_int & 0x7f as ::core::ffi::c_int {
-            DISP_TYPE_DIRECTORY | TYPE_DIRECTORY => {
-                (*stbuf).st_mode = S_IFDIR as __mode_t;
-            }
-            DISP_TYPE_SYMLINK | TYPE_SYMLINK => {
-                (*stbuf).st_mode = S_IFLNK as __mode_t;
-            }
-            DISP_TYPE_FILE | TYPE_FILE => {
-                (*stbuf).st_mode = S_IFREG as __mode_t;
-            }
-            DISP_TYPE_FIFO | TYPE_FIFO => {
-                (*stbuf).st_mode = S_IFIFO as __mode_t;
-            }
-            DISP_TYPE_SOCKET | TYPE_SOCKET => {
-                (*stbuf).st_mode = S_IFSOCK as __mode_t;
-            }
-            DISP_TYPE_BLOCKDEV | TYPE_BLOCKDEV => {
-                (*stbuf).st_mode = S_IFBLK as __mode_t;
-            }
-            DISP_TYPE_CHARDEV | TYPE_CHARDEV => {
-                (*stbuf).st_mode = S_IFCHR as __mode_t;
-            }
-            _ => {
-                (*stbuf).st_mode = 0 as __mode_t;
-            }
+
+    /// mfs_meta_stat: fixed stats for the virtual meta directories
+    pub fn meta_stat(inode: u32, now: u32) -> StatFields {
+        let (nlink, mode) = match inode {
+            META_ROOT_INODE => (4, S_IFDIR | 0o555),
+            META_TRASH_INODE => (3 + TRASH_BUCKETS, S_IFDIR | 0o700),
+            META_UNDEL_INODE => (2 + TRASH_BUCKETS, S_IFDIR | 0o200),
+            META_SUSTAINED_INODE => (2, S_IFDIR | 0o500),
+            META_SUBTRASH_INODE_MIN..=META_SUBTRASH_INODE_MAX => (3, S_IFDIR | 0o700),
+            _ => (0, 0),
         };
+        StatFields {
+            ino: inode,
+            mode,
+            size: 0,
+            blocks: 0,
+            blksize: MFSBLOCKSIZE,
+            uid: 0,
+            gid: 0,
+            atime: now,
+            mtime: now,
+            ctime: now,
+            nlink,
+        }
     }
-}
-unsafe extern "C" fn mfs_meta_stat(mut inode: uint32_t, mut stbuf: *mut stat) {
-    unsafe {
-        let mut now: ::core::ffi::c_int = 0;
-        (*stbuf).st_ino = inode as __ino_t;
-        (*stbuf).st_size = 0 as __off_t;
-        (*stbuf).st_blksize = MFSBLOCKSIZE as __blksize_t;
-        match inode {
-            1 => {
-                (*stbuf).st_nlink = 4 as __nlink_t;
-                (*stbuf).st_mode = (S_IFDIR | META_ROOT_MODE) as __mode_t;
+
+    /// size of the meta (static) entries blob for a directory inode
+    pub fn dir_metaentries_size(ino: u32, master_ge_3064: bool, flat_trash: bool) -> u32 {
+        match ino {
+            META_ROOT_INODE => {
+                (4 * 6 + 1 + 2 + META_TRASH_NAME.len() + META_SUSTAINED_NAME.len()) as u32
             }
-            2147483640 => {
-                (*stbuf).st_nlink = (3 as ::core::ffi::c_int + TRASH_BUCKETS) as __nlink_t;
-                (*stbuf).st_mode = (S_IFDIR | META_TRASH_MODE) as __mode_t;
-            }
-            2147483641 => {
-                (*stbuf).st_nlink = (2 as ::core::ffi::c_int + TRASH_BUCKETS) as __nlink_t;
-                (*stbuf).st_mode = (S_IFDIR | META_UNDEL_MODE) as __mode_t;
-            }
-            2147483642 => {
-                (*stbuf).st_nlink = 2 as __nlink_t;
-                (*stbuf).st_mode = (S_IFDIR | META_SUSTAINED_MODE) as __mode_t;
-            }
-            _ => {
-                if inode >= META_SUBTRASH_INODE_MIN as uint32_t
-                    && inode <= META_SUBTRASH_INODE_MAX as uint32_t
-                {
-                    (*stbuf).st_nlink = 3 as __nlink_t;
-                    (*stbuf).st_mode = (S_IFDIR | META_SUBTRASH_MODE) as __mode_t;
+            META_TRASH_INODE => {
+                if master_ge_3064 && !flat_trash {
+                    ((3 + TRASH_BUCKETS) * 6
+                        + 1
+                        + 2
+                        + META_UNDEL_NAME.len() as u32
+                        + TRASH_BUCKETS * if TRASH_BUCKETS <= 4096 { 3 } else { 4 })
+                        as u32
+                } else {
+                    (3 * 6 + 1 + 2 + META_UNDEL_NAME.len()) as u32
                 }
             }
+            META_UNDEL_INODE | META_SUSTAINED_INODE => 2 * 6 + 1 + 2,
+            META_SUBTRASH_INODE_MIN..=META_SUBTRASH_INODE_MAX => {
+                (3 * 6 + 1 + 2 + META_UNDEL_NAME.len()) as u32
+            }
+            _ => 0,
         }
-        (*stbuf).st_uid = 0 as __uid_t;
-        (*stbuf).st_gid = 0 as __gid_t;
-        now = time(::core::ptr::null_mut::<time_t>()) as ::core::ffi::c_int;
-        (*stbuf).st_atim.tv_sec = now as __time_t;
-        (*stbuf).st_mtim.tv_sec = now as __time_t;
-        (*stbuf).st_ctim.tv_sec = now as __time_t;
+    }
+
+    fn put_entry(out: &mut Vec<u8>, name: &[u8], ino: u32, type_: u8) {
+        out.push(name.len() as u8);
+        out.extend_from_slice(name);
+        out.extend_from_slice(&ino.to_be_bytes());
+        out.push(type_);
+    }
+
+    /// the static entries blob for a meta directory (exact C byte layout:
+    /// [nleng][name][inode:4BE][type:1] per entry)
+    pub fn dir_metaentries_fill(ino: u32, master_ge_3064: bool, flat_trash: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        match ino {
+            META_ROOT_INODE => {
+                put_entry(&mut out, b".", META_ROOT_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, b"..", META_ROOT_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, META_TRASH_NAME, META_TRASH_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, META_SUSTAINED_NAME, META_SUSTAINED_INODE, TYPE_DIRECTORY);
+            }
+            META_TRASH_INODE => {
+                put_entry(&mut out, b".", META_TRASH_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, b"..", META_ROOT_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, META_UNDEL_NAME, META_UNDEL_INODE, TYPE_DIRECTORY);
+                if master_ge_3064 && !flat_trash {
+                    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+                    for tid in 0..TRASH_BUCKETS {
+                        let mut name = Vec::with_capacity(4);
+                        if TRASH_BUCKETS > 4096 {
+                            name.push(HEX[((tid >> 12) & 15) as usize]);
+                        }
+                        name.push(HEX[((tid >> 8) & 15) as usize]);
+                        name.push(HEX[((tid >> 4) & 15) as usize]);
+                        name.push(HEX[(tid & 15) as usize]);
+                        put_entry(&mut out, &name, META_SUBTRASH_INODE_MIN + tid, TYPE_DIRECTORY);
+                    }
+                }
+            }
+            META_UNDEL_INODE => {
+                put_entry(&mut out, b".", META_UNDEL_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, b"..", META_TRASH_INODE, TYPE_DIRECTORY);
+            }
+            META_SUSTAINED_INODE => {
+                put_entry(&mut out, b".", META_SUSTAINED_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, b"..", META_ROOT_INODE, TYPE_DIRECTORY);
+            }
+            META_SUBTRASH_INODE_MIN..=META_SUBTRASH_INODE_MAX => {
+                put_entry(&mut out, b".", META_TRASH_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, b"..", META_ROOT_INODE, TYPE_DIRECTORY);
+                put_entry(&mut out, META_UNDEL_NAME, META_UNDEL_INODE, TYPE_DIRECTORY);
+            }
+            _ => {}
+        }
+        out
+    }
+
+    /// size of the converted data-entries blob (master's dbuff → meta dir
+    /// entries with "HEX|name" filenames)
+    pub fn dir_dataentries_size(dbuff: &[u8]) -> u32 {
+        let mut eleng = 0u32;
+        let mut pos = 0usize;
+        while pos < dbuff.len() {
+            let nleng = dbuff[pos] as usize;
+            pos += 5 + nleng;
+            if nleng > 255 - 9 {
+                eleng += 6 + 255;
+            } else {
+                eleng += (6 + nleng + 9) as u32;
+            }
+        }
+        eleng
+    }
+
+    /// 8 uppercase hex digits, big-endian nibble order
+    pub fn dir_hexgen(out: &mut [u8; 8], hex: u32) {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        for i in 0..8 {
+            out[7 - i] = HEX[(hex >> (4 * i)) as usize & 15];
+        }
+    }
+
+    /// dbuff → meta entries; long names truncated to 255-9 after the
+    /// "HEX|" prefix. Second return = malformed-data flag (C logged and
+    /// stopped the walk).
+    pub fn dir_dataentries_convert(dbuff: &[u8]) -> (Vec<u8>, bool) {
+        let mut out = Vec::new();
+        let mut malformed = false;
+        let mut pos = 0usize;
+        while pos < dbuff.len() {
+            let nleng = dbuff[pos] as usize;
+            if pos + nleng + 5 <= dbuff.len() {
+                let name = &dbuff[pos + 1..pos + 1 + nleng];
+                let inode = get32(&dbuff[pos + 1 + nleng..]);
+                let inoleng = if nleng > 255 - 9 { 255 } else { nleng + 9 };
+                out.push(inoleng as u8);
+                let mut hexbuf = [0u8; 8];
+                dir_hexgen(&mut hexbuf, inode);
+                out.extend_from_slice(&hexbuf);
+                out.push(b'|');
+                if nleng > 255 - 9 {
+                    out.extend_from_slice(&name[..255 - 9]);
+                } else {
+                    out.extend_from_slice(name);
+                }
+                out.extend_from_slice(&inode.to_be_bytes());
+                out.push(TYPE_FILE);
+                pos += 1 + nleng + 4;
+            } else {
+                malformed = true;
+                break;
+            }
+        }
+        (out, malformed)
+    }
+
+    /// lookup name resolution within the meta tree
+    pub enum Lookup {
+        /// static meta inode (reply with meta_stat)
+        MetaInode(u32),
+        /// "HEX|name" entry: needs fs_getdetachedattr
+        DetachedAttr(u32),
+        /// the .masterinfo file
+        MasterInfo,
+        NotFound,
+    }
+
+    pub fn resolve_lookup(parent: u32, name: &[u8], master_ge_3064: bool, flat_trash: bool) -> Lookup {
+        match parent {
+            META_ROOT_INODE => {
+                if name == b"." || name == b".." {
+                    Lookup::MetaInode(META_ROOT_INODE)
+                } else if name == META_TRASH_NAME {
+                    Lookup::MetaInode(META_TRASH_INODE)
+                } else if name == META_SUSTAINED_NAME {
+                    Lookup::MetaInode(META_SUSTAINED_INODE)
+                } else if name == MASTERINFO_NAME {
+                    Lookup::MasterInfo
+                } else {
+                    Lookup::NotFound
+                }
+            }
+            META_TRASH_INODE => {
+                if name == b"." {
+                    Lookup::MetaInode(META_TRASH_INODE)
+                } else if name == b".." {
+                    Lookup::MetaInode(META_ROOT_INODE)
+                } else if name == META_UNDEL_NAME {
+                    Lookup::MetaInode(META_UNDEL_INODE)
+                } else if master_ge_3064 && !flat_trash {
+                    // subtrash hex name (strtoul, no '|' required here)
+                    let mut inode: u32 = 0;
+                    let mut any = false;
+                    for &b in name {
+                        let d = match b {
+                            b'0'..=b'9' => (b - b'0') as u32,
+                            b'a'..=b'f' => (b - b'a') as u32 + 10,
+                            b'A'..=b'F' => (b - b'A') as u32 + 10,
+                            _ => {
+                                any = false;
+                                break;
+                            }
+                        };
+                        inode = inode.wrapping_mul(16).wrapping_add(d);
+                        any = true;
+                    }
+                    if any && inode < TRASH_BUCKETS {
+                        Lookup::MetaInode(META_SUBTRASH_INODE_MIN + inode)
+                    } else {
+                        Lookup::NotFound
+                    }
+                } else {
+                    let inode = name_to_inode(name);
+                    if inode > 0 {
+                        Lookup::DetachedAttr(inode)
+                    } else {
+                        Lookup::NotFound
+                    }
+                }
+            }
+            META_UNDEL_INODE => {
+                if name == b"." {
+                    Lookup::MetaInode(META_UNDEL_INODE)
+                } else if name == b".." {
+                    Lookup::MetaInode(META_TRASH_INODE)
+                } else {
+                    Lookup::NotFound
+                }
+            }
+            META_SUSTAINED_INODE => {
+                if name == b"." {
+                    Lookup::MetaInode(META_SUSTAINED_INODE)
+                } else if name == b".." {
+                    Lookup::MetaInode(META_ROOT_INODE)
+                } else {
+                    let inode = name_to_inode(name);
+                    if inode > 0 {
+                        Lookup::DetachedAttr(inode)
+                    } else {
+                        Lookup::NotFound
+                    }
+                }
+            }
+            META_SUBTRASH_INODE_MIN..=META_SUBTRASH_INODE_MAX => {
+                if name == b"." {
+                    Lookup::MetaInode(parent)
+                } else if name == b".." {
+                    Lookup::MetaInode(META_TRASH_INODE)
+                } else if name == META_UNDEL_NAME {
+                    Lookup::MetaInode(META_UNDEL_INODE)
+                } else {
+                    let inode = name_to_inode(name);
+                    if inode > 0 {
+                        Lookup::DetachedAttr(inode)
+                    } else {
+                        Lookup::NotFound
+                    }
+                }
+            }
+            _ => Lookup::NotFound,
+        }
+    }
+
+    /// read slicing shared by meta_read and the masterinfo read:
+    /// Some((start,len)) or None for EOF (off<0 pre-checked by caller)
+    pub fn slice_range(off: u64, size: u64, total: u64) -> Option<(u64, u64)> {
+        if off >= total {
+            None
+        } else if off + size > total {
+            Some((off, total - off))
+        } else {
+            Some((off, size))
+        }
     }
 }
-unsafe extern "C" fn mfs_attr_to_stat(
-    mut inode: uint32_t,
-    mut attr: *const uint8_t,
-    mut stbuf: *mut stat,
-) {
+
+// ---------------------------------------------------------------------------
+// Boundary: FUSE ops (fuse_reply_* / fs_* master calls).
+// ---------------------------------------------------------------------------
+
+use imp::Lookup;
+use std::sync::Mutex as StdMutex;
+
+pub const PKGVERSION: ::core::ffi::c_int = 4 * 1000000 + 59 * 1000 + 4; // VERSMAJ/MID/MIN (transpiled value, frozen)
+static mut debug_mode: ::core::ffi::c_int = 0;
+static mut flat_trash: ::core::ffi::c_int = 0;
+static mut entry_cache_timeout: ::core::ffi::c_double = 0.0;
+static mut attr_cache_timeout: ::core::ffi::c_double = 1.0;
+
+/// .masterinfo file content attr (masterinfoattr in C)
+static MASTERINFOATTR: [uint8_t; 36] = [
+    b'f', 0x01, 0x24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+    0, 0, 0, 0, 0, 0, 22, 0,
+];
+
+/// SAFETY: config statics set once in mfs_meta_init before FUSE threads.
+unsafe fn flat_trash_on() -> bool {
+    unsafe { flat_trash != 0 }
+}
+
+/// SAFETY: as above.
+unsafe fn entry_to() -> ::core::ffi::c_double {
+    unsafe { entry_cache_timeout }
+}
+
+/// SAFETY: as above.
+unsafe fn attr_to() -> ::core::ffi::c_double {
+    unsafe { attr_cache_timeout }
+}
+
+fn master_ge_3064() -> bool {
+    unsafe { master_version() >= imp::VERSION_3_0_64 }
+}
+
+/// fill a C struct stat from StatFields (zero first, as C memset)
+/// SAFETY: stbuf valid for writes.
+unsafe fn fill_stat(inode: u32, f: &imp::StatFields, stbuf: *mut stat) {
     unsafe {
-        let mut attrmode: uint16_t = 0;
-        let mut attrtype: uint8_t = 0;
-        let mut attruid: uint32_t = 0;
-        let mut attrgid: uint32_t = 0;
-        let mut attratime: uint32_t = 0;
-        let mut attrmtime: uint32_t = 0;
-        let mut attrctime: uint32_t = 0;
-        let mut attrnlink: uint32_t = 0;
-        let mut attrlength: uint64_t = 0;
-        let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        ptr = attr as *const uint8_t;
-        if (*attr.offset(0 as isize) as ::core::ffi::c_int) < 64 as ::core::ffi::c_int {
-            ptr = ptr.offset(1);
-            attrmode = get16bit(&raw mut ptr);
-            attrtype = (attrmode as ::core::ffi::c_int >> 12 as ::core::ffi::c_int) as uint8_t;
-        } else {
-            attrtype = get8bit(&raw mut ptr);
-            attrtype = fsnodes_type_convert(
-                (attrtype as ::core::ffi::c_int & 0x7f as ::core::ffi::c_int) as uint8_t,
-            );
-            attrmode = get16bit(&raw mut ptr);
-        }
-        attrmode = (attrmode as ::core::ffi::c_int & 0xfff as ::core::ffi::c_int) as uint16_t;
-        attruid = get32bit(&raw mut ptr);
-        attrgid = get32bit(&raw mut ptr);
-        attratime = get32bit(&raw mut ptr);
-        attrmtime = get32bit(&raw mut ptr);
-        attrctime = get32bit(&raw mut ptr);
-        attrnlink = get32bit(&raw mut ptr);
-        attrlength = get64bit(&raw mut ptr);
+        ::core::ptr::write_bytes(stbuf as *mut uint8_t, 0, 1);
         (*stbuf).st_ino = inode as __ino_t;
-        (*stbuf).st_blksize = MFSBLOCKSIZE as __blksize_t;
-        if attrtype as ::core::ffi::c_int == TYPE_FILE
-            || attrtype as ::core::ffi::c_int == TYPE_TRASH
-            || attrtype as ::core::ffi::c_int == TYPE_SUSTAINED
-        {
-            (*stbuf).st_mode = (S_IFREG
-                | attrmode as ::core::ffi::c_int & 0o7777 as ::core::ffi::c_int)
-                as __mode_t;
-        } else {
-            (*stbuf).st_mode = 0 as __mode_t;
-        }
-        (*stbuf).st_size = attrlength as __off_t;
-        (*stbuf).st_blocks = attrlength
-            .wrapping_add(511 as uint64_t)
-            .wrapping_div(512 as uint64_t) as __blkcnt_t;
-        (*stbuf).st_uid = attruid as __uid_t;
-        (*stbuf).st_gid = attrgid as __gid_t;
-        (*stbuf).st_atim.tv_sec = attratime as __time_t;
-        (*stbuf).st_mtim.tv_sec = attrmtime as __time_t;
-        (*stbuf).st_ctim.tv_sec = attrctime as __time_t;
-        (*stbuf).st_nlink = attrnlink as __nlink_t;
+        (*stbuf).st_mode = f.mode;
+        (*stbuf).st_size = f.size as __off_t;
+        (*stbuf).st_blocks = f.blocks as __blkcnt_t;
+        (*stbuf).st_blksize = f.blksize as __blksize_t;
+        (*stbuf).st_uid = f.uid;
+        (*stbuf).st_gid = f.gid;
+        (*stbuf).st_atim.tv_sec = f.atime as __time_t;
+        (*stbuf).st_mtim.tv_sec = f.mtime as __time_t;
+        (*stbuf).st_ctim.tv_sec = f.ctime as __time_t;
+        (*stbuf).st_nlink = f.nlink as __nlink_t;
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_statfs(mut req: fuse_req_t, _ino: fuse_ino_t) {
+pub extern "C" fn mfs_meta_name_to_inode(name: *const ::core::ffi::c_char) -> uint32_t {
+    // SAFETY: name is a NUL-terminated C string per C contract.
+    let bytes = unsafe { ::core::ffi::CStr::from_ptr(name) }.to_bytes();
+    imp::name_to_inode(bytes)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mfs_meta_statfs(req: fuse_req_t, _ino: fuse_ino_t) {
     unsafe {
         let mut totalspace: uint64_t = 0;
         let mut availspace: uint64_t = 0;
@@ -679,26 +1031,7 @@ pub unsafe extern "C" fn mfs_meta_statfs(mut req: fuse_req_t, _ino: fuse_ino_t) 
         let mut trashspace: uint64_t = 0;
         let mut sustainedspace: uint64_t = 0;
         let mut inodes: uint32_t = 0;
-        let mut stfsbuf: statvfs = statvfs {
-            f_bsize: 0,
-            f_frsize: 0,
-            f_blocks: 0,
-            f_bfree: 0,
-            f_bavail: 0,
-            f_files: 0,
-            f_ffree: 0,
-            f_favail: 0,
-            f_fsid: 0,
-            f_flag: 0,
-            f_namemax: 0,
-            f_type: 0,
-            __f_spare: [0; 5],
-        };
-        memset(
-            &raw mut stfsbuf as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<statvfs>(),
-        );
+        let mut stfsbuf: statvfs = ::core::mem::zeroed();
         fs_statfs(
             &raw mut totalspace,
             &raw mut availspace,
@@ -708,1191 +1041,541 @@ pub unsafe extern "C" fn mfs_meta_statfs(mut req: fuse_req_t, _ino: fuse_ino_t) 
             &raw mut inodes,
         );
         stfsbuf.f_namemax = NAME_MAX as ::core::ffi::c_ulong;
-        stfsbuf.f_frsize = MFSBLOCKSIZE as ::core::ffi::c_ulong;
-        stfsbuf.f_bsize = MFSBLOCKSIZE as ::core::ffi::c_ulong;
-        stfsbuf.f_blocks = trashspace
-            .wrapping_div(MFSBLOCKSIZE as uint64_t)
-            .wrapping_add(sustainedspace.wrapping_div(MFSBLOCKSIZE as uint64_t))
-            as __fsblkcnt64_t;
-        stfsbuf.f_bfree = sustainedspace.wrapping_div(MFSBLOCKSIZE as uint64_t) as __fsblkcnt64_t;
-        stfsbuf.f_bavail = sustainedspace.wrapping_div(MFSBLOCKSIZE as uint64_t) as __fsblkcnt64_t;
-        stfsbuf.f_files = (1000000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
-        stfsbuf.f_ffree = (1000000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
-        stfsbuf.f_favail = (1000000000 as ::core::ffi::c_int + PKGVERSION) as __fsfilcnt64_t;
-        fuse_reply_statfs(req, &raw mut stfsbuf);
+        stfsbuf.f_frsize = imp::MFSBLOCKSIZE as ::core::ffi::c_ulong;
+        stfsbuf.f_bsize = imp::MFSBLOCKSIZE as ::core::ffi::c_ulong;
+        stfsbuf.f_blocks = (trashspace + sustainedspace) / imp::MFSBLOCKSIZE as u64;
+        stfsbuf.f_bfree = sustainedspace / imp::MFSBLOCKSIZE as u64;
+        stfsbuf.f_bavail = stfsbuf.f_bfree;
+        stfsbuf.f_files = (1000000000 as __fsfilcnt64_t) + (PKGVERSION as __fsfilcnt64_t);
+        stfsbuf.f_ffree = stfsbuf.f_files;
+        stfsbuf.f_favail = stfsbuf.f_files;
+        fuse_reply_statfs(req, &raw const stfsbuf);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_lookup(
-    mut req: fuse_req_t,
-    mut parent: fuse_ino_t,
-    mut name: *const ::core::ffi::c_char,
+    req: fuse_req_t,
+    parent: fuse_ino_t,
+    name: *const ::core::ffi::c_char,
 ) {
     unsafe {
-        let mut e: fuse_entry_param = fuse_entry_param {
-            ino: 0,
-            generation: 0,
-            attr: stat {
-                st_dev: 0,
-                st_ino: 0,
-                st_nlink: 0,
-                st_mode: 0,
-                st_uid: 0,
-                st_gid: 0,
-                __pad0: 0,
-                st_rdev: 0,
-                st_size: 0,
-                st_blksize: 0,
-                st_blocks: 0,
-                st_atim: timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                },
-                st_mtim: timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                },
-                st_ctim: timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                },
-                __glibc_reserved: [0; 3],
-            },
-            attr_timeout: 0.,
-            entry_timeout: 0.,
-        };
-        let mut inode: uint32_t = 0;
-        memset(
-            &raw mut e as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<fuse_entry_param>(),
-        );
-        inode = 0 as uint32_t;
-        match parent {
-            1 => {
-                if strcmp(name, b".\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                    || strcmp(name, b"..\0".as_ptr() as *const ::core::ffi::c_char)
-                        == 0 as ::core::ffi::c_int
-                {
-                    inode = META_ROOT_INODE as uint32_t;
-                } else if strcmp(name, META_TRASH_NAME.as_ptr()) == 0 as ::core::ffi::c_int {
-                    inode = META_TRASH_INODE as uint32_t;
-                } else if strcmp(name, META_SUSTAINED_NAME.as_ptr()) == 0 as ::core::ffi::c_int {
-                    inode = META_SUSTAINED_INODE as uint32_t;
-                } else if strcmp(name, MASTERINFO_NAME.as_ptr()) == 0 as ::core::ffi::c_int {
-                    memset(
-                        &raw mut e as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ::core::mem::size_of::<fuse_entry_param>(),
-                    );
-                    e.ino = MASTERINFO_INODE as fuse_ino_t;
-                    e.attr_timeout = 3600.0f64;
-                    e.entry_timeout = 3600.0f64;
-                    mfs_attr_to_stat(
-                        MASTERINFO_INODE as uint32_t,
-                        &raw mut masterinfoattr as *mut uint8_t as *const uint8_t,
-                        &raw mut e.attr,
-                    );
-                    fuse_reply_entry(req, &raw mut e);
-                    return;
-                }
+        let namelen = libc::strlen(name);
+        let nameb = ::core::slice::from_raw_parts(name as *const uint8_t, namelen);
+        let mut e: fuse_entry_param = ::core::mem::zeroed();
+        match imp::resolve_lookup(parent as uint32_t, nameb, master_ge_3064(), flat_trash_on()) {
+            Lookup::MetaInode(inode) => {
+                e.ino = inode as fuse_ino_t;
+                e.attr_timeout = attr_to();
+                e.entry_timeout = entry_to();
+                let now = time(::core::ptr::null_mut()) as u32;
+                let f = imp::meta_stat(inode, now);
+                fill_stat(inode, &f, &raw mut e.attr);
+                fuse_reply_entry(req, &raw const e);
             }
-            2147483640 => {
-                if strcmp(name, b".\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_TRASH_INODE as uint32_t;
-                } else if strcmp(name, b"..\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_ROOT_INODE as uint32_t;
-                } else if strcmp(name, META_UNDEL_NAME.as_ptr()) == 0 as ::core::ffi::c_int {
-                    inode = META_UNDEL_INODE as uint32_t;
-                } else if master_version()
-                    >= (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
-                        + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
-                        + (if 3 as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                            64 as ::core::ffi::c_int * 2 as ::core::ffi::c_int
-                        } else {
-                            64 as ::core::ffi::c_int
-                        })) as uint32_t
-                    && flat_trash == 0 as ::core::ffi::c_int
-                {
-                    inode = strtoul(
-                        name,
-                        ::core::ptr::null_mut::<*mut ::core::ffi::c_char>(),
-                        16 as ::core::ffi::c_int,
-                    ) as uint32_t;
-                    if inode < TRASH_BUCKETS as uint32_t {
-                        inode = inode.wrapping_add(META_SUBTRASH_INODE_MIN as uint32_t);
-                    } else {
-                        inode = 0 as uint32_t;
-                    }
+            Lookup::MasterInfo => {
+                e.ino = imp::MASTERINFO_INODE as fuse_ino_t;
+                e.attr_timeout = 3600.0;
+                e.entry_timeout = 3600.0;
+                let f = imp::attr_to_stat(imp::MASTERINFO_INODE, &MASTERINFOATTR);
+                fill_stat(imp::MASTERINFO_INODE, &f, &raw mut e.attr);
+                fuse_reply_entry(req, &raw const e);
+            }
+            Lookup::DetachedAttr(inode) => {
+                let mut attr = [0u8; 36];
+                let status = imp::errorconv(fs_getdetachedattr(inode, attr.as_mut_ptr()) as i32);
+                if status != 0 {
+                    fuse_reply_err(req, status);
                 } else {
-                    inode = mfs_meta_name_to_inode(name);
-                    if inode > 0 as uint32_t {
-                        let mut status: ::core::ffi::c_int = 0;
-                        let mut attr: [uint8_t; 36] = [0; 36];
-                        status = fs_getdetachedattr(inode, &raw mut attr as *mut uint8_t)
-                            as ::core::ffi::c_int;
-                        status = mfs_errorconv(status);
-                        if status != 0 as ::core::ffi::c_int {
-                            fuse_reply_err(req, status);
-                        } else {
-                            e.ino = inode as fuse_ino_t;
-                            e.attr_timeout = attr_cache_timeout;
-                            e.entry_timeout = entry_cache_timeout;
-                            mfs_attr_to_stat(
-                                inode,
-                                &raw mut attr as *mut uint8_t as *const uint8_t,
-                                &raw mut e.attr,
-                            );
-                            fuse_reply_entry(req, &raw mut e);
-                        }
-                        return;
-                    }
+                    e.ino = inode as fuse_ino_t;
+                    e.attr_timeout = attr_to();
+                    e.entry_timeout = entry_to();
+                    let f = imp::attr_to_stat(inode, &attr);
+                    fill_stat(inode, &f, &raw mut e.attr);
+                    fuse_reply_entry(req, &raw const e);
                 }
             }
-            2147483641 => {
-                if strcmp(name, b".\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_UNDEL_INODE as uint32_t;
-                } else if strcmp(name, b"..\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_TRASH_INODE as uint32_t;
-                }
-            }
-            2147483642 => {
-                if strcmp(name, b".\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_SUSTAINED_INODE as uint32_t;
-                } else if strcmp(name, b"..\0".as_ptr() as *const ::core::ffi::c_char)
-                    == 0 as ::core::ffi::c_int
-                {
-                    inode = META_ROOT_INODE as uint32_t;
-                } else {
-                    inode = mfs_meta_name_to_inode(name);
-                    if inode > 0 as uint32_t {
-                        let mut status_0: ::core::ffi::c_int = 0;
-                        let mut attr_0: [uint8_t; 36] = [0; 36];
-                        status_0 = fs_getdetachedattr(inode, &raw mut attr_0 as *mut uint8_t)
-                            as ::core::ffi::c_int;
-                        status_0 = mfs_errorconv(status_0);
-                        if status_0 != 0 as ::core::ffi::c_int {
-                            fuse_reply_err(req, status_0);
-                        } else {
-                            e.ino = inode as fuse_ino_t;
-                            e.attr_timeout = attr_cache_timeout;
-                            e.entry_timeout = entry_cache_timeout;
-                            mfs_attr_to_stat(
-                                inode,
-                                &raw mut attr_0 as *mut uint8_t as *const uint8_t,
-                                &raw mut e.attr,
-                            );
-                            fuse_reply_entry(req, &raw mut e);
-                        }
-                        return;
-                    }
-                }
-            }
-            _ => {
-                if parent >= META_SUBTRASH_INODE_MIN as fuse_ino_t
-                    && parent <= META_SUBTRASH_INODE_MAX as fuse_ino_t
-                {
-                    if strcmp(name, b".\0".as_ptr() as *const ::core::ffi::c_char)
-                        == 0 as ::core::ffi::c_int
-                    {
-                        inode = parent as uint32_t;
-                    } else if strcmp(name, b"..\0".as_ptr() as *const ::core::ffi::c_char)
-                        == 0 as ::core::ffi::c_int
-                    {
-                        inode = META_TRASH_INODE as uint32_t;
-                    } else if strcmp(name, META_UNDEL_NAME.as_ptr()) == 0 as ::core::ffi::c_int {
-                        inode = META_UNDEL_INODE as uint32_t;
-                    } else {
-                        inode = mfs_meta_name_to_inode(name);
-                        if inode > 0 as uint32_t {
-                            let mut status_1: ::core::ffi::c_int = 0;
-                            let mut attr_1: [uint8_t; 36] = [0; 36];
-                            status_1 = fs_getdetachedattr(inode, &raw mut attr_1 as *mut uint8_t)
-                                as ::core::ffi::c_int;
-                            status_1 = mfs_errorconv(status_1);
-                            if status_1 != 0 as ::core::ffi::c_int {
-                                fuse_reply_err(req, status_1);
-                            } else {
-                                e.ino = inode as fuse_ino_t;
-                                e.attr_timeout = attr_cache_timeout;
-                                e.entry_timeout = entry_cache_timeout;
-                                mfs_attr_to_stat(
-                                    inode,
-                                    &raw mut attr_1 as *mut uint8_t as *const uint8_t,
-                                    &raw mut e.attr,
-                                );
-                                fuse_reply_entry(req, &raw mut e);
-                            }
-                            return;
-                        }
-                    }
-                }
+            Lookup::NotFound => {
+                fuse_reply_err(req, ENOENT);
             }
         }
-        if inode == 0 as uint32_t {
-            fuse_reply_err(req, ENOENT);
-        } else {
-            e.ino = inode as fuse_ino_t;
-            e.attr_timeout = attr_cache_timeout;
-            e.entry_timeout = entry_cache_timeout;
-            mfs_meta_stat(inode, &raw mut e.attr);
-            fuse_reply_entry(req, &raw mut e);
-        };
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_getattr(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
     _fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let mut o_stbuf: stat = stat {
-            st_dev: 0,
-            st_ino: 0,
-            st_nlink: 0,
-            st_mode: 0,
-            st_uid: 0,
-            st_gid: 0,
-            __pad0: 0,
-            st_rdev: 0,
-            st_size: 0,
-            st_blksize: 0,
-            st_blocks: 0,
-            st_atim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            st_mtim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            st_ctim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            __glibc_reserved: [0; 3],
-        };
-        if ino == MASTERINFO_INODE as fuse_ino_t {
-            memset(
-                &raw mut o_stbuf as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<stat>(),
-            );
-            mfs_attr_to_stat(
-                ino as uint32_t,
-                &raw mut masterinfoattr as *mut uint8_t as *const uint8_t,
-                &raw mut o_stbuf,
-            );
-            fuse_reply_attr(req, &raw mut o_stbuf, 3600.0f64);
-        } else if ino >= MIN_SPECIAL_INODE as fuse_ino_t || ino == META_ROOT_INODE as fuse_ino_t {
-            memset(
-                &raw mut o_stbuf as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<stat>(),
-            );
-            mfs_meta_stat(ino as uint32_t, &raw mut o_stbuf);
-            fuse_reply_attr(req, &raw mut o_stbuf, attr_cache_timeout);
+        let inode = ino as uint32_t;
+        let mut stbuf: stat = ::core::mem::zeroed();
+        if inode == imp::MASTERINFO_INODE {
+            let f = imp::attr_to_stat(inode, &MASTERINFOATTR);
+            fill_stat(inode, &f, &raw mut stbuf);
+            fuse_reply_attr(req, &raw const stbuf, 3600.0);
+        } else if imp::is_special_inode(inode) {
+            let now = time(::core::ptr::null_mut()) as u32;
+            let f = imp::meta_stat(inode, now);
+            fill_stat(inode, &f, &raw mut stbuf);
+            fuse_reply_attr(req, &raw const stbuf, attr_to());
         } else {
-            let mut status: ::core::ffi::c_int = 0;
-            let mut attr: [uint8_t; 36] = [0; 36];
-            status = fs_getdetachedattr(ino as uint32_t, &raw mut attr as *mut uint8_t)
-                as ::core::ffi::c_int;
-            status = mfs_errorconv(status);
-            if status != 0 as ::core::ffi::c_int {
+            let mut attr = [0u8; 36];
+            let status = imp::errorconv(fs_getdetachedattr(inode, attr.as_mut_ptr()) as i32);
+            if status != 0 {
                 fuse_reply_err(req, status);
             } else {
-                memset(
-                    &raw mut o_stbuf as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ::core::mem::size_of::<stat>(),
-                );
-                mfs_attr_to_stat(
-                    ino as uint32_t,
-                    &raw mut attr as *mut uint8_t as *const uint8_t,
-                    &raw mut o_stbuf,
-                );
-                fuse_reply_attr(req, &raw mut o_stbuf, attr_cache_timeout);
+                let f = imp::attr_to_stat(inode, &attr);
+                fill_stat(inode, &f, &raw mut stbuf);
+                fuse_reply_attr(req, &raw const stbuf, attr_to());
             }
-        };
+        }
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_setattr(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
     _stbuf: *mut stat,
     _to_set: ::core::ffi::c_int,
-    mut fi: *mut fuse_file_info,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
         mfs_meta_getattr(req, ino, fi);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_unlink(
-    mut req: fuse_req_t,
-    mut parent: fuse_ino_t,
-    mut name: *const ::core::ffi::c_char,
+    req: fuse_req_t,
+    parent: fuse_ino_t,
+    name: *const ::core::ffi::c_char,
 ) {
     unsafe {
-        let mut status: ::core::ffi::c_int = 0;
-        let mut inode: uint32_t = 0;
-        if !(parent == META_TRASH_INODE as fuse_ino_t
-            || parent >= META_SUBTRASH_INODE_MIN as fuse_ino_t
-                && parent <= META_SUBTRASH_INODE_MAX as fuse_ino_t)
+        let p = parent as uint32_t;
+        if !(p == imp::META_TRASH_INODE
+            || (imp::META_SUBTRASH_INODE_MIN..=imp::META_SUBTRASH_INODE_MAX).contains(&p))
         {
             fuse_reply_err(req, EACCES);
             return;
         }
-        inode = mfs_meta_name_to_inode(name);
-        if inode == 0 as uint32_t {
+        let namelen = libc::strlen(name);
+        let inode = imp::name_to_inode(::core::slice::from_raw_parts(
+            name as *const uint8_t,
+            namelen,
+        ));
+        if inode == 0 {
             fuse_reply_err(req, ENOENT);
             return;
         }
-        status = fs_purge(inode) as ::core::ffi::c_int;
-        status = mfs_errorconv(status);
+        let status = imp::errorconv(fs_purge(inode) as i32);
         fuse_reply_err(req, status);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_rename(
-    mut req: fuse_req_t,
-    mut parent: fuse_ino_t,
-    mut name: *const ::core::ffi::c_char,
-    mut newparent: fuse_ino_t,
+    req: fuse_req_t,
+    parent: fuse_ino_t,
+    name: *const ::core::ffi::c_char,
+    newparent: fuse_ino_t,
     _newname: *const ::core::ffi::c_char,
     _flags: ::core::ffi::c_uint,
 ) {
     unsafe {
-        let mut status: ::core::ffi::c_int = 0;
-        let mut inode: uint32_t = 0;
-        if !(parent == META_TRASH_INODE as fuse_ino_t
-            || parent >= META_SUBTRASH_INODE_MIN as fuse_ino_t
-                && parent <= META_SUBTRASH_INODE_MAX as fuse_ino_t)
-            && newparent != META_UNDEL_INODE as fuse_ino_t
+        let p = parent as uint32_t;
+        let np = newparent as uint32_t;
+        if !(p == imp::META_TRASH_INODE
+            || (imp::META_SUBTRASH_INODE_MIN..=imp::META_SUBTRASH_INODE_MAX).contains(&p))
+            && np != imp::META_UNDEL_INODE
         {
             fuse_reply_err(req, EACCES);
             return;
         }
-        inode = mfs_meta_name_to_inode(name);
-        if inode == 0 as uint32_t {
+        let namelen = libc::strlen(name);
+        let inode = imp::name_to_inode(::core::slice::from_raw_parts(
+            name as *const uint8_t,
+            namelen,
+        ));
+        if inode == 0 {
             fuse_reply_err(req, ENOENT);
             return;
         }
-        status = fs_undel(inode) as ::core::ffi::c_int;
-        status = mfs_errorconv(status);
+        let status = imp::errorconv(fs_undel(inode) as i32);
         fuse_reply_err(req, status);
     }
 }
-unsafe extern "C" fn dir_metaentries_size(mut ino: uint32_t) -> uint32_t {
-    unsafe {
-        match ino {
-            1 => {
-                return ((4 as ::core::ffi::c_int * 6 as ::core::ffi::c_int
-                    + 1 as ::core::ffi::c_int
-                    + 2 as ::core::ffi::c_int) as size_t)
-                    .wrapping_add(strlen(META_TRASH_NAME.as_ptr()))
-                    .wrapping_add(strlen(META_SUSTAINED_NAME.as_ptr()))
-                    as uint32_t;
-            }
-            2147483640 => {
-                if master_version()
-                    >= (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
-                        + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
-                        + (if 3 as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                            64 as ::core::ffi::c_int * 2 as ::core::ffi::c_int
-                        } else {
-                            64 as ::core::ffi::c_int
-                        })) as uint32_t
-                    && flat_trash == 0 as ::core::ffi::c_int
-                {
-                    return (((3 as ::core::ffi::c_int + TRASH_BUCKETS) * 6 as ::core::ffi::c_int
-                        + 1 as ::core::ffi::c_int
-                        + 2 as ::core::ffi::c_int) as size_t)
-                        .wrapping_add(strlen(META_UNDEL_NAME.as_ptr()))
-                        .wrapping_add(
-                            (TRASH_BUCKETS
-                                * (if TRASH_BUCKETS <= 4096 as ::core::ffi::c_int {
-                                    3 as ::core::ffi::c_int
-                                } else {
-                                    4 as ::core::ffi::c_int
-                                })) as size_t,
-                        ) as uint32_t;
-                } else {
-                    return ((3 as ::core::ffi::c_int * 6 as ::core::ffi::c_int
-                        + 1 as ::core::ffi::c_int
-                        + 2 as ::core::ffi::c_int) as size_t)
-                        .wrapping_add(strlen(META_UNDEL_NAME.as_ptr()))
-                        as uint32_t;
-                }
-            }
-            2147483641 => {
-                return (2 as ::core::ffi::c_int * 6 as ::core::ffi::c_int
-                    + 1 as ::core::ffi::c_int
-                    + 2 as ::core::ffi::c_int) as uint32_t;
-            }
-            2147483642 => {
-                return (2 as ::core::ffi::c_int * 6 as ::core::ffi::c_int
-                    + 1 as ::core::ffi::c_int
-                    + 2 as ::core::ffi::c_int) as uint32_t;
-            }
-            _ => {
-                if ino >= META_SUBTRASH_INODE_MIN as uint32_t
-                    && ino <= META_SUBTRASH_INODE_MAX as uint32_t
-                {
-                    return ((3 as ::core::ffi::c_int * 6 as ::core::ffi::c_int
-                        + 1 as ::core::ffi::c_int
-                        + 2 as ::core::ffi::c_int) as size_t)
-                        .wrapping_add(strlen(META_UNDEL_NAME.as_ptr()))
-                        as uint32_t;
-                }
-            }
-        }
-        return 0 as uint32_t;
-    }
+
+struct DirBuf {
+    data: Vec<u8>,
+    wasread: bool,
+    lock: StdMutex<()>,
 }
-unsafe extern "C" fn dir_metaentries_fill(mut buff: *mut uint8_t, mut ino: uint32_t) {
+
+/// build the directory content blob for `ino` (dirbuf_meta_fill);
+/// returns None on master-error (C left b->p NULL/size 0)
+unsafe fn dirbuf_meta_fill(ino: uint32_t) -> Option<Vec<u8>> {
     unsafe {
-        let mut l: uint8_t = 0;
-        match ino {
-            1 => {
-                put8bit(&raw mut buff, 1 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_ROOT_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                put8bit(&raw mut buff, 2 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_ROOT_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                l = strlen(META_TRASH_NAME.as_ptr()) as uint8_t;
-                put8bit(&raw mut buff, l);
-                memcpy(
-                    buff as *mut ::core::ffi::c_void,
-                    META_TRASH_NAME.as_ptr() as *const ::core::ffi::c_void,
-                    l as size_t,
-                );
-                buff = buff.offset(l as ::core::ffi::c_int as isize);
-                put32bit(&raw mut buff, META_TRASH_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                l = strlen(META_SUSTAINED_NAME.as_ptr()) as uint8_t;
-                put8bit(&raw mut buff, l);
-                memcpy(
-                    buff as *mut ::core::ffi::c_void,
-                    META_SUSTAINED_NAME.as_ptr() as *const ::core::ffi::c_void,
-                    l as size_t,
-                );
-                buff = buff.offset(l as ::core::ffi::c_int as isize);
-                put32bit(&raw mut buff, META_SUSTAINED_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                return;
-            }
-            2147483640 => {
-                put8bit(&raw mut buff, 1 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_TRASH_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                put8bit(&raw mut buff, 2 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_ROOT_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                l = strlen(META_UNDEL_NAME.as_ptr()) as uint8_t;
-                put8bit(&raw mut buff, l);
-                memcpy(
-                    buff as *mut ::core::ffi::c_void,
-                    META_UNDEL_NAME.as_ptr() as *const ::core::ffi::c_void,
-                    l as size_t,
-                );
-                buff = buff.offset(l as ::core::ffi::c_int as isize);
-                put32bit(&raw mut buff, META_UNDEL_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                if master_version()
-                    >= (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
-                        + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
-                        + (if 3 as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                            64 as ::core::ffi::c_int * 2 as ::core::ffi::c_int
-                        } else {
-                            64 as ::core::ffi::c_int
-                        })) as uint32_t
-                    && flat_trash == 0 as ::core::ffi::c_int
-                {
-                    let mut tid: uint32_t = 0;
-                    tid = 0 as uint32_t;
-                    while tid < TRASH_BUCKETS as uint32_t {
-                        if TRASH_BUCKETS > 4096 as ::core::ffi::c_int {
-                            put8bit(&raw mut buff, 4 as uint8_t);
-                            put8bit(
-                                &raw mut buff,
-                                ::core::mem::transmute::<[u8; 17], [::core::ffi::c_char; 17]>(
-                                    *b"0123456789ABCDEF\0",
-                                )
-                                    [(tid >> 12 as ::core::ffi::c_int & 15 as uint32_t) as usize]
-                                    as uint8_t,
-                            );
-                        } else {
-                            put8bit(&raw mut buff, 3 as uint8_t);
-                        }
-                        put8bit(
-                            &raw mut buff,
-                            ::core::mem::transmute::<[u8; 17], [::core::ffi::c_char; 17]>(
-                                *b"0123456789ABCDEF\0",
-                            )
-                                [(tid >> 8 as ::core::ffi::c_int & 15 as uint32_t) as usize]
-                                as uint8_t,
-                        );
-                        put8bit(
-                            &raw mut buff,
-                            ::core::mem::transmute::<[u8; 17], [::core::ffi::c_char; 17]>(
-                                *b"0123456789ABCDEF\0",
-                            )
-                                [(tid >> 4 as ::core::ffi::c_int & 15 as uint32_t) as usize]
-                                as uint8_t,
-                        );
-                        put8bit(
-                            &raw mut buff,
-                            ::core::mem::transmute::<[u8; 17], [::core::ffi::c_char; 17]>(
-                                *b"0123456789ABCDEF\0",
-                            )[(tid & 15 as uint32_t) as usize]
-                                as uint8_t,
-                        );
-                        put32bit(
-                            &raw mut buff,
-                            tid.wrapping_add(META_SUBTRASH_INODE_MIN as uint32_t),
-                        );
-                        put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                        tid = tid.wrapping_add(1);
-                    }
-                }
-                return;
-            }
-            2147483641 => {
-                put8bit(&raw mut buff, 1 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_UNDEL_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                put8bit(&raw mut buff, 2 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_TRASH_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                return;
-            }
-            2147483642 => {
-                put8bit(&raw mut buff, 1 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_SUSTAINED_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                put8bit(&raw mut buff, 2 as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put8bit(&raw mut buff, '.' as uint8_t);
-                put32bit(&raw mut buff, META_ROOT_INODE as uint32_t);
-                put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                return;
-            }
-            _ => {
-                if ino >= META_SUBTRASH_INODE_MIN as uint32_t
-                    && ino <= META_SUBTRASH_INODE_MAX as uint32_t
-                {
-                    put8bit(&raw mut buff, 1 as uint8_t);
-                    put8bit(&raw mut buff, '.' as uint8_t);
-                    put32bit(&raw mut buff, META_TRASH_INODE as uint32_t);
-                    put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                    put8bit(&raw mut buff, 2 as uint8_t);
-                    put8bit(&raw mut buff, '.' as uint8_t);
-                    put8bit(&raw mut buff, '.' as uint8_t);
-                    put32bit(&raw mut buff, META_ROOT_INODE as uint32_t);
-                    put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                    l = strlen(META_UNDEL_NAME.as_ptr()) as uint8_t;
-                    put8bit(&raw mut buff, l);
-                    memcpy(
-                        buff as *mut ::core::ffi::c_void,
-                        META_UNDEL_NAME.as_ptr() as *const ::core::ffi::c_void,
-                        l as size_t,
-                    );
-                    buff = buff.offset(l as ::core::ffi::c_int as isize);
-                    put32bit(&raw mut buff, META_UNDEL_INODE as uint32_t);
-                    put8bit(&raw mut buff, TYPE_DIRECTORY as uint8_t);
-                    return;
-                }
-            }
-        };
-    }
-}
-unsafe extern "C" fn dir_dataentries_size(
-    mut dbuff: *const uint8_t,
-    mut dsize: uint32_t,
-) -> uint32_t {
-    unsafe {
-        let mut nleng: uint8_t = 0;
-        let mut eleng: uint32_t = 0;
-        let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        eleng = 0 as uint32_t;
-        if dbuff.is_null() || dsize == 0 as uint32_t {
-            return 0 as uint32_t;
-        }
-        eptr = dbuff.offset(dsize as isize);
-        while dbuff < eptr {
-            nleng = *dbuff.offset(0 as isize);
-            dbuff = dbuff.offset((5 as ::core::ffi::c_int + nleng as ::core::ffi::c_int) as isize);
-            if nleng as ::core::ffi::c_int > 255 as ::core::ffi::c_int - 9 as ::core::ffi::c_int {
-                eleng = eleng.wrapping_add(
-                    (6 as ::core::ffi::c_int + 255 as ::core::ffi::c_int) as uint32_t,
-                );
-            } else {
-                eleng = eleng.wrapping_add(
-                    (6 as ::core::ffi::c_int
-                        + nleng as ::core::ffi::c_int
-                        + 9 as ::core::ffi::c_int) as uint32_t,
-                );
-            }
-        }
-        return eleng;
-    }
-}
-unsafe extern "C" fn dir_hexgen(mut buff: *mut uint8_t, mut hex: uint32_t) {
-    unsafe {
-        let mut i: uint8_t = 0;
-        i = 0 as uint8_t;
-        while (i as ::core::ffi::c_int) < 8 as ::core::ffi::c_int {
-            *buff.offset((7 as ::core::ffi::c_int - i as ::core::ffi::c_int) as isize) =
-                ::core::mem::transmute::<[u8; 17], [::core::ffi::c_char; 17]>(
-                    *b"0123456789ABCDEF\0",
-                )[(hex & 0xf as uint32_t) as usize] as uint8_t;
-            hex >>= 4 as ::core::ffi::c_int;
-            i = i.wrapping_add(1);
-        }
-    }
-}
-unsafe extern "C" fn dir_dataentries_convert(
-    mut buff: *mut uint8_t,
-    mut dbuff: *const uint8_t,
-    mut dsize: uint32_t,
-) {
-    unsafe {
-        let mut name: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-        let mut inode: uint32_t = 0;
-        let mut nleng: uint8_t = 0;
-        let mut inoleng: uint8_t = 0;
-        let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        eptr = dbuff.offset(dsize as isize);
-        while dbuff < eptr {
-            nleng = *dbuff.offset(0 as isize);
-            if dbuff
-                .offset(nleng as ::core::ffi::c_int as isize)
-                .offset(5 as ::core::ffi::c_int as isize)
-                <= eptr
-            {
-                dbuff = dbuff.offset(1);
-                if nleng as ::core::ffi::c_int > 255 as ::core::ffi::c_int - 9 as ::core::ffi::c_int
-                {
-                    inoleng = 255 as uint8_t;
-                } else {
-                    inoleng = (nleng as ::core::ffi::c_int + 9 as ::core::ffi::c_int) as uint8_t;
-                }
-                put8bit(&raw mut buff, inoleng);
-                name = dbuff as *const ::core::ffi::c_char;
-                dbuff = dbuff.offset(nleng as ::core::ffi::c_int as isize);
-                inode = get32bit(&raw mut dbuff);
-                dir_hexgen(buff, inode);
-                *buff.offset(8 as isize) = '|' as uint8_t;
-                if nleng as ::core::ffi::c_int > 255 as ::core::ffi::c_int - 9 as ::core::ffi::c_int
-                {
-                    memcpy(
-                        buff.offset(9 as ::core::ffi::c_int as isize) as *mut ::core::ffi::c_void,
-                        name as *const ::core::ffi::c_void,
-                        (255 as ::core::ffi::c_int - 9 as ::core::ffi::c_int) as size_t,
-                    );
-                    buff = buff.offset(255 as ::core::ffi::c_int as isize);
-                } else {
-                    memcpy(
-                        buff.offset(9 as ::core::ffi::c_int as isize) as *mut ::core::ffi::c_void,
-                        name as *const ::core::ffi::c_void,
-                        nleng as size_t,
-                    );
-                    buff = buff
-                        .offset((9 as ::core::ffi::c_int + nleng as ::core::ffi::c_int) as isize);
-                }
-                put32bit(&raw mut buff, inode);
-                put8bit(&raw mut buff, TYPE_FILE as uint8_t);
-            } else {
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_WARNING,
-                    b"dir data malformed (trash)\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                dbuff = eptr;
-            }
-        }
-    }
-}
-unsafe extern "C" fn dirbuf_meta_fill(mut b: *mut dirbuf, mut ino: uint32_t) {
-    unsafe {
-        let mut status: ::core::ffi::c_int = 0;
-        let mut msize: uint32_t = 0;
-        let mut dcsize: uint32_t = 0;
-        let mut dbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
+        let msize = imp::dir_metaentries_size(ino, master_ge_3064(), flat_trash_on());
+        let mut dbuff: *const uint8_t = ::core::ptr::null();
         let mut dsize: uint32_t = 0;
-        (*b).p = ::core::ptr::null_mut::<uint8_t>();
-        (*b).size = 0 as size_t;
-        msize = dir_metaentries_size(ino);
-        dbuff = ::core::ptr::null::<uint8_t>();
-        dsize = 0 as uint32_t;
-        if ino == META_TRASH_INODE as uint32_t
-            && (master_version()
-                < (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
-                    + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
-                    + (if 3 as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                        64 as ::core::ffi::c_int * 2 as ::core::ffi::c_int
-                    } else {
-                        64 as ::core::ffi::c_int
-                    })) as uint32_t
-                || flat_trash != 0)
+        let mut data: Option<Vec<u8>> = None;
+        if ino == imp::META_TRASH_INODE && (!master_ge_3064() || flat_trash_on()) {
+            if fs_gettrash(0xFFFFFFFF, &raw mut dbuff, &raw mut dsize) == MFS_STATUS_OK as uint8_t {
+                let blob = ::core::slice::from_raw_parts(dbuff, dsize as usize);
+                let (conv, malformed) = imp::dir_dataentries_convert(blob);
+                if malformed {
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_WARNING,
+                        b"dir data malformed (trash)\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
+                data = Some(conv);
+            }
+        } else if ino == imp::META_SUSTAINED_INODE {
+            if fs_getsustained(&raw mut dbuff, &raw mut dsize) == MFS_STATUS_OK as uint8_t {
+                let blob = ::core::slice::from_raw_parts(dbuff, dsize as usize);
+                let (conv, malformed) = imp::dir_dataentries_convert(blob);
+                if malformed {
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_WARNING,
+                        b"dir data malformed (sustained)\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
+                data = Some(conv);
+            }
+        } else if (imp::META_SUBTRASH_INODE_MIN..=imp::META_SUBTRASH_INODE_MAX).contains(&ino)
+            && master_ge_3064()
+            && !flat_trash_on()
         {
-            status = fs_gettrash(0xffffffff as uint32_t, &raw mut dbuff, &raw mut dsize)
-                as ::core::ffi::c_int;
-            if status != MFS_STATUS_OK {
-                return;
+            if fs_gettrash(ino - imp::META_SUBTRASH_INODE_MIN, &raw mut dbuff, &raw mut dsize)
+                == MFS_STATUS_OK as uint8_t
+            {
+                let blob = ::core::slice::from_raw_parts(dbuff, dsize as usize);
+                let (conv, _) = imp::dir_dataentries_convert(blob);
+                data = Some(conv);
             }
-            dcsize = dir_dataentries_size(dbuff, dsize);
-        } else if ino == META_SUSTAINED_INODE as uint32_t {
-            status = fs_getsustained(&raw mut dbuff, &raw mut dsize) as ::core::ffi::c_int;
-            if status != MFS_STATUS_OK {
-                return;
-            }
-            dcsize = dir_dataentries_size(dbuff, dsize);
-        } else if ino >= META_SUBTRASH_INODE_MIN as uint32_t
-            && ino <= META_SUBTRASH_INODE_MAX as uint32_t
-            && master_version()
-                >= (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
-                    + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
-                    + (if 3 as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                        64 as ::core::ffi::c_int * 2 as ::core::ffi::c_int
-                    } else {
-                        64 as ::core::ffi::c_int
-                    })) as uint32_t
-            && flat_trash == 0 as ::core::ffi::c_int
-        {
-            status = fs_gettrash(
-                ino.wrapping_sub(META_SUBTRASH_INODE_MIN as uint32_t),
-                &raw mut dbuff,
-                &raw mut dsize,
-            ) as ::core::ffi::c_int;
-            if status != MFS_STATUS_OK {
-                return;
-            }
-            dcsize = dir_dataentries_size(dbuff, dsize);
-        } else {
-            dcsize = 0 as uint32_t;
         }
-        if msize.wrapping_add(dcsize) == 0 as uint32_t {
-            return;
+        if msize == 0 && data.is_none() {
+            return None;
         }
-        (*b).p = malloc(msize.wrapping_add(dcsize) as size_t) as *mut uint8_t;
-        if (*b).p.is_null() {
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_WARNING,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return;
+        let mut out = Vec::with_capacity(msize as usize + data.as_ref().map_or(0, |d| d.len()));
+        if msize > 0 {
+            out.extend_from_slice(&imp::dir_metaentries_fill(
+                ino,
+                master_ge_3064(),
+                flat_trash_on(),
+            ));
         }
-        if msize > 0 as uint32_t {
-            dir_metaentries_fill((*b).p, ino);
+        if let Some(d) = data {
+            out.extend_from_slice(&d);
         }
-        if dcsize > 0 as uint32_t {
-            dir_dataentries_convert((*b).p.offset(msize as isize), dbuff, dsize);
-        }
-        (*b).size = msize.wrapping_add(dcsize) as size_t;
+        Some(out)
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_opendir(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut fi: *mut fuse_file_info,
-) {
+pub unsafe extern "C" fn mfs_meta_opendir(req: fuse_req_t, ino: fuse_ino_t, fi: *mut fuse_file_info) {
     unsafe {
-        let mut dirinfo: *mut dirbuf = ::core::ptr::null_mut::<dirbuf>();
-        if ino == META_ROOT_INODE as fuse_ino_t
-            || ino == META_TRASH_INODE as fuse_ino_t
-            || ino == META_UNDEL_INODE as fuse_ino_t
-            || ino == META_SUSTAINED_INODE as fuse_ino_t
-            || ino >= META_SUBTRASH_INODE_MIN as fuse_ino_t
-                && ino <= META_SUBTRASH_INODE_MAX as fuse_ino_t
+        let inode = ino as uint32_t;
+        if inode == imp::META_ROOT_INODE
+            || inode == imp::META_TRASH_INODE
+            || inode == imp::META_UNDEL_INODE
+            || inode == imp::META_SUSTAINED_INODE
+            || (imp::META_SUBTRASH_INODE_MIN..=imp::META_SUBTRASH_INODE_MAX).contains(&inode)
         {
-            dirinfo = malloc(::core::mem::size_of::<dirbuf>()) as *mut dirbuf;
-            pthread_mutex_init(
-                &raw mut (*dirinfo).lock,
-                ::core::ptr::null::<pthread_mutexattr_t>(),
-            );
-            (*dirinfo).p = ::core::ptr::null_mut::<uint8_t>();
-            (*dirinfo).size = 0 as size_t;
-            (*dirinfo).wasread = 0 as ::core::ffi::c_int;
-            (*fi).fh = dirinfo.expose_provenance() as ::core::ffi::c_ulong as uint64_t;
+            let dirinfo = Box::new(DirBuf {
+                data: Vec::new(),
+                wasread: false,
+                lock: StdMutex::new(()),
+            });
+            (*fi).fh = Box::into_raw(dirinfo) as ::core::ffi::c_ulong;
             if fuse_reply_open(req, fi) == -ENOENT {
-                (*fi).fh = 0 as uint64_t;
-                pthread_mutex_destroy(&raw mut (*dirinfo).lock);
-                free((*dirinfo).p as *mut ::core::ffi::c_void);
-                free(dirinfo as *mut ::core::ffi::c_void);
+                (*fi).fh = 0;
+                drop(Box::from_raw((*fi).fh as *mut DirBuf));
             }
         } else {
             fuse_reply_err(req, ENOTDIR);
-        };
+        }
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_readdir(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut size: size_t,
-    mut off: off_t,
-    mut fi: *mut fuse_file_info,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
+    size: size_t,
+    off: off_t,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let mut dirinfo: *mut dirbuf = ::core::ptr::with_exposed_provenance_mut::<dirbuf>(
-            (*fi).fh as ::core::ffi::c_ulong as usize,
-        );
-        let mut buffer: [::core::ffi::c_char; 50000] = [0; 50000];
-        let mut name: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let mut c: ::core::ffi::c_char = 0;
-        let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut end: uint8_t = 0;
-        let mut opos: size_t = 0;
-        let mut oleng: size_t = 0;
-        let mut nleng: uint8_t = 0;
-        let mut inode: uint32_t = 0;
-        let mut r#type: uint8_t = 0;
-        let mut stbuf: stat = stat {
-            st_dev: 0,
-            st_ino: 0,
-            st_nlink: 0,
-            st_mode: 0,
-            st_uid: 0,
-            st_gid: 0,
-            __pad0: 0,
-            st_rdev: 0,
-            st_size: 0,
-            st_blksize: 0,
-            st_blocks: 0,
-            st_atim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            st_mtim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            st_ctim: timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            __glibc_reserved: [0; 3],
-        };
-        if off < 0 as off_t {
+        if off < 0 {
             fuse_reply_err(req, EINVAL);
             return;
         }
-        pthread_mutex_lock(&raw mut (*dirinfo).lock);
-        if (*dirinfo).wasread == 0 as ::core::ffi::c_int
-            || (*dirinfo).wasread == 1 as ::core::ffi::c_int && off == 0 as off_t
-        {
-            if !(*dirinfo).p.is_null() {
-                free((*dirinfo).p as *mut ::core::ffi::c_void);
-            }
-            dirbuf_meta_fill(dirinfo, ino as uint32_t);
+        // SAFETY: fh from mfs_meta_opendir.
+        let dirinfo = &mut *((*fi).fh as *mut DirBuf);
+        let _g = dirinfo.lock.lock().unwrap();
+        if !dirinfo.wasread || off == 0 {
+            dirinfo.data = dirbuf_meta_fill(ino as uint32_t).unwrap_or_default();
         }
-        (*dirinfo).wasread = 1 as ::core::ffi::c_int;
-        if off >= (*dirinfo).size as off_t {
-            fuse_reply_buf(req, ::core::ptr::null::<::core::ffi::c_char>(), 0 as size_t);
-        } else {
-            if size > READDIR_BUFFSIZE as size_t {
-                size = READDIR_BUFFSIZE as size_t;
-            }
-            ptr = ((*dirinfo).p as *const uint8_t).offset(off as isize);
-            eptr = ((*dirinfo).p as *const uint8_t).offset((*dirinfo).size as isize);
-            opos = 0 as size_t;
-            end = 0 as uint8_t;
-            while ptr < eptr && end as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                nleng = *ptr.offset(0 as isize);
-                ptr = ptr.offset(1);
-                name = ptr as *mut ::core::ffi::c_char;
-                ptr = ptr.offset(nleng as ::core::ffi::c_int as isize);
-                off += (nleng as ::core::ffi::c_int + 6 as ::core::ffi::c_int) as off_t;
-                if ptr.offset(5 as ::core::ffi::c_int as isize) <= eptr {
-                    inode = get32bit(&raw mut ptr);
-                    r#type = get8bit(&raw mut ptr);
-                    mfs_meta_type_to_stat(inode, r#type, &raw mut stbuf);
-                    c = *name.offset(nleng as isize);
-                    *name.offset(nleng as isize) = 0 as ::core::ffi::c_char;
-                    oleng = fuse_add_direntry(
-                        req,
-                        (&raw mut buffer as *mut ::core::ffi::c_char).offset(opos as isize),
-                        size.wrapping_sub(opos),
-                        name,
-                        &raw mut stbuf,
-                        off,
-                    );
-                    *name.offset(nleng as isize) = c;
-                    if opos.wrapping_add(oleng) > size {
-                        end = 1 as uint8_t;
-                    } else {
-                        opos = opos.wrapping_add(oleng);
-                    }
-                }
-            }
-            fuse_reply_buf(req, &raw mut buffer as *mut ::core::ffi::c_char, opos);
+        dirinfo.wasread = true;
+        if off as usize >= dirinfo.data.len() {
+            fuse_reply_buf(req, ::core::ptr::null(), 0);
+            return;
         }
-        pthread_mutex_unlock(&raw mut (*dirinfo).lock);
+        let size = size.min(READDIR_BUFFSIZE as size_t);
+        let mut buffer = vec![0u8; size];
+        let mut opos: size_t = 0;
+        let mut off = off as usize;
+        let data = &dirinfo.data;
+        let mut pos = off;
+        while pos < data.len() {
+            let nleng = data[pos] as usize;
+            let name_start = pos + 1;
+            let entry_end = name_start + nleng + 5;
+            if entry_end > data.len() {
+                break;
+            }
+            let inode = u32::from_be_bytes([
+                data[name_start + nleng],
+                data[name_start + nleng + 1],
+                data[name_start + nleng + 2],
+                data[name_start + nleng + 3],
+            ]);
+            let type_ = data[name_start + nleng + 4];
+            off += nleng + 6;
+            let mut stbuf: stat = ::core::mem::zeroed();
+            stbuf.st_ino = inode as __ino_t;
+            stbuf.st_mode = imp::type_to_mode(type_);
+            // fuse_add_direntry wants a NUL-terminated name
+            let mut cname = Vec::with_capacity(nleng + 1);
+            cname.extend_from_slice(&data[name_start..name_start + nleng]);
+            cname.push(0);
+            let oleng = fuse_add_direntry(
+                req,
+                buffer.as_mut_ptr().add(opos) as *mut ::core::ffi::c_char,
+                size - opos,
+                cname.as_ptr() as *const ::core::ffi::c_char,
+                &raw const stbuf,
+                off as off_t,
+            ) as size_t;
+            if opos + oleng > size {
+                break;
+            }
+            opos += oleng;
+            pos = entry_end;
+        }
+        fuse_reply_buf(req, buffer.as_ptr() as *const ::core::ffi::c_char, opos);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_releasedir(
-    mut req: fuse_req_t,
+    req: fuse_req_t,
     _ino: fuse_ino_t,
-    mut fi: *mut fuse_file_info,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let mut dirinfo: *mut dirbuf = ::core::ptr::with_exposed_provenance_mut::<dirbuf>(
-            (*fi).fh as ::core::ffi::c_ulong as usize,
-        );
-        pthread_mutex_lock(&raw mut (*dirinfo).lock);
-        pthread_mutex_unlock(&raw mut (*dirinfo).lock);
-        pthread_mutex_destroy(&raw mut (*dirinfo).lock);
-        free((*dirinfo).p as *mut ::core::ffi::c_void);
-        free(dirinfo as *mut ::core::ffi::c_void);
-        (*fi).fh = 0 as uint64_t;
-        fuse_reply_err(req, 0 as ::core::ffi::c_int);
+        if (*fi).fh != 0 {
+            // SAFETY: fh from mfs_meta_opendir, released exactly once.
+            drop(Box::from_raw((*fi).fh as *mut DirBuf));
+            (*fi).fh = 0;
+        }
+        fuse_reply_err(req, 0);
     }
 }
+
+struct PathBuf {
+    data: Vec<u8>,
+    changed: bool,
+    lock: StdMutex<()>,
+}
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_open(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut fi: *mut fuse_file_info,
-) {
+pub unsafe extern "C" fn mfs_meta_open(req: fuse_req_t, ino: fuse_ino_t, fi: *mut fuse_file_info) {
     unsafe {
-        let mut pathinfo: *mut pathbuf = ::core::ptr::null_mut::<pathbuf>();
-        let mut path: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut status: ::core::ffi::c_int = 0;
-        if ino == MASTERINFO_INODE as fuse_ino_t {
-            (*fi).fh = 0 as uint64_t;
-            (*fi).set_direct_io(0 as uint32_t as uint32_t);
-            (*fi).set_keep_cache(1 as uint32_t as uint32_t);
+        let inode = ino as uint32_t;
+        if inode == imp::MASTERINFO_INODE {
+            (*fi).fh = 0;
+            (*fi).set_direct_io(0);
+            (*fi).set_keep_cache(1);
             fuse_reply_open(req, fi);
             return;
         }
-        if ino >= MIN_SPECIAL_INODE as fuse_ino_t || ino == META_ROOT_INODE as fuse_ino_t {
+        if imp::is_special_inode(inode) {
             fuse_reply_err(req, EACCES);
-        } else {
-            status = fs_gettrashpath(ino as uint32_t, &raw mut path) as ::core::ffi::c_int;
-            status = mfs_errorconv(status);
-            if status != 0 as ::core::ffi::c_int {
-                fuse_reply_err(req, status);
-            } else {
-                pathinfo = malloc(::core::mem::size_of::<pathbuf>()) as *mut pathbuf;
-                pthread_mutex_init(
-                    &raw mut (*pathinfo).lock,
-                    ::core::ptr::null::<pthread_mutexattr_t>(),
-                );
-                (*pathinfo).changed = 0 as ::core::ffi::c_int;
-                (*pathinfo).size =
-                    strlen(path as *mut ::core::ffi::c_char).wrapping_add(1 as size_t);
-                (*pathinfo).p = malloc((*pathinfo).size) as *mut ::core::ffi::c_char;
-                memcpy(
-                    (*pathinfo).p as *mut ::core::ffi::c_void,
-                    path as *const ::core::ffi::c_void,
-                    (*pathinfo).size.wrapping_sub(1 as size_t),
-                );
-                *(*pathinfo)
-                    .p
-                    .offset((*pathinfo).size.wrapping_sub(1 as size_t) as isize) =
-                    '\n' as ::core::ffi::c_char;
-                (*fi).set_direct_io(1 as uint32_t as uint32_t);
-                (*fi).fh = pathinfo.expose_provenance() as ::core::ffi::c_ulong as uint64_t;
-                if fuse_reply_open(req, fi) == -ENOENT {
-                    (*fi).fh = 0 as uint64_t;
-                    pthread_mutex_destroy(&raw mut (*pathinfo).lock);
-                    free((*pathinfo).p as *mut ::core::ffi::c_void);
-                    free(pathinfo as *mut ::core::ffi::c_void);
-                }
-            }
-        };
+            return;
+        }
+        let mut path: *const uint8_t = ::core::ptr::null();
+        let status = imp::errorconv(fs_gettrashpath(inode, &raw mut path) as i32);
+        if status != 0 {
+            fuse_reply_err(req, status);
+            return;
+        }
+        // C: size = strlen(path)+1, copy size-1 bytes, last byte = '\n'
+        let plen = libc::strlen(path as *const ::core::ffi::c_char);
+        let mut data = Vec::with_capacity(plen + 1);
+        data.extend_from_slice(::core::slice::from_raw_parts(path, plen));
+        data.push(b'\n');
+        let pathinfo = Box::new(PathBuf {
+            data,
+            changed: false,
+            lock: StdMutex::new(()),
+        });
+        (*fi).set_direct_io(1);
+        (*fi).fh = Box::into_raw(pathinfo) as ::core::ffi::c_ulong;
+        if fuse_reply_open(req, fi) == -ENOENT {
+            (*fi).fh = 0;
+            drop(Box::from_raw((*fi).fh as *mut PathBuf));
+        }
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_release(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut fi: *mut fuse_file_info,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
-        if ino == MASTERINFO_INODE as fuse_ino_t {
-            fuse_reply_err(req, 0 as ::core::ffi::c_int);
+        let inode = ino as uint32_t;
+        if inode == imp::MASTERINFO_INODE {
+            fuse_reply_err(req, 0);
             return;
         }
-        let mut pathinfo: *mut pathbuf = ::core::ptr::with_exposed_provenance_mut::<pathbuf>(
-            (*fi).fh as ::core::ffi::c_ulong as usize,
-        );
-        pthread_mutex_lock(&raw mut (*pathinfo).lock);
-        if (*pathinfo).changed != 0 {
-            if *(*pathinfo)
-                .p
-                .offset((*pathinfo).size.wrapping_sub(1 as size_t) as isize)
-                as ::core::ffi::c_int
-                == '\n' as ::core::ffi::c_int
-            {
-                *(*pathinfo)
-                    .p
-                    .offset((*pathinfo).size.wrapping_sub(1 as size_t) as isize) =
-                    0 as ::core::ffi::c_char;
-            } else {
-                (*pathinfo).p = realloc(
-                    (*pathinfo).p as *mut ::core::ffi::c_void,
-                    (*pathinfo).size.wrapping_add(1 as size_t),
-                ) as *mut ::core::ffi::c_char;
-                *(*pathinfo).p.offset((*pathinfo).size as isize) = 0 as ::core::ffi::c_char;
+        // SAFETY: fh from mfs_meta_open, released exactly once.
+        let pathinfo = Box::from_raw((*fi).fh as *mut PathBuf);
+        {
+            let _g = pathinfo.lock.lock().unwrap();
+            let mut data = pathinfo.data.clone();
+            if pathinfo.changed {
+                if data.last() == Some(&b'\n') {
+                    *data.last_mut().unwrap() = 0;
+                } else {
+                    data.push(0);
+                }
+                fs_settrashpath(inode, data.as_ptr());
             }
-            fs_settrashpath(ino as uint32_t, (*pathinfo).p as *mut uint8_t);
         }
-        pthread_mutex_unlock(&raw mut (*pathinfo).lock);
-        pthread_mutex_destroy(&raw mut (*pathinfo).lock);
-        free((*pathinfo).p as *mut ::core::ffi::c_void);
-        free(pathinfo as *mut ::core::ffi::c_void);
-        (*fi).fh = 0 as uint64_t;
-        fuse_reply_err(req, 0 as ::core::ffi::c_int);
+        (*fi).fh = 0;
+        fuse_reply_err(req, 0);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_read(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut size: size_t,
-    mut off: off_t,
-    mut fi: *mut fuse_file_info,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
+    size: size_t,
+    off: off_t,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let mut pathinfo: *mut pathbuf = ::core::ptr::with_exposed_provenance_mut::<pathbuf>(
-            (*fi).fh as ::core::ffi::c_ulong as usize,
-        );
-        if ino == MASTERINFO_INODE as fuse_ino_t {
-            let mut masterinfo: [uint8_t; 22] = [0; 22];
-            fs_getmasterlocation(&raw mut masterinfo as *mut uint8_t);
-            masterproxy_getlocation(&raw mut masterinfo as *mut uint8_t);
-            if off >= 22 as off_t {
-                fuse_reply_buf(req, ::core::ptr::null::<::core::ffi::c_char>(), 0 as size_t);
-            } else if (off as size_t).wrapping_add(size) > 22 as size_t {
-                fuse_reply_buf(
-                    req,
-                    (&raw mut masterinfo as *mut uint8_t).offset(off as isize)
-                        as *mut ::core::ffi::c_char,
-                    (22 as off_t - off) as size_t,
-                );
-            } else {
-                fuse_reply_buf(
-                    req,
-                    (&raw mut masterinfo as *mut uint8_t).offset(off as isize)
-                        as *mut ::core::ffi::c_char,
-                    size,
-                );
+        let inode = ino as uint32_t;
+        if inode == imp::MASTERINFO_INODE {
+            let mut masterinfo = [0u8; 22];
+            fs_getmasterlocation(masterinfo.as_mut_ptr());
+            masterproxy_getlocation(masterinfo.as_mut_ptr());
+            if off < 0 {
+                fuse_reply_err(req, EINVAL);
+                return;
+            }
+            match imp::slice_range(off as u64, size as u64, 22) {
+                None => {
+                    fuse_reply_buf(req, ::core::ptr::null(), 0);
+                }
+                Some((start, len)) => {
+                    fuse_reply_buf(
+                        req,
+                        masterinfo.as_ptr().add(start as usize) as *const ::core::ffi::c_char,
+                        len as size_t,
+                    );
+                }
             }
             return;
         }
-        if pathinfo.is_null() {
+        if (*fi).fh == 0 {
             fuse_reply_err(req, EBADF);
             return;
         }
-        pthread_mutex_lock(&raw mut (*pathinfo).lock);
-        if off < 0 as off_t {
-            pthread_mutex_unlock(&raw mut (*pathinfo).lock);
+        // SAFETY: fh from mfs_meta_open.
+        let pathinfo = &mut *((*fi).fh as *mut PathBuf);
+        let _g = pathinfo.lock.lock().unwrap();
+        if off < 0 {
+            drop(_g);
             fuse_reply_err(req, EINVAL);
             return;
         }
-        if off as size_t > (*pathinfo).size {
-            fuse_reply_buf(req, ::core::ptr::null::<::core::ffi::c_char>(), 0 as size_t);
-        } else if (off as size_t).wrapping_add(size) > (*pathinfo).size {
-            fuse_reply_buf(
-                req,
-                (*pathinfo).p.offset(off as isize),
-                (*pathinfo).size.wrapping_sub(off as size_t),
-            );
-        } else {
-            fuse_reply_buf(req, (*pathinfo).p.offset(off as isize), size);
+        match imp::slice_range(off as u64, size as u64, pathinfo.data.len() as u64) {
+            None => {
+                fuse_reply_buf(req, ::core::ptr::null(), 0);
+            }
+            Some((start, len)) => {
+                fuse_reply_buf(
+                    req,
+                    pathinfo.data.as_ptr().add(start as usize) as *const ::core::ffi::c_char,
+                    len as size_t,
+                );
+            }
         }
-        pthread_mutex_unlock(&raw mut (*pathinfo).lock);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_write(
-    mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
-    mut buf: *const ::core::ffi::c_char,
-    mut size: size_t,
-    mut off: off_t,
-    mut fi: *mut fuse_file_info,
+    req: fuse_req_t,
+    ino: fuse_ino_t,
+    buf: *const ::core::ffi::c_char,
+    size: size_t,
+    off: off_t,
+    fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let mut pathinfo: *mut pathbuf = ::core::ptr::with_exposed_provenance_mut::<pathbuf>(
-            (*fi).fh as ::core::ffi::c_ulong as usize,
-        );
-        if ino == MASTERINFO_INODE as fuse_ino_t {
+        let inode = ino as uint32_t;
+        if inode == imp::MASTERINFO_INODE {
             fuse_reply_err(req, EACCES);
             return;
         }
-        if pathinfo.is_null() {
+        if (*fi).fh == 0 {
             fuse_reply_err(req, EBADF);
             return;
         }
-        if (off as size_t).wrapping_add(size) > PATH_SIZE_LIMIT as size_t {
+        if off < 0 || off as u64 + size as u64 > PATH_SIZE_LIMIT as u64 {
             fuse_reply_err(req, EINVAL);
             return;
         }
-        pthread_mutex_lock(&raw mut (*pathinfo).lock);
-        if (*pathinfo).changed == 0 as ::core::ffi::c_int {
-            (*pathinfo).size = 0 as size_t;
+        // SAFETY: fh from mfs_meta_open; buf valid for size bytes.
+        let pathinfo = &mut *((*fi).fh as *mut PathBuf);
+        let _g = pathinfo.lock.lock().unwrap();
+        if !pathinfo.changed {
+            pathinfo.data.clear();
         }
-        if (off as size_t).wrapping_add(size) > (*pathinfo).size {
-            let mut s: size_t = (*pathinfo).size;
-            (*pathinfo).p = realloc(
-                (*pathinfo).p as *mut ::core::ffi::c_void,
-                (off as size_t).wrapping_add(size),
-            ) as *mut ::core::ffi::c_char;
-            (*pathinfo).size = (off as size_t).wrapping_add(size);
-            memset(
-                (*pathinfo).p.offset(s as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                (off as size_t).wrapping_add(size).wrapping_sub(s),
-            );
+        let end = off as usize + size;
+        if end > pathinfo.data.len() {
+            pathinfo.data.resize(end, 0);
         }
-        memcpy(
-            (*pathinfo).p.offset(off as isize) as *mut ::core::ffi::c_void,
-            buf as *const ::core::ffi::c_void,
+        ::core::ptr::copy_nonoverlapping(
+            buf as *const uint8_t,
+            pathinfo.data.as_mut_ptr().add(off as usize),
             size,
         );
-        (*pathinfo).changed = 1 as ::core::ffi::c_int;
-        pthread_mutex_unlock(&raw mut (*pathinfo).lock);
+        pathinfo.changed = true;
+        drop(_g);
         fuse_reply_write(req, size);
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_init(
-    mut debug_mode_in: ::core::ffi::c_int,
-    mut entry_cache_timeout_in: ::core::ffi::c_double,
-    mut attr_cache_timeout_in: ::core::ffi::c_double,
-    mut flat_trash_in: ::core::ffi::c_int,
+    debug_mode_in: ::core::ffi::c_int,
+    entry_cache_timeout_in: ::core::ffi::c_double,
+    attr_cache_timeout_in: ::core::ffi::c_double,
+    flat_trash_in: ::core::ffi::c_int,
 ) {
     unsafe {
         debug_mode = debug_mode_in;
@@ -1900,19 +1583,284 @@ pub unsafe extern "C" fn mfs_meta_init(
         attr_cache_timeout = attr_cache_timeout_in;
         flat_trash = flat_trash_in;
         if debug_mode != 0 {
-            fprintf(
-                stderr,
-                b"cache parameters: entry_cache_timeout=%.2lf attr_cache_timeout=%.2lf\n\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                entry_cache_timeout,
-                attr_cache_timeout,
-            );
+            let et = entry_cache_timeout;
+            let at = attr_cache_timeout;
+            eprintln!("cache parameters: entry_cache_timeout={et:.2} attr_cache_timeout={at:.2}");
             if flat_trash != 0 {
-                fprintf(
-                    stderr,
-                    b"force using 'flat' trash\n\0".as_ptr() as *const ::core::ffi::c_char,
-                );
+                eprintln!("force using 'flat' trash");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::format;
+    use std::vec;
+    use std::vec::Vec;
+
+    #[test]
+    fn name_to_inode_reference() {
+        assert_eq!(name_to_inode(b"0000001A|file.txt"), 0x1A);
+        assert_eq!(name_to_inode(b"deadbeef|x"), 0xdeadbeef);
+        assert_eq!(name_to_inode(b"ABC|n"), 0xABC); // uppercase hex
+        assert_eq!(name_to_inode(b"123"), 0); // no '|'
+        assert_eq!(name_to_inode(b"123|"), 0); // '|' must have follower
+        assert_eq!(name_to_inode(b"|x"), 0); // no digits
+        assert_eq!(name_to_inode(b"xyz|n"), 0);
+        assert_eq!(name_to_inode(b"12aF|some longer name"), 0x12AF);
+    }
+
+    #[test]
+    fn errorconv_table() {
+        assert_eq!(errorconv(0), 0);
+        assert_eq!(errorconv(3), 2); // ENOENT
+        assert_eq!(errorconv(8), 5); // IO → EIO
+        assert_eq!(errorconv(33), 30); // EROFS
+        assert_eq!(errorconv(40), 122); // QUOTA → EDQUOT
+        assert_eq!(errorconv(99), 22); // unknown → EINVAL
+    }
+
+    #[test]
+    fn type_conversions() {
+        assert_eq!(fsnodes_type_convert(DISP_TYPE_FILE), TYPE_FILE);
+        assert_eq!(fsnodes_type_convert(DISP_TYPE_SUSTAINED), TYPE_SUSTAINED);
+        assert_eq!(fsnodes_type_convert(0), 0);
+        assert_eq!(type_to_mode(DISP_TYPE_DIRECTORY), S_IFDIR);
+        assert_eq!(type_to_mode(TYPE_SYMLINK), S_IFLNK);
+        assert_eq!(type_to_mode(103), 0); // 'g' unmapped
+        // masked high bit preserved: type&0x7F
+        assert_eq!(type_to_mode(DISP_TYPE_FILE | 0x80), S_IFREG);
+    }
+
+    #[test]
+    fn attr_to_stat_modern_record() {
+        let mut attr = [0u8; 36];
+        attr[0] = 1; // flags < 64 → modern
+        attr[1..3].copy_from_slice(&0x81A4u16.to_be_bytes()); // type 8 (TRASH) | 0o644
+        attr[3..7].copy_from_slice(&1000u32.to_be_bytes());
+        attr[7..11].copy_from_slice(&1001u32.to_be_bytes());
+        attr[11..15].copy_from_slice(&11u32.to_be_bytes());
+        attr[15..19].copy_from_slice(&22u32.to_be_bytes());
+        attr[19..23].copy_from_slice(&33u32.to_be_bytes());
+        attr[23..27].copy_from_slice(&1u32.to_be_bytes());
+        attr[27..35].copy_from_slice(&12345u64.to_be_bytes());
+        let f = attr_to_stat(555, &attr);
+        assert_eq!(f.ino, 555);
+        assert_eq!(f.mode, S_IFREG | 0o644);
+        assert_eq!(f.size, 12345);
+        assert_eq!(f.blocks, (12345 + 511) / 512);
+        assert_eq!(f.uid, 1000);
+        assert_eq!(f.gid, 1001);
+        assert_eq!(f.atime, 11);
+        assert_eq!(f.mtime, 22);
+        assert_eq!(f.ctime, 33);
+        assert_eq!(f.nlink, 1);
+        assert_eq!(f.blksize, MFSBLOCKSIZE);
+    }
+
+    #[test]
+    fn attr_to_stat_legacy_record_and_dir() {
+        let mut attr = [0u8; 36];
+        attr[0] = DISP_TYPE_DIRECTORY; // >= 64 → legacy
+        attr[1..3].copy_from_slice(&0o755u16.to_be_bytes());
+        let f = attr_to_stat(1, &attr);
+        assert_eq!(f.mode, 0); // only FILE/TRASH/SUSTAINED get S_IFREG
+        attr[0] = DISP_TYPE_FILE;
+        let f = attr_to_stat(1, &attr);
+        assert_eq!(f.mode, S_IFREG | 0o755);
+    }
+
+    #[test]
+    fn meta_stat_table() {
+        let f = meta_stat(META_ROOT_INODE, 100);
+        assert_eq!((f.nlink, f.mode), (4, S_IFDIR | 0o555));
+        let f = meta_stat(META_TRASH_INODE, 100);
+        assert_eq!((f.nlink, f.mode), (3 + TRASH_BUCKETS, S_IFDIR | 0o700));
+        let f = meta_stat(META_UNDEL_INODE, 100);
+        assert_eq!((f.nlink, f.mode), (2 + TRASH_BUCKETS, S_IFDIR | 0o200));
+        let f = meta_stat(META_SUSTAINED_INODE, 100);
+        assert_eq!((f.nlink, f.mode), (2, S_IFDIR | 0o500));
+        let f = meta_stat(META_SUBTRASH_INODE_MIN + 7, 100);
+        assert_eq!((f.nlink, f.mode), (3, S_IFDIR | 0o700));
+        assert_eq!(f.atime, 100);
+    }
+
+    #[test]
+    fn metaentries_root_blob_exact_bytes() {
+        let blob = dir_metaentries_fill(META_ROOT_INODE, true, false);
+        let mut want = Vec::new();
+        for (name, ino) in [
+            (&b"."[..], META_ROOT_INODE),
+            (b"..", META_ROOT_INODE),
+            (b"trash", META_TRASH_INODE),
+            (b"sustained", META_SUSTAINED_INODE),
+        ] {
+            want.push(name.len() as u8);
+            want.extend_from_slice(name);
+            want.extend_from_slice(&ino.to_be_bytes());
+            want.push(TYPE_DIRECTORY);
+        }
+        assert_eq!(blob, want);
+        assert_eq!(
+            blob.len() as u32,
+            dir_metaentries_size(META_ROOT_INODE, true, false)
+        );
+    }
+
+    #[test]
+    fn metaentries_trash_bucket_names() {
+        // bucketed trash: names are 3 hex digits (TRASH_BUCKETS=4096)
+        let blob = dir_metaentries_fill(META_TRASH_INODE, true, false);
+        let size = dir_metaentries_size(META_TRASH_INODE, true, false);
+        assert_eq!(blob.len() as u32, size);
+        // first bucket entry after ".", "..", "undel": "000"
+        let prefix_len = (6 + 1) + (6 + 2) + (6 + 5); // . + .. + undel
+        assert_eq!(&blob[prefix_len..prefix_len + 4], &[3, b'0', b'0', b'0']);
+        // bucket 0xABC → name "ABC"
+        let b0_size = 3 + 6;
+        let abc_off = prefix_len + 0xABC * b0_size;
+        assert_eq!(&blob[abc_off..abc_off + 4], &[3, b'A', b'B', b'C']);
+        assert_eq!(
+            u32::from_be_bytes([
+                blob[abc_off + 4],
+                blob[abc_off + 5],
+                blob[abc_off + 6],
+                blob[abc_off + 7]
+            ]),
+            META_SUBTRASH_INODE_MIN + 0xABC
+        );
+        // flat trash: no buckets
+        let flat = dir_metaentries_fill(META_TRASH_INODE, false, false);
+        assert_eq!(flat.len() as u32, dir_metaentries_size(META_TRASH_INODE, false, false));
+        assert_eq!(flat.len(), prefix_len);
+    }
+
+    #[test]
+    fn dataentries_size_and_convert() {
+        // two entries: "aa"(inode 1), "bbb"(inode 0x1234)
+        let mut dbuff = Vec::new();
+        dbuff.push(2);
+        dbuff.extend_from_slice(b"aa");
+        dbuff.extend_from_slice(&1u32.to_be_bytes());
+        dbuff.push(3);
+        dbuff.extend_from_slice(b"bbb");
+        dbuff.extend_from_slice(&0x1234u32.to_be_bytes());
+        assert_eq!(dir_dataentries_size(&dbuff), (6 + 2 + 9 + 6 + 3 + 9) as u32);
+        let (conv, malformed) = dir_dataentries_convert(&dbuff);
+        assert!(!malformed);
+        assert_eq!(conv.len() as u32, dir_dataentries_size(&dbuff));
+        // first entry: len=11, "00000001|aa", inode 1, TYPE_FILE
+        assert_eq!(conv[0], 11);
+        assert_eq!(&conv[1..9], b"00000001");
+        assert_eq!(conv[9], b'|');
+        assert_eq!(&conv[10..12], b"aa");
+        assert_eq!(
+            u32::from_be_bytes([conv[12], conv[13], conv[14], conv[15]]),
+            1
+        );
+        assert_eq!(conv[16], TYPE_FILE);
+        // malformed tail → flagged, stops
+        let mut bad = dbuff.clone();
+        bad.extend_from_slice(&[9, b'x']); // claims 9+5 bytes, truncated
+        let (_, malformed) = dir_dataentries_convert(&bad);
+        assert!(malformed);
+    }
+
+    #[test]
+    fn hexgen_reference() {
+        let mut out = [0u8; 8];
+        dir_hexgen(&mut out, 0x00000001);
+        assert_eq!(&out, b"00000001");
+        dir_hexgen(&mut out, 0xDEADBEEF);
+        assert_eq!(&out, b"DEADBEEF");
+        dir_hexgen(&mut out, 0);
+        assert_eq!(&out, b"00000000");
+    }
+
+    #[test]
+    fn long_name_truncation() {
+        // name of 250 chars → inoleng 255, name truncated to 246
+        let name = vec![b'x'; 250];
+        let mut dbuff = Vec::new();
+        dbuff.push(250);
+        dbuff.extend_from_slice(&name);
+        dbuff.extend_from_slice(&7u32.to_be_bytes());
+        let (conv, _) = dir_dataentries_convert(&dbuff);
+        assert_eq!(conv[0], 255);
+        assert_eq!(&conv[1..9], b"00000007");
+        assert_eq!(conv.len(), 1 + 255 + 4 + 1);
+    }
+
+    #[test]
+    fn resolve_lookup_tree() {
+        assert!(matches!(
+            resolve_lookup(META_ROOT_INODE, b"trash", true, false),
+            Lookup::MetaInode(META_TRASH_INODE)
+        ));
+        assert!(matches!(
+            resolve_lookup(META_ROOT_INODE, b"sustained", true, false),
+            Lookup::MetaInode(META_SUSTAINED_INODE)
+        ));
+        assert!(matches!(
+            resolve_lookup(META_ROOT_INODE, b".masterinfo", true, false),
+            Lookup::MasterInfo
+        ));
+        assert!(matches!(
+            resolve_lookup(META_ROOT_INODE, b"nope", true, false),
+            Lookup::NotFound
+        ));
+        // bucketed trash: hex name resolves to subtrash inode
+        assert!(matches!(
+            resolve_lookup(META_TRASH_INODE, b"0aF", true, false),
+            Lookup::MetaInode(i) if i == META_SUBTRASH_INODE_MIN + 0xAF
+        ));
+        assert!(matches!(
+            resolve_lookup(META_TRASH_INODE, b"FFFF", true, false), // >= buckets
+            Lookup::NotFound
+        ));
+        // flat trash: HEX|name → detached attr
+        assert!(matches!(
+            resolve_lookup(META_TRASH_INODE, b"00000001|f", false, false),
+            Lookup::DetachedAttr(1)
+        ));
+        // sustained: HEX|name → detached attr
+        assert!(matches!(
+            resolve_lookup(META_SUSTAINED_INODE, b"00000002|g", true, false),
+            Lookup::DetachedAttr(2)
+        ));
+        // undel parent: only . and ..
+        assert!(matches!(
+            resolve_lookup(META_UNDEL_INODE, b"..", true, false),
+            Lookup::MetaInode(META_TRASH_INODE)
+        ));
+        assert!(matches!(
+            resolve_lookup(META_UNDEL_INODE, b"undel", true, false),
+            Lookup::NotFound
+        ));
+        // subtrash parent
+        assert!(matches!(
+            resolve_lookup(META_SUBTRASH_INODE_MIN + 5, b"undel", true, false),
+            Lookup::MetaInode(META_UNDEL_INODE)
+        ));
+        assert!(matches!(
+            resolve_lookup(META_SUBTRASH_INODE_MIN + 5, b".", true, false),
+            Lookup::MetaInode(i) if i == META_SUBTRASH_INODE_MIN + 5
+        ));
+        assert!(matches!(
+            resolve_lookup(999, b".", true, false),
+            Lookup::NotFound
+        ));
+    }
+
+    #[test]
+    fn slice_range_cases() {
+        assert_eq!(slice_range(0, 10, 22), Some((0, 10)));
+        assert_eq!(slice_range(20, 10, 22), Some((20, 2)));
+        assert_eq!(slice_range(22, 10, 22), None);
+        assert_eq!(slice_range(0, 22, 22), Some((0, 22)));
+        let _ = format!(""); // keep format import
     }
 }
