@@ -8,11 +8,16 @@
 //! caller frees via groups_rel.
 //!
 //! Safe core in `imp`: the /proc line parser (pure, reference-tested) and
-//! the cache decision tree over a HashMap. The boundary keeps the C blob
-//! ABI and the reaper thread. One deliberate deviation, externally
-//! invisible: C swept expired same-bucket neighbors during a lookup;
-//! here only the queried key is validated and the reaper does the rest
-//! (the hit/miss/refresh decision per key is unchanged).
+//! the cache decision tree. The boundary keeps the C blob ABI, the lcnt
+//! refcount protocol and the reaper thread. Two deliberate deviations,
+//! externally invisible: C swept expired same-bucket neighbors during a
+//! lookup (here only the reaper sweeps), and C stored the blob pointer in
+//! the cache entry (here the entry stores it as `usize` so `imp` stays
+//! free of unsafe) — the refcounting itself is behavior and is preserved
+//! exactly: caller ref (lcnt=1 at make), +1 while cached, free at 0.
+//! mfs_fuse RELIES on the cache ref: it reads a groups blob after
+//! groups_rel (opendir gidtab copy), valid only because the cache keeps
+//! the blob alive.
 
 use std::sync::Mutex as StdMutex;
 
@@ -124,9 +129,25 @@ pub mod imp {
         ret
     }
 
+    /// Cache entry. `blob` is a `*mut groups` stored as usize (imp is
+    /// unsafe-free); the cache holds ONE refcount of the blob, released
+    /// on replace/sweep/term via the boundary's blob_decref.
     struct Entry {
         time: f64,
-        gids: Vec<u32>,
+        blob: usize,
+    }
+
+    /// Outcome of the groups_get_common decision tree. Refcount side
+    /// effects happen at the boundary under the same lock:
+    /// - Cached(blob): caller must incref before use.
+    /// - Emergency: cacheonly miss — caller builds an UNCACHED [gid] blob.
+    /// - Fetched(new, old): new blob from `fetch` (lcnt=1, caller ref) was
+    ///   stored; caller must incref for the cache and decref `old` (the
+    ///   replaced entry's cache ref), C-order.
+    pub enum GetResult {
+        Cached(usize),
+        Emergency,
+        Fetched(usize, Option<usize>),
     }
 
     pub struct GroupCache {
@@ -142,8 +163,8 @@ pub mod imp {
             }
         }
 
-        /// The groups_get_common decision tree. `fetch` reads /proc at the
-        /// boundary and returns the full gid list (gid first).
+        /// The groups_get_common decision tree. `fetch` (boundary) reads
+        /// /proc and returns a fresh blob with lcnt=1 as usize.
         pub fn get_common(
             &mut self,
             pid: i32,
@@ -151,8 +172,8 @@ pub mod imp {
             gid: u32,
             cacheonly: bool,
             now: f64,
-            fetch: &dyn Fn(i32, u32) -> Vec<u32>,
-        ) -> Vec<u32> {
+            fetch: &dyn Fn(i32, u32) -> usize,
+        ) -> GetResult {
             let key = (pid, uid, gid);
             let fresh = self
                 .map
@@ -160,37 +181,42 @@ pub mod imp {
                 .map(|e| e.time + self.timeout >= now)
                 .unwrap_or(false);
             if cacheonly {
-                // emergency mode: any cached entry (even stale) wins;
-                // else a fresh [gid] that is NOT cached
+                // emergency mode: any cached entry (even stale) wins
                 return match self.map.get(&key) {
-                    Some(e) => e.gids.clone(),
-                    None => vec![gid],
+                    Some(e) => GetResult::Cached(e.blob),
+                    None => GetResult::Emergency,
                 };
             }
             // expired entries are treated as missing (reaper sweeps them)
             if uid != 0 && fresh {
-                return self.map.get(&key).unwrap().gids.clone();
+                return GetResult::Cached(self.map.get(&key).unwrap().blob);
             }
             // root always refetches; non-root refetches on miss/stale
-            let gids = fetch(pid, gid);
-            self.map.insert(
-                key,
-                Entry {
-                    time: now, // C stamps the pre-fetch time
-                    gids: gids.clone(),
-                },
-            );
-            gids
+            let blob = fetch(pid, gid);
+            let old = self
+                .map
+                .insert(key, Entry { time: now, blob }) // C stamps pre-fetch time
+                .map(|e| e.blob);
+            GetResult::Fetched(blob, old)
         }
 
-        /// reaper sweep: drop expired entries
-        pub fn sweep(&mut self, now: f64) {
+        /// reaper sweep: drop expired entries, returning their blobs so
+        /// the boundary can release the cache refs.
+        pub fn sweep(&mut self, now: f64) -> Vec<usize> {
             let to = self.timeout;
-            self.map.retain(|_, e| e.time + to >= now);
+            let mut out = Vec::new();
+            self.map.retain(|_, e| {
+                let keep = e.time + to >= now;
+                if !keep {
+                    out.push(e.blob);
+                }
+                keep
+            });
+            out
         }
 
-        pub fn term(&mut self) {
-            self.map.clear();
+        pub fn term(&mut self) -> Vec<usize> {
+            self.map.drain().map(|(_, e)| e.blob).collect()
         }
 
         #[cfg(test)]
@@ -204,7 +230,7 @@ pub mod imp {
 // Boundary: C blob ABI, /proc IO, reaper thread.
 // ---------------------------------------------------------------------------
 
-use imp::GroupCache;
+use imp::{GetResult, GroupCache};
 
 static CACHE: StdMutex<Option<GroupCache>> = StdMutex::new(None);
 static KEEP_ALIVE: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
@@ -247,6 +273,20 @@ unsafe fn make_blob(gids: &[u32]) -> *mut groups {
     }
 }
 
+/// C groups_decref: lcnt-- (guarded), free at 0. Under CACHE lock at
+/// every call site, mirroring C's glock.
+/// SAFETY: b is a live groups blob from make_blob.
+unsafe fn blob_decref(b: *mut groups) {
+    unsafe {
+        if (*b).lcnt > 0 {
+            (*b).lcnt -= 1;
+        }
+        if (*b).lcnt == 0 {
+            free(b as *mut ::core::ffi::c_void);
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn groups_get_common(
     pid: pid_t,
@@ -256,29 +296,52 @@ pub unsafe extern "C" fn groups_get_common(
 ) -> *mut groups {
     unsafe {
         let now = monotonic_seconds();
-        let gids = {
-            let mut g = CACHE.lock().unwrap();
-            match g.as_mut() {
-                Some(c) => c.get_common(pid, uid, gid, cacheonly != 0, now, &|p, gg| {
-                    fetch_groups(p, gg)
-                }),
-                None => vec![gid],
+        let mut g = CACHE.lock().unwrap();
+        let res = match g.as_mut() {
+            Some(c) => c.get_common(pid, uid, gid, cacheonly != 0, now, &|p, gg| {
+                let gids = fetch_groups(p, gg);
+                make_blob(&gids) as usize
+            }),
+            None => GetResult::Emergency,
+        };
+        let blob = match res {
+            GetResult::Cached(b) => {
+                let b = b as *mut groups;
+                (*b).lcnt += 1; // caller ref
+                b
+            }
+            GetResult::Emergency => make_blob(&[gid]),
+            GetResult::Fetched(b, old) => {
+                let b = b as *mut groups;
+                (*b).lcnt += 1; // cache ref
+                if let Some(o) = old {
+                    blob_decref(o as *mut groups);
+                }
+                b
             }
         };
         if debug_mode != 0 {
-            eprintln!("groups_get(pid={pid},uid={uid},gid={gid}): {gids:?}");
+            eprintln!(
+                "groups_get(pid={pid},uid={uid},gid={gid}): gidcnt={} lcnt={}",
+                (*blob).gidcnt,
+                (*blob).lcnt
+            );
         }
-        make_blob(&gids)
+        blob
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn groups_rel(g: *mut groups) {
     if !g.is_null() {
-        // SAFETY: blob from groups_get_common, libc-malloc'd, released at
-        // most once (mfs_fuse get→use→rel pattern).
+        // C protocol: decref under glock; the blob dies only when the
+        // cache AND all callers released it. Callers (mfs_fuse opendir)
+        // legally read the blob after rel via the surviving cache ref.
+        let _lock = CACHE.lock().unwrap();
+        // SAFETY: blob from groups_get_common, decref'd at most once per
+        // get (mfs_fuse get→use→rel pattern).
         unsafe {
-            free(g as *mut ::core::ffi::c_void);
+            blob_decref(g);
         }
     }
 }
@@ -293,7 +356,9 @@ unsafe extern "C" fn groups_cleanup_thread(arg: *mut ::core::ffi::c_void) -> *mu
                     // C swept 16 of 65536 buckets per 10ms; a whole-map
                     // retain each 10ms is the same work amortized — only
                     // memory-reclamation timing differs, never a decision.
-                    c.sweep(now);
+                    for b in c.sweep(now) {
+                        blob_decref(b as *mut groups);
+                    }
                 }
             }
             if KEEP_ALIVE.load(::core::sync::atomic::Ordering::SeqCst) == 0 {
@@ -314,7 +379,9 @@ pub unsafe extern "C" fn groups_term() {
         );
         let mut g = CACHE.lock().unwrap();
         if let Some(c) = g.as_mut() {
-            c.term();
+            for b in c.term() {
+                blob_decref(b as *mut groups);
+            }
         }
     }
 }
@@ -362,62 +429,72 @@ mod tests {
         assert_eq!(parse_groups_line(" 4 5x 6", 1000), vec![1000, 4, 5]);
     }
 
-    fn fetch_fixed(v: Vec<u32>) -> impl Fn(i32, u32) -> Vec<u32> {
-        move |_, _| v.clone()
+    // imp never dereferences blobs; tests use fake pointer values.
+    fn fetch_blob(v: usize) -> impl Fn(i32, u32) -> usize {
+        move |_, _| v
     }
 
     #[test]
     fn cache_tree_nonroot() {
         let mut c = GroupCache::new(10.0);
-        let f = fetch_fixed(vec![1000, 4, 24]);
-        let g = c.get_common(111, 1000, 1000, false, 100.0, &f);
-        assert_eq!(&*g, &vec![1000, 4, 24]);
+        let g = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
+        assert!(matches!(g, GetResult::Fetched(0x1000, None)));
         // cached hit within timeout (fetch would panic if called)
         let g2 = c.get_common(111, 1000, 1000, false, 105.0, &|_, _| {
             panic!("must not fetch")
         });
-        assert_eq!(&*g2, &vec![1000, 4, 24]);
-        // expired → refetch
-        let g3 = c.get_common(111, 1000, 1000, false, 111.0, &fetch_fixed(vec![1000, 7]));
-        assert_eq!(&*g3, &vec![1000, 7]);
+        assert!(matches!(g2, GetResult::Cached(0x1000)));
+        // expired → refetch, old blob handed back for decref
+        let g3 = c.get_common(111, 1000, 1000, false, 111.0, &fetch_blob(0x2000));
+        assert!(matches!(g3, GetResult::Fetched(0x2000, Some(0x1000))));
         // strict-< : time+to == now is still fresh
         let g4 = c.get_common(111, 1000, 1000, false, 121.0, &|_, _| {
             panic!("must not fetch")
         });
-        assert_eq!(&*g4, &vec![1000, 7]);
+        assert!(matches!(g4, GetResult::Cached(0x2000)));
     }
 
     #[test]
     fn root_always_refetches() {
         let mut c = GroupCache::new(1000.0);
-        let _ = c.get_common(111, 0, 0, false, 100.0, &fetch_fixed(vec![0, 1]));
-        let g = c.get_common(111, 0, 0, false, 101.0, &fetch_fixed(vec![0, 2]));
-        assert_eq!(&*g, &vec![0, 2]);
+        let _ = c.get_common(111, 0, 0, false, 100.0, &fetch_blob(0x1000));
+        let g = c.get_common(111, 0, 0, false, 101.0, &fetch_blob(0x2000));
+        assert!(matches!(g, GetResult::Fetched(0x2000, Some(0x1000))));
     }
 
     #[test]
     fn cacheonly_returns_stale_but_never_fetches() {
         let mut c = GroupCache::new(10.0);
-        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_fixed(vec![1000, 4]));
+        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
         // stale but cacheonly → still returned, no fetch
         let g = c.get_common(111, 1000, 1000, true, 1000.0, &|_, _| {
             panic!("must not fetch")
         });
-        assert_eq!(&*g, &vec![1000, 4]);
-        // cacheonly miss → [gid], not cached
+        assert!(matches!(g, GetResult::Cached(0x1000)));
+        // cacheonly miss → Emergency (uncached [gid] at boundary), not stored
         let g = c.get_common(222, 1000, 1000, true, 1000.0, &|_, _| {
             panic!("must not fetch")
         });
-        assert_eq!(&*g, &vec![1000]);
+        assert!(matches!(g, GetResult::Emergency));
         assert_eq!(c.len(), 1);
     }
 
     #[test]
-    fn sweep_drops_expired() {
+    fn sweep_drops_expired_and_returns_blobs() {
         let mut c = GroupCache::new(10.0);
-        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_fixed(vec![1000, 4]));
-        let _ = c.get_common(222, 1000, 1000, false, 105.0, &fetch_fixed(vec![1000, 5]));
-        c.sweep(120.0); // both stale (110/115 < 120)
+        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
+        let _ = c.get_common(222, 1000, 1000, false, 105.0, &fetch_blob(0x2000));
+        let mut dead = c.sweep(120.0); // both stale (110/115 < 120)
+        dead.sort();
+        assert_eq!(dead, vec![0x1000, 0x2000]);
+        assert_eq!(c.len(), 0);
+    }
+
+    #[test]
+    fn term_drains_all_blobs() {
+        let mut c = GroupCache::new(10.0);
+        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
+        assert_eq!(c.term(), vec![0x1000]);
         assert_eq!(c.len(), 0);
     }
 }
