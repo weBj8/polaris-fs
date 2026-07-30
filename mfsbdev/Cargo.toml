@@ -20,6 +20,7 @@ name = "mfsbdev"
 c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
 libc = "0.2"
 mfscommon = { path = "../mfscommon" }
+mfsclient = { path = "../mfsclient" }
 
 
 

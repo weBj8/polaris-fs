@@ -31,7 +31,16 @@ version = "0.0.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
+ "mfsclient",
  "mfscommon",
+]
+
+[[package]]
+name = "mfsclient"
+version = "0.0.0"
+dependencies = [
+ "c2rust-bitfields",
+ "libc",
 ]
 
 [[package]]

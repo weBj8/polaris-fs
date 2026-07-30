@@ -16,24 +16,15 @@ extern crate libc;
 // their #[no_mangle] extern "C" symbols reachable so LTO retains them; the
 // daemon's extern blocks resolve to these definitions at link time.
 pub use mfscommon::{clocks, conncache, crc, delayrun, labelparser, lwthread, md5, mfslog, processname, sockets};
+// Shared transpiled mfsclient modules (dedup, VC-06); pub use keeps their
+// #[no_mangle] extern "C" symbols reachable so fat LTO retains them.
+pub use mfsclient::{chunkrwlock, chunksdatacache, csdb, csorder, extrapackets, heapsorter, inoleng, mastercomm, readdata, stats, truncate, writedata};
 
 pub mod src {
     pub mod mfsclient {
-        pub mod chunkrwlock;
-        pub mod chunksdatacache;
-        pub mod csdb;
-        pub mod csorder;
-        pub mod extrapackets;
-        pub mod heapsorter;
-        pub mod inoleng;
-        pub mod mastercomm;
         pub mod mfsio;
         pub mod mfsioint;
         pub mod mfsioint_lookupcache;
-        pub mod readdata;
-        pub mod stats;
-        pub mod truncate;
-        pub mod writedata;
     } // mod mfsclient
     pub mod mfscommon {
         pub mod pcqueue;
