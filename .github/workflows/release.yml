@@ -114,10 +114,25 @@ jobs:
         # caps they need; LD_LIBRARY_PATH finds the freshly installed fuse 3.18.
         run: |
           set +e
-          sudo LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu bash tools/smoke_test.sh
+          # core dump capture: unlimited size, core.<exe>.<pid> in the
+          # process cwd (repo root — smoke_test.sh cd's there).
+          sudo sh -c 'ulimit -c unlimited && sysctl -w kernel.core_pattern=core.%e.%p && LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu bash tools/smoke_test.sh'
           rc=$?
-          sudo rm -rf target/smoke   # drop root-owned artifacts so later cache hashFiles works
+          # Preserve crash artifacts before cleanup. The mfsmount binary is
+          # bundled so the core can be symbolized against the exact build.
+          mkdir -p target/smoke-artifacts
+          sudo sh -c 'cp -f dist/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null; chown -R $(id -u):$(id -g) target/smoke-artifacts'
+          sudo rm -rf target/smoke core*   # drop root-owned artifacts so later cache hashFiles works
           exit $rc
+
+      - name: Upload crash artifacts on smoke failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mfsmount-crash-${{ github.sha }}
+          path: target/smoke-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload release executables
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
