@@ -1,3 +1,16 @@
+//! mfs_fuse — FUSE lowlevel operations: ANNOTATED UNSAFE BOUNDARY (P4).
+//!
+//! Every function in this module is a libfuse kernel callback: requests
+//! arrive as raw fuse_req_t/fuse_ctx/buffer pointers, reply buffers are
+//! borrowed from libfuse, and path/name arguments are C strings whose
+//! lifetimes libfuse owns. The request lifecycle (fuse_reply_* exactly
+//! once per request) is a C protocol with no safe Rust model short of a
+//! full FUSE wrapper crate, so this module intentionally stays an unsafe
+//! boundary (P1 sockets precedent). All cache/data-structure logic it
+//! relies on HAS been migrated to safe Rust in the other P4 modules
+//! (dirattrcache, symlinkcache, negentrycache, xattrcache, fdcache,
+//! dentry_invalidator, sustained_*, oplog, dirblob_*_index).
+
 pub enum fuse_session {}
 pub enum fuse_req {}
 pub enum _IO_wide_data {}

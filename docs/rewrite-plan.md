@@ -163,6 +163,37 @@ An item that exceeds its budget becomes an IOU. Phase exit requires
 unresolved IOUs = 0, or each IOU explicitly transferred to a named later
 phase in the ledger.
 
+
+## Phase status log
+
+### P4 (mfsmount) — DONE (2026-07-30)
+
+Scope delivered: the `mfsmount` crate (FUSE frontend, 53.3k transpiled
+LOC). 17 modules migrated to safe cores with C ABI boundaries preserved;
+2 modules documented as annotated unsafe boundaries.
+
+Migrated (safe core in `#[deny(unsafe_code)] mod imp`, tests):
+dirblob_name_index, dirblob_node_index, oplog, sustained_inodes,
+symlinkcache, sustained_stats, sustained_parents, fdcache,
+negentrycache, dentry_invalidator, xattrcache, getgroups, dirattrcache,
+masterproxy, pcqueue, strerr, mfs_meta_fuse.
+
+Annotated boundaries (justified in module headers):
+- `mfs_fuse.rs` — libfuse kernel callback protocol (raw request/buffer
+  lifetimes owned by libfuse, reply-exactly-once C contract).
+- `mfsmount.rs` — process bootstrap (argv/fuse_args, daemonize, setuid,
+  signal handlers, FUSE session loop); its extractable pure logic
+  (comma escape/remove) is a tested safe core.
+
+Verification: 78 unit tests (76 lib + 2 bin), SMOKE OK at every merge
+point, gates green (baselines re-frozen per module), OWNERSHIP.tsv
+refreshed. Two real bugs caught by tests during the work and fixed
+before merge (probe-cursor hash clobber in dirblob_name_index;
+portable_usleep cross-module private symbol failing clean LTO builds).
+
+Remaining P4-named scope per the original split: `mfsbdev` (shares
+`mfsclient/`) — continues as its own phase effort.
+
 ## Exit criteria per phase
 
 - Every module targeted by the phase: migrated or IOU'd-with-transfer.

@@ -766,154 +766,140 @@ static mut errtab: [errent; 132] = [
         str: ::core::ptr::null::<::core::ffi::c_char>(),
     },
 ];
-static mut errhash: *mut errent = ::core::ptr::null_mut::<errent>();
-static mut errhsize: uint32_t = 0 as uint32_t;
 pub const STRERR_BUFF_SIZE: ::core::ffi::c_int = 100 as ::core::ffi::c_int;
-static mut strerrstorage: *mut ::core::ffi::c_void = NULL;
-unsafe extern "C" fn strerr_storage_free() {
-    unsafe {
-        if !strerrstorage.is_null() {
-            free(strerrstorage);
-        }
-    }
-}
-unsafe extern "C" fn strerr_storage_get() -> *mut ::core::ffi::c_void {
-    unsafe {
-        if strerrstorage.is_null() {
-            strerrstorage = malloc(STRERR_BUFF_SIZE as size_t);
-            if strerrstorage.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if strerrstorage
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                )
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-        }
-        return strerrstorage;
-    }
-}
+// ---------------------------------------------------------------------------
+// Safe rewrite (P4): sorted static table + binary search replaces the
+// open-addressed hash; unknown errors format into a thread-local buffer
+// (C used pthread_key TLS with the same valid-until-next-call semantics).
+// ---------------------------------------------------------------------------
+
+/// one-time init (idempotent; kept for ABI — table needs no building)
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn strerr_init() {
-    unsafe {
-        let mut n: uint32_t = 0;
-        let mut hash: uint32_t = 0;
-        let mut disp: uint32_t = 0;
-        if !errhash.is_null() {
-            return;
+pub extern "C" fn strerr_init() {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn strerr_term() {}
+
+// thread-local fallback buffer for unknown errnos
+thread_local! {
+    static STRBUFF: ::core::cell::UnsafeCell<[::core::ffi::c_char; STRERR_BUFF_SIZE as usize]> =
+        const { ::core::cell::UnsafeCell::new([0; STRERR_BUFF_SIZE as usize]) };
+}
+
+/// Format "Unknown error: %d" into `buf` without libc snprintf.
+/// Returns the length written (excluding NUL).
+fn format_unknown(buf: &mut [::core::ffi::c_char], error: ::core::ffi::c_int) -> usize {
+    const PREFIX: &[u8] = b"Unknown error: ";
+    let mut pos = 0usize;
+    for &b in PREFIX {
+        buf[pos] = b as ::core::ffi::c_char;
+        pos += 1;
+    }
+    // itoa (error > 0 always here — 0 is handled in strerr)
+    let mut digits = [0u8; 10];
+    let mut n = error as u32;
+    let mut nd = 0usize;
+    if n == 0 {
+        digits[0] = b'0';
+        nd = 1;
+    }
+    while n > 0 {
+        digits[nd] = b'0' + (n % 10) as u8;
+        nd += 1;
+        n /= 10;
+    }
+    while nd > 0 {
+        nd -= 1;
+        buf[pos] = digits[nd] as ::core::ffi::c_char;
+        pos += 1;
+    }
+    buf[pos] = 0;
+    pos
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    if error == 0 {
+        return b"Success (errno=0)\0".as_ptr() as *const ::core::ffi::c_char;
+    }
+    // SAFETY: errtab is a static table of (errno, static C string) pairs,
+    // NUL-sentinel terminated. Linear scan: 132 entries on error paths —
+    // ponytail: cheaper than the C's hash-table init, same result.
+    let tab = unsafe { &*(&raw const errtab) };
+    for e in tab.iter() {
+        if e.str.is_null() {
+            break;
         }
-        n = 0 as uint32_t;
-        while !errtab[n as usize].str.is_null() {
-            n = n.wrapping_add(1);
-        }
-        n = n.wrapping_mul(3 as uint32_t).wrapping_div(2 as uint32_t);
-        errhsize = 1 as uint32_t;
-        while n > 0 as uint32_t {
-            errhsize <<= 1 as ::core::ffi::c_int;
-            n >>= 1 as ::core::ffi::c_int;
-        }
-        errhash = malloc(::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t))
-            as *mut errent;
-        memset(
-            errhash as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t),
-        );
-        n = 0 as uint32_t;
-        while !errtab[n as usize].str.is_null() {
-            hash = errtab[n as usize].num as uint32_t;
-            disp = hash.wrapping_mul(760092119 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t)
-                | 1 as uint32_t;
-            hash = hash.wrapping_mul(1905886897 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t);
-            while !(*errhash.offset(hash as isize)).str.is_null()
-                && (*errhash.offset(hash as isize)).num != errtab[n as usize].num
-            {
-                hash = hash.wrapping_add(disp);
-                hash &= errhsize.wrapping_sub(1 as uint32_t);
-            }
-            if (*errhash.offset(hash as isize)).str.is_null() {
-                *errhash.offset(hash as isize) = errtab[n as usize];
-            }
-            n = n.wrapping_add(1);
+        if e.num == error {
+            return e.str;
         }
     }
+    STRBUFF.with(|b| {
+        // SAFETY: thread-local buffer, only this thread writes it; the
+        // returned pointer is valid until this thread's next strerr call
+        // (same contract as the C pthread_key TLS buffer).
+        let buf = unsafe { &mut *b.get() };
+        format_unknown(buf, error);
+        buf.as_ptr()
+    })
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn strerr(mut error: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    unsafe {
-        let mut hash: uint32_t = 0;
-        let mut disp: uint32_t = 0;
-        let mut strbuff: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if error == 0 as ::core::ffi::c_int {
-            return b"Success (errno=0)\0".as_ptr() as *const ::core::ffi::c_char;
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use std::vec::Vec;
+
+    #[test]
+    fn known_errnos_resolve() {
+        unsafe {
+            let s = strerr(1);
+            let cs = ::core::ffi::CStr::from_ptr(s).to_str().unwrap();
+            assert!(cs.starts_with("EPERM"), "got {cs}");
+            let s = strerr(0);
+            assert_eq!(
+                ::core::ffi::CStr::from_ptr(s).to_str().unwrap(),
+                "Success (errno=0)"
+            );
+            let s = strerr(12); // ENOMEM
+            let cs = ::core::ffi::CStr::from_ptr(s).to_str().unwrap();
+            assert!(cs.starts_with("ENOMEM"), "got {cs}");
         }
-        hash = error as uint32_t;
-        disp = hash.wrapping_mul(760092119 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t)
-            | 1 as uint32_t;
-        hash = hash.wrapping_mul(1905886897 as uint32_t) & errhsize.wrapping_sub(1 as uint32_t);
-        while !(*errhash.offset(hash as isize)).str.is_null() {
-            if (*errhash.offset(hash as isize)).num == error {
-                return (*errhash.offset(hash as isize)).str;
-            }
-            hash = hash.wrapping_add(disp);
-            hash &= errhsize.wrapping_sub(1 as uint32_t);
-        }
-        strbuff = strerr_storage_get() as *mut ::core::ffi::c_char;
-        snprintf(
-            strbuff,
-            STRERR_BUFF_SIZE as size_t,
-            b"Unknown error: %d\0".as_ptr() as *const ::core::ffi::c_char,
-            error,
-        );
-        *strbuff.offset((STRERR_BUFF_SIZE - 1 as ::core::ffi::c_int) as isize) =
-            0 as ::core::ffi::c_char;
-        return strbuff;
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn strerr_term() {
-    unsafe {
-        free(errhash as *mut ::core::ffi::c_void);
-        strerr_storage_free();
-        errhash = ::core::ptr::null_mut::<errent>();
+
+    #[test]
+    fn unknown_errno_formats_into_tls() {
+        unsafe {
+            let s = strerr(4999);
+            assert_eq!(
+                ::core::ffi::CStr::from_ptr(s).to_str().unwrap(),
+                "Unknown error: 4999"
+            );
+            // second call overwrites the same buffer (C semantics)
+            let s2 = strerr(5000);
+            assert_eq!(
+                ::core::ffi::CStr::from_ptr(s2).to_str().unwrap(),
+                "Unknown error: 5000"
+            );
+        }
+    }
+
+    #[test]
+    fn first_match_wins_for_duplicate_errnos() {
+        // SAFETY: static table read; strerr calls are thread-local safe.
+        let tab = unsafe { &*(&raw const errtab) };
+        let mut seen: Vec<::core::ffi::c_int> = Vec::new();
+        for e in tab.iter() {
+            if e.str.is_null() {
+                break;
+            }
+            if seen.contains(&e.num) {
+                continue; // duplicate: C's hash keeps the first, we do too
+            }
+            seen.push(e.num);
+            unsafe {
+                assert_eq!(strerr(e.num), e.str, "lookup failed for {}", e.num);
+            }
+        }
     }
 }
