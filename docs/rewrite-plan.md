@@ -98,7 +98,8 @@ package, one daemon binary.
 
 | Phase | Crate(s) | LOC | unsafe | Why this position |
 | --- | --- | ---: | ---: | --- |
-| P1 (pilot) | `mfsnetdump` | 2,711 | 44 | Smallest; single file; no cluster role — calibrates the whole pipeline cheaply |
+| ~~P1 (pilot)~~ | ~~`mfsnetdump`~~ | ~~2,711~~ | ~~44~~ | ~~Smallest; single file; no cluster role~~ **Revised (user directive, 2026-07-30):** P1 targets the shared `mfscommon` crate first — every daemon benefits, and the shim pattern it requires (extern "C" signatures kept for symbol-linking consumers) is the pattern all later phases need. `mfsnetdump` demoted to a P6 cleanup item. |
+| **P1 (revised)** | `mfscommon` (14 shared modules) | 16,088 | 336 | Shared by all daemons; calibrates the shim pattern + gates on real shared code |
 | P2 | `mfsmetalogger`, `mfsgui` | 27,658 | 944 | Small, single-purpose daemons; real network protocol surface |
 | P3 | `mfschunkserver` | 97,856 | 1,288 | Data path: chunk I/O, CRC, disk layout. Heavy `static mut` and buffer management |
 | P4 | `mfsmount` + `mfsbdev` | 224,562 | 3,167 | **Shared `mfsclient/` tree in two copies** — must be de-duplicated into one shared crate *first* (else every fix lands twice) |
