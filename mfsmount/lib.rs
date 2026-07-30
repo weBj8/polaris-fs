@@ -29,7 +29,11 @@ pub use mfsclient::{
 };
 
 pub mod src {
-    pub mod mfsclient {
+    // Mount-only (FUSE) client modules — the ones that diverged from
+    // mfsbdev's NBD path in the C mfsclient/ tree (VC-06). Renamed from
+    // `mfsclient` to `fuse_client` to stop colliding with the shared
+    // `mfsclient` crate above.
+    pub mod fuse_client {
         pub mod dentry_invalidator;
         pub mod dirattrcache;
         pub mod dirblob_name_index;
@@ -46,7 +50,7 @@ pub mod src {
         pub mod sustained_stats;
         pub mod symlinkcache;
         pub mod xattrcache;
-    } // mod mfsclient
+    } // mod fuse_client
     pub mod mfscommon {
         pub mod pcqueue;
         pub mod strerr;

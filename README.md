@@ -111,7 +111,7 @@ Known local patches after transpiling:
    `mastercomm.rs`, `readdata.rs`, `writedata.rs`; `ponytail:` comments).
 3. Link libs via `build.rs`: mfsmaster/mfschunkserver `z`, mfsmount
    `fuse3`+`z`, mfsnetdump `pcap`.
-4. Groups-cache UAF fix in `mfsmount/src/mfsclient/getgroups.rs`
+4. Groups-cache UAF fix in `mfsmount/src/fuse_client/getgroups.rs`
    (latent MooseFS bug; commit `35f00f4`).
 5. Edition-2024/nightly adjustments: `&raw const` for the log sink,
    `c_variadic`/`core_intrinsics` feature attrs, `VaList::arg` → `next_arg`.

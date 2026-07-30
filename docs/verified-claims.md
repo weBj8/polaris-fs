@@ -170,12 +170,12 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   divergent list) are a priority cluster for the aliasing hunt.
 - GATE: the P4 plan must include a re-audit of all `mfsclient` cache modules
   against the fixed `getgroups.rs` pattern.
-- SRC: `git show 35f00f4`; `mfsmount/src/mfsclient/getgroups.rs`.
+- SRC: `git show 35f00f4`; `mfsmount/src/fuse_client/getgroups.rs`.
 
 ### VC-10 — variadic logging leaves
 
 - FACT: C-variadic functions remain in: `mfscommon/mfslog.rs` (all 6 crates),
-  `mfsclient/oplog.rs` (mfsmount), `mfsclient/mfsio.rs` (mfsbdev),
+  `fuse_client/oplog.rs` (mfsmount), `mfsclient/mfsio.rs` (mfsbdev),
   `mfsmaster/changelog.rs`, `mfsgui/mfsgui.rs`.
 - RUST: these are the `c_variadic` confinement leaves
   ([porting.md](porting.md) type map). Safe wrappers get fixed signatures;

@@ -53,9 +53,9 @@ echo "## mfsclient/ (mfsmount vs mfsbdev)"
 echo
 echo '| file | mfsmount | mfsbdev |'
 echo '| --- | --- | --- |'
-files=$( (ls mfsmount/src/mfsclient; ls mfsbdev/src/mfsclient) | sort -u)
+files=$( (ls mfsmount/src/fuse_client; ls mfsbdev/src/mfsclient) | sort -u)
 for f in $files; do
-  a="mfsmount/src/mfsclient/$f"; b="mfsbdev/src/mfsclient/$f"
+  a="mfsmount/src/fuse_client/$f"; b="mfsbdev/src/mfsclient/$f"
   if [ -f "$a" ] && [ -f "$b" ]; then
     if cmp -s "$a" "$b"; then row="| $f | = | = |"; else row="| $f | A | B |"; fi
   elif [ -f "$a" ]; then row="| $f | present | - |"

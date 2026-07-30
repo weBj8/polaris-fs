@@ -14,7 +14,7 @@ name = "mfsmount"
 path = "lib.rs"
 crate-type = ["staticlib", "rlib"]
 [[bin]]
-path = "src/mfsclient/mfsmount.rs"
+path = "src/fuse_client/mfsmount.rs"
 name = "mfsmount"
 [dependencies]
 c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }

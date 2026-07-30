@@ -194,6 +194,11 @@ portable_usleep cross-module private symbol failing clean LTO builds).
 Remaining P4-named scope per the original split: `mfsbdev` (shares
 `mfsclient/`) — continues as its own phase effort.
 
+Note (post-P4): the mount-only FUSE modules moved from
+`mfsmount/src/mfsclient/` to `mfsmount/src/fuse_client/` to stop the
+name collision with the shared `mfsclient` crate. Pure rename — no
+behavior change; paths in the entries above predate it.
+
 ## Exit criteria per phase
 
 - Every module targeted by the phase: migrated or IOU'd-with-transfer.

@@ -90,13 +90,13 @@ Populated during P0–P4; seeded below with the class-B module list.*
 
 | Crate | Module | Pattern to check |
 | --- | --- | --- |
-| mfsmount | `mfsclient/dirattrcache.rs` | entry pointer held across master round-trip |
-| mfsmount | `mfsclient/negentrycache.rs` | same |
-| mfsmount | `mfsclient/symlinkcache.rs` | same |
-| mfsmount | `mfsclient/xattrcache.rs` | same |
-| mfsmount | `mfsclient/fdcache.rs` | same |
-| mfsmount | `mfsclient/dentry_invalidator.rs` | invalidation vs. held references |
-| mfsmount | `mfsclient/masterproxy.rs` | callback re-entrancy |
+| mfsmount | `fuse_client/dirattrcache.rs` | entry pointer held across master round-trip |
+| mfsmount | `fuse_client/negentrycache.rs` | same |
+| mfsmount | `fuse_client/symlinkcache.rs` | same |
+| mfsmount | `fuse_client/xattrcache.rs` | same |
+| mfsmount | `fuse_client/fdcache.rs` | same |
+| mfsmount | `fuse_client/dentry_invalidator.rs` | invalidation vs. held references |
+| mfsmount | `fuse_client/masterproxy.rs` | callback re-entrancy |
 | shared (post-dedup) | `mfsclient/chunksdatacache.rs` | same |
 | shared | `mfsclient/csdb.rs` | same |
 | shared | `mfsclient/mastercomm.rs` | re-added `_Atomic` counters (VC-07) + callback contexts |

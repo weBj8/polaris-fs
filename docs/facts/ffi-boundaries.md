@@ -15,7 +15,7 @@ Evidence commands are reproducible; numbers as of commit `2e49c26`.
 
 | Crate | C library | Direction | Sites | Evidence |
 | --- | --- | --- | --- | --- |
-| `mfsmount` | libfuse3 (≥3.17; CI builds 3.18) | Rust→C: session setup, `fuse_session_new_versioned` | `mfsmount/src/mfsclient/mfsmount.rs:93` (extern decl), `:1125` (`fuse_session_new_fn` compat wrapper), `:1138` (call) | `grep -n fuse_session_new_versioned mfsmount/src/mfsclient/mfsmount.rs` |
+| `mfsmount` | libfuse3 (≥3.17; CI builds 3.18) | Rust→C: session setup, `fuse_session_new_versioned` | `mfsmount/src/fuse_client/mfsmount.rs:93` (extern decl), `:1125` (`fuse_session_new_fn` compat wrapper), `:1138` (call) | `grep -n fuse_session_new_versioned mfsmount/src/fuse_client/mfsmount.rs` |
 | `mfsmount` | libfuse3 | **C→Rust callbacks**: the two `fuse_lowlevel_ops` vtables | `mfsmount.rs:1311` (`mfs_oper`), `:1197` (`mfs_meta_oper`), struct def `:741` | every fn pointer in these tables is a re-entrant C→Rust entry point — aliasing-hunt class C |
 | `mfsmaster` | zlib (`-l z`) | Rust→C: metadata (de)compression | `mfsmaster/build.rs` link line; users: `mfsmaster/src/mfsmaster/bio.rs`, `metadata.rs`, `bgsaver.rs` | `grep -l 'deflate\|inflate\|zlib' mfsmaster/src/mfsmaster/*.rs` |
 | `mfschunkserver` | zlib (`-l z`) | Rust→C: chunk CRC helpers | `mfschunkserver/build.rs`; `mfscommon/crc.rs`, `mfschunkserver/replicator.rs`, `hddspacemgr.rs` | same grep |

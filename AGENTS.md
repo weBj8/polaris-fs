@@ -55,7 +55,7 @@ bash tools/gates/check.sh                          # exit 0
    LTO on clean builds. Per-TU private symbols are NOT linkable;
    c2rust's model gives each module its own copy. Mirror that or use
    `#[unsafe(no_mangle)]`.)
-2. **Tests in the mfsmount *binary* target** (`src/mfsclient/mfsmount.rs`
+2. **Tests in the mfsmount *binary* target** (`src/fuse_client/mfsmount.rs`
    is the bin root, not the lib) only run with `cargo test` /
    `--bins`, not `--lib`.
 3. **Probe cursors ≠ content keys.** When porting hash tables that cache
