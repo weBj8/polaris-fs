@@ -100,9 +100,12 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   (2/2), `strerr.rs` (2/6). Cause: MooseFS compiles its convenience library
   per-binary with different configure defines, and the transpile ran per
   binary (`README.md` §Regenerating, steps 3–4).
-- RUST: P0 de-duplicates the byte-identical files into a shared `mfscommon`
+- RUST: ~~P0 de-duplicates the byte-identical files into a shared `mfscommon`
   crate (mechanical, zero behavior risk). Divergent files stay per-crate and
-  migrate with their owning daemon.
+  migrate with their owning daemon.~~ **CLOSED (P0, commit `e167823`):** 14
+  modules extracted to `mfscommon/`, consumers use `pub use` reachability so
+  fat LTO retains the `#[no_mangle]` symbols. Smoke + gates green after
+  extraction.
 - GATE: post-dedup, `md5sum` of the shared file equals the md5 of every copy
   it replaced; daemons build and pass smoke unchanged.
 - SRC: `md5sum */src/mfscommon/<file>` matrix (run 2026-07-30; full table in
@@ -118,9 +121,11 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   `mfs_meta_fuse.rs`, `getgroups.rs`, cache modules — mfsmount-only or
   differing; NBD path: `mfsbdev.rs`, `mfsioint_lookupcache.rs`,
   `squeue.rs`/`workers.rs` in `mfsbdev/src/mfscommon`).
-- RUST: P0 moves the 12 identical files into a shared `mfsclient` crate;
+- RUST: ~~P0 moves the 12 identical files into a shared `mfsclient` crate;
   divergent files migrate with their daemon in P4. Without this, every
-  client-side fix would land twice.
+  client-side fix would land twice.~~ **CLOSED (P0, commit `91a7221`):**
+  12 modules extracted to `mfsclient/`; needed `#![feature(core_intrinsics)]`
+  (inoleng). Smoke + gates green after extraction.
 - GATE: same as VC-05.
 - SRC: `cmp -s mfsmount/src/mfsclient/<f> mfsbdev/src/mfsclient/<f>` sweep
   (run 2026-07-30).
