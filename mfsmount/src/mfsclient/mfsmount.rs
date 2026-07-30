@@ -1,3 +1,14 @@
+//! mfsmount — process bootstrap: ANNOTATED UNSAFE BOUNDARY (P4).
+//!
+//! This module is main(): argv/fuse_args handling, config-file option
+//! staging, daemonize (fork/setsid/fd juggling), setuid/setgid, signal
+//! handlers, the FUSE lowlevel session loop and mount-option munging for
+//! libfuse. Every one of those is an OS/C interface with no safe Rust
+//! equivalent, so the module intentionally stays an unsafe boundary like
+//! mfscommon::sockets (P1 precedent). The pure string logic that was
+//! extractable — the comma escape/remove helpers used for -ofsname
+//! construction — has been ported to safe Rust in `imp` with tests.
+
 #![allow(
     clippy::missing_safety_doc,
     dead_code,
@@ -3771,73 +3782,101 @@ pub unsafe extern "C" fn mainloop(
         };
     }
 }
-unsafe extern "C" fn strncpy_remove_commas(
-    mut dstbuff: *mut ::core::ffi::c_char,
-    mut dstsize: ::core::ffi::c_uint,
-    mut src: *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_uint {
-    unsafe {
-        let mut c: ::core::ffi::c_char = 0;
-        let mut l: ::core::ffi::c_uint = 0;
-        l = 0 as ::core::ffi::c_uint;
-        loop {
-            let c2rust_fresh0 = src;
-            src = src.offset(1);
-            c = *c2rust_fresh0;
-            if !(c as ::core::ffi::c_int != 0 && l.wrapping_add(1 as ::core::ffi::c_uint) < dstsize)
-            {
+#[deny(unsafe_code)]
+pub mod imp {
+    /// C strncpy_remove_commas: copy non-comma bytes while l+1<dstsize.
+    /// Returns the bytes written (NUL appended by the boundary).
+    pub fn remove_commas(src: &[u8], dstsize: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &c in src {
+            if out.len() + 1 >= dstsize {
                 break;
             }
-            if c as ::core::ffi::c_int != ',' as ::core::ffi::c_int {
-                let c2rust_fresh1 = dstbuff;
-                dstbuff = dstbuff.offset(1);
-                *c2rust_fresh1 = c;
-                l = l.wrapping_add(1);
+            if c != b',' {
+                out.push(c);
             }
         }
-        *dstbuff = 0 as ::core::ffi::c_char;
-        return l;
+        out
+    }
+
+    /// C strncpy_escape_commas: ',' and '\\' get a backslash prefix when
+    /// l+2<dstsize, otherwise the copy stops (returning what fit).
+    pub fn escape_commas(src: &[u8], dstsize: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &c in src {
+            if out.len() + 1 >= dstsize {
+                break;
+            }
+            if c != b',' && c != b'\\' {
+                out.push(c);
+            } else if out.len() + 2 < dstsize {
+                out.push(b'\\');
+                out.push(c);
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        extern crate std;
+        use super::*;
+        use std::vec::Vec;
+
+        #[test]
+        fn remove_commas_reference() {
+            assert_eq!(remove_commas(b"a,b,c", 16), b"abc");
+            assert_eq!(remove_commas(b",,,", 16), Vec::<u8>::new());
+            // dstsize limits: l+1<dstsize → at most dstsize-1 bytes
+            assert_eq!(remove_commas(b"abcdef", 4), b"abc");
+            assert_eq!(remove_commas(b"a,b", 3), b"ab");
+            assert_eq!(remove_commas(b"", 4), Vec::<u8>::new());
+            // commas don't count toward the limit in C either
+            assert_eq!(remove_commas(b",a,b,c", 4), b"abc");
+        }
+
+        #[test]
+        fn escape_commas_reference() {
+            assert_eq!(escape_commas(b"a,b", 16), b"a\\,b");
+            assert_eq!(escape_commas(b"a\\b", 16), b"a\\\\b");
+            // escape pair needs l+2<dstsize
+            assert_eq!(escape_commas(b"ab,c", 4), b"ab");
+            assert_eq!(escape_commas(b"ab,c", 5), b"ab\\,");
+            assert_eq!(escape_commas(b"plain", 16), b"plain");
+            assert_eq!(escape_commas(b"abcdef", 4), b"abc");
+        }
+    }
+}
+
+unsafe extern "C" fn strncpy_remove_commas(
+    dstbuff: *mut ::core::ffi::c_char,
+    dstsize: ::core::ffi::c_uint,
+    src: *mut ::core::ffi::c_char,
+) -> ::core::ffi::c_uint {
+    unsafe {
+        // SAFETY: src is a NUL-terminated C string; dstbuff has dstsize
+        // bytes (C contract).
+        let bytes = ::core::ffi::CStr::from_ptr(src).to_bytes();
+        let out = imp::remove_commas(bytes, dstsize as usize);
+        ::core::ptr::copy_nonoverlapping(out.as_ptr(), dstbuff as *mut uint8_t, out.len());
+        *dstbuff.add(out.len()) = 0;
+        out.len() as ::core::ffi::c_uint
     }
 }
 unsafe extern "C" fn strncpy_escape_commas(
-    mut dstbuff: *mut ::core::ffi::c_char,
-    mut dstsize: ::core::ffi::c_uint,
-    mut src: *mut ::core::ffi::c_char,
+    dstbuff: *mut ::core::ffi::c_char,
+    dstsize: ::core::ffi::c_uint,
+    src: *mut ::core::ffi::c_char,
 ) -> ::core::ffi::c_uint {
     unsafe {
-        let mut c: ::core::ffi::c_char = 0;
-        let mut l: ::core::ffi::c_uint = 0;
-        l = 0 as ::core::ffi::c_uint;
-        loop {
-            let c2rust_fresh2 = src;
-            src = src.offset(1);
-            c = *c2rust_fresh2;
-            if !(c as ::core::ffi::c_int != 0 && l.wrapping_add(1 as ::core::ffi::c_uint) < dstsize)
-            {
-                break;
-            }
-            if c as ::core::ffi::c_int != ',' as ::core::ffi::c_int
-                && c as ::core::ffi::c_int != '\\' as ::core::ffi::c_int
-            {
-                let c2rust_fresh3 = dstbuff;
-                dstbuff = dstbuff.offset(1);
-                *c2rust_fresh3 = c;
-                l = l.wrapping_add(1);
-            } else if l.wrapping_add(2 as ::core::ffi::c_uint) < dstsize {
-                let c2rust_fresh4 = dstbuff;
-                dstbuff = dstbuff.offset(1);
-                *c2rust_fresh4 = '\\' as ::core::ffi::c_char;
-                let c2rust_fresh5 = dstbuff;
-                dstbuff = dstbuff.offset(1);
-                *c2rust_fresh5 = c;
-                l = l.wrapping_add(2 as ::core::ffi::c_uint);
-            } else {
-                *dstbuff = 0 as ::core::ffi::c_char;
-                return l;
-            }
-        }
-        *dstbuff = 0 as ::core::ffi::c_char;
-        return l;
+        // SAFETY: as strncpy_remove_commas.
+        let bytes = ::core::ffi::CStr::from_ptr(src).to_bytes();
+        let out = imp::escape_commas(bytes, dstsize as usize);
+        ::core::ptr::copy_nonoverlapping(out.as_ptr(), dstbuff as *mut uint8_t, out.len());
+        *dstbuff.add(out.len()) = 0;
+        out.len() as ::core::ffi::c_uint
     }
 }
 #[unsafe(no_mangle)]

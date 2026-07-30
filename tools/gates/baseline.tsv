@@ -39,7 +39,7 @@ wrapping_ops	mfsclient	ge	796
 wrapping_ops	mfsmaster	ge	4068
 wrapping_ops	mfschunkserver	ge	1316
 wrapping_ops	mfsmetalogger	ge	151
-wrapping_ops	mfsmount	ge	416
+wrapping_ops	mfsmount	ge	410
 wrapping_ops	mfsbdev	ge	240
 wrapping_ops	mfsgui	ge	149
 wrapping_ops	mfsnetdump	ge	68
