@@ -1,73 +1,52 @@
-unsafe extern "C" {
-    unsafe fn open(
-        __file: *const ::core::ffi::c_char,
-        __oflag: ::core::ffi::c_int,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn close(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    unsafe fn read(
-        __fd: ::core::ffi::c_int,
-        __buf: *mut ::core::ffi::c_void,
-        __nbytes: size_t,
-    ) -> ssize_t;
-    unsafe fn getpagesize() -> ::core::ffi::c_int;
-    unsafe fn strtoul(
-        __nptr: *const ::core::ffi::c_char,
-        __endptr: *mut *mut ::core::ffi::c_char,
-        __base: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_ulong;
-}
-pub type size_t = usize;
-pub type ssize_t = isize;
-pub type uint8_t = u8;
+//! /proc/self/statm memory usage, migrated to safe Rust (P1).
+//! Layout: safe logic in `imp` (deny unsafe, one annotated escape hatch for
+//! sysconf), C ABI out-param export at top level.
+
 pub type uint64_t = u64;
-pub const O_RDONLY: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+pub type uint8_t = u8;
+
+#[deny(unsafe_code)]
+mod imp {
+    /// pages of (total, rss) from /proc/self/statm; rss None if the second
+    /// field is missing/unparseable (the C original set *virt but returned 0)
+    pub fn statm() -> Option<(u64, Option<u64>)> {
+        let buf = std::fs::read("/proc/self/statm").ok()?;
+        let mut it = buf.split(|&b| b == b' ');
+        let total = std::str::from_utf8(it.next()?).ok()?.parse().ok()?;
+        let rss = it
+            .next()
+            .and_then(|f| std::str::from_utf8(f).ok()?.parse().ok());
+        Some((total, rss))
+    }
+
+    // ponytail: sysconf has no std equivalent; error (-1) matches the C
+    // original's unchecked getpagesize().
+    #[allow(unsafe_code)]
+    pub fn pagesize() -> u64 {
+        // SAFETY: sysconf(_SC_PAGESIZE) reads process-global config; no
+        // memory unsafety possible.
+        unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 }
+    }
+}
+
+/// C ABI out-param wrapper — the six daemon crates call this by symbol.
+///
+/// # Safety
+/// `rss` and `virt` must be valid writable `u64` pointers (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mem_used(mut rss: *mut uint64_t, mut virt: *mut uint64_t) -> uint8_t {
+    // SAFETY: per fn contract; both written unconditionally, as the original did.
     unsafe {
-        let mut fd: ::core::ffi::c_int = open(
-            b"/proc/self/statm\0".as_ptr() as *const ::core::ffi::c_char,
-            O_RDONLY,
-        );
-        let mut statbuff: [::core::ffi::c_char; 1000] = [0; 1000];
-        let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let mut l: ::core::ffi::c_int = 0;
-        let mut e: ::core::ffi::c_int = 0;
-        e = 0 as ::core::ffi::c_int;
-        *rss = 0 as uint64_t;
-        *virt = 0 as uint64_t;
-        if fd >= 0 as ::core::ffi::c_int {
-            l = read(
-                fd,
-                &raw mut statbuff as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-                1000 as size_t,
-            ) as ::core::ffi::c_int;
-            if l < 1000 as ::core::ffi::c_int && l > 0 as ::core::ffi::c_int {
-                statbuff[l as usize] = 0 as ::core::ffi::c_char;
-                *virt = strtoul(
-                    &raw mut statbuff as *mut ::core::ffi::c_char,
-                    &raw mut p,
-                    10 as ::core::ffi::c_int,
-                )
-                .wrapping_mul(getpagesize() as ::core::ffi::c_ulong)
-                    as uint64_t;
-                if *p as ::core::ffi::c_int == ' ' as ::core::ffi::c_int {
-                    *rss = strtoul(
-                        p.offset(1 as ::core::ffi::c_int as isize),
-                        &raw mut p,
-                        10 as ::core::ffi::c_int,
-                    )
-                    .wrapping_mul(getpagesize() as ::core::ffi::c_ulong)
-                        as uint64_t;
-                    if *p as ::core::ffi::c_int == ' ' as ::core::ffi::c_int
-                        || *p as ::core::ffi::c_int == '\0' as ::core::ffi::c_int
-                    {
-                        e = 1 as ::core::ffi::c_int;
-                    }
-                }
+        *rss = 0;
+        *virt = 0;
+        if let Some((t, r)) = imp::statm() {
+            let ps = imp::pagesize();
+            *virt = t.wrapping_mul(ps);
+            if let Some(r) = r {
+                *rss = r.wrapping_mul(ps);
+                return 1;
             }
-            close(fd);
         }
-        return e as uint8_t;
     }
+    0
 }

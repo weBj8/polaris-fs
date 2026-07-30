@@ -18,10 +18,19 @@ unsafe extern "C" {
 pub type size_t = usize;
 pub type uint32_t = u32;
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
+// BOUNDARY MODULE (P1): processname mutates the process-global argv memory
+// region and swaps `environ` so the new name shows in ps/top. This is
+// inherently raw-pointer work; the module stays unsafe with annotated blocks
+// rather than being made "safe" (there is no safe abstraction for rewriting
+// another allocation's bytes — the C runtime's argv area).
 static mut argv_start: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
 static mut argv_leng: uint32_t = 0;
 static mut myenvcpy: *mut *mut ::core::ffi::c_char =
     ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
+// SAFETY (module): argv/environ pointers come from the C runtime and are
+// valid for the process lifetime; malloc'd env copy is freed only in
+// processname_term; all offset walks are bounded by NUL terminators the C
+// runtime guarantees.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn processname_init(
     mut argc: ::core::ffi::c_int,
@@ -95,6 +104,9 @@ pub unsafe extern "C" fn processname_init(
         argv_leng = (lastpos.offset_from(argv_start) - 1 as isize) as uint32_t;
     }
 }
+// SAFETY: argv_start/argv_leng bound the writable region (computed in init
+// from contiguous argv+environ storage); name must be a valid NUL-terminated
+// C string (C caller contract).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn processname_set(mut name: *mut ::core::ffi::c_char) {
     unsafe {
@@ -119,6 +131,7 @@ pub unsafe extern "C" fn processname_set(mut name: *mut ::core::ffi::c_char) {
         }
     }
 }
+// SAFETY: myenvcpy was allocated by malloc in init (or is null); freed once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn processname_term() {
     unsafe {

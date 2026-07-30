@@ -1,71 +1,68 @@
-unsafe extern "C" {
-    unsafe fn clock_gettime(__clock_id: clockid_t, __tp: *mut timespec) -> ::core::ffi::c_int;
-}
-pub type __time_t = ::core::ffi::c_long;
-pub type __clockid_t = ::core::ffi::c_int;
-pub type __syscall_slong_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct timespec {
-    pub tv_sec: __time_t,
-    pub tv_nsec: __syscall_slong_t,
-}
-pub type clockid_t = __clockid_t;
+//! Monotonic clock helpers (CLOCK_MONOTONIC), migrated to safe Rust (P1).
+//! Semantics preserved from the c2rust original: values are raw
+//! CLOCK_MONOTONIC timestamps (boot-relative), not `std::time::Instant`.
+//!
+//! Layout per porting.md: safe logic in `imp` (deny unsafe, one annotated
+//! escape hatch), C ABI exports at top level (no module-level deny:
+//! `#[unsafe(no_mangle)]` is itself an unsafe attribute in edition 2024).
+
 pub type uint32_t = u32;
 pub type uint64_t = u64;
-pub const CLOCK_MONOTONIC: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn monotonic_seconds() -> ::core::ffi::c_double {
-    unsafe {
-        let mut ts: timespec = timespec {
+
+#[deny(unsafe_code)]
+mod imp {
+    /// nanoseconds since boot (CLOCK_MONOTONIC)
+    // ponytail: this one libc call is why the module isn't 100% safe —
+    // std exposes no raw CLOCK_MONOTONIC value (Instant is opaque).
+    #[allow(unsafe_code)]
+    pub fn nseconds() -> u64 {
+        let mut ts = libc::timespec {
             tv_sec: 0,
             tv_nsec: 0,
         };
-        clock_gettime(CLOCK_MONOTONIC, &raw mut ts);
-        return ts.tv_sec as ::core::ffi::c_double
-            + ts.tv_nsec as ::core::ffi::c_double * 0.000000001f64;
+        // SAFETY: ts is a valid pointer to a timespec we own;
+        // clock_gettime(CLOCK_MONOTONIC) cannot fail.
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        (ts.tv_sec as u64)
+            .wrapping_mul(1_000_000_000)
+            .wrapping_add(ts.tv_nsec as u64)
     }
 }
+
+pub use imp::nseconds;
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn monotonic_nseconds() -> uint64_t {
-    unsafe {
-        let mut ts: timespec = timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        clock_gettime(CLOCK_MONOTONIC, &raw mut ts);
-        return (ts.tv_sec as uint64_t)
-            .wrapping_mul(1000000000 as uint64_t)
-            .wrapping_add(ts.tv_nsec as uint64_t);
-    }
+pub extern "C" fn monotonic_seconds() -> ::core::ffi::c_double {
+    let ns = nseconds();
+    (ns / 1_000_000_000) as ::core::ffi::c_double
+        + (ns % 1_000_000_000) as ::core::ffi::c_double * 0.000000001f64
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn monotonic_useconds() -> uint64_t {
-    unsafe {
-        return monotonic_nseconds().wrapping_div(1000 as uint64_t);
-    }
+pub extern "C" fn monotonic_nseconds() -> uint64_t {
+    nseconds()
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn monotonic_method() -> *const ::core::ffi::c_char {
-    unsafe {
-        return b"clock_gettime\0".as_ptr() as *const ::core::ffi::c_char;
-    }
+pub extern "C" fn monotonic_useconds() -> uint64_t {
+    nseconds().wrapping_div(1000)
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn monotonic_speed() -> uint32_t {
-    unsafe {
-        let mut i: uint32_t = 0;
-        let mut st: uint64_t = 0;
-        let mut en: uint64_t = 0;
-        i = 0 as uint32_t;
-        st = monotonic_nseconds().wrapping_add(10000000 as uint64_t);
-        loop {
-            en = monotonic_nseconds();
-            i = i.wrapping_add(1);
-            if en >= st {
-                break;
-            }
+pub extern "C" fn monotonic_method() -> *const ::core::ffi::c_char {
+    b"clock_gettime\0".as_ptr() as *const ::core::ffi::c_char
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn monotonic_speed() -> uint32_t {
+    let mut i: uint32_t = 0;
+    let st = nseconds().wrapping_add(10_000_000);
+    loop {
+        let en = nseconds();
+        i = i.wrapping_add(1);
+        if en >= st {
+            break;
         }
-        return i;
     }
+    i
 }
