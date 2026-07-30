@@ -244,6 +244,7 @@ mod tests {
     }
 
     fn find(idx: *mut ::core::ffi::c_void, name: &[u8]) -> *mut uint8_t {
+        // SAFETY: test-only; blobs outlive the index.
         unsafe { name_index_find(idx, name.as_ptr(), name.len() as u8) }
     }
 
@@ -257,6 +258,7 @@ mod tests {
         let mut ptrs = Vec::new();
         for n in &names {
             let p = blobs.add(n.as_bytes());
+            // SAFETY: test-only; blobs outlive the index.
             unsafe { name_index_add(idx, p) };
             ptrs.push(p);
         }
@@ -268,6 +270,7 @@ mod tests {
         assert!(find(idx, b"file-name-1000").is_null());
         // same prefix, different length
         assert!(find(idx, b"file-name-000").is_null());
+        // SAFETY: test-only; blobs outlive the index.
         unsafe { name_index_destroy(idx) };
     }
 
