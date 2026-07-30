@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Cluster smoke gate — the behavioral oracle for every migration PR.
-# Boots master + chunkserver + metalogger from dist/, FUSE-mounts (inside a
-# user+mount namespace, `unshare -rm`, so no setuid fusermount3 is needed),
-# exercises write/read (md5-verified), mkdir/ln/mv/rm/symlink, df; tears down.
+# Boots master + chunkserver + metalogger from dist/, FUSE-mounts (as root:
+# direct; unprivileged: inside `unshare -rm`), exercises write/read (md5-verified), mkdir/ln/mv/rm/symlink, df; tears down.
 # Requires: dist/ binaries (./build-all.sh), /dev/fuse, unshare, and
 # LD_LIBRARY_PATH pointing at a libfuse3 >= 3.17 if the system one is older.
 # Usage: tools/smoke_test.sh [workdir]   (default: target/smoke)
@@ -68,9 +67,10 @@ for i in $(seq 1 30); do
   sleep 0.5
 done
 
-# mount + exercise inside a user+mount namespace: euid 0 there, libfuse
-# mounts directly (no setuid fusermount3). Net namespace is NOT unshared,
-# so 127.0.0.1 reaches the daemons above.
+# mount + exercise: needs privilege for /dev/fuse. As real root (CI: sudo),
+# libfuse mounts directly — no namespace needed. Unprivileged: wrap in a
+# user+mount namespace (`unshare -rm`) where euid 0 mounts without setuid
+# fusermount3. Net namespace is never unshared, so 127.0.0.1 reaches daemons.
 cat >"$W/inner.sh" <<EOF
 set -euo pipefail
 export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
@@ -88,6 +88,10 @@ df "$W/mnt" >/dev/null
 rm "$W/mnt/d1/hard" "$W/mnt/sym" "$W/mnt/d1/f2"; rmdir "$W/mnt/d1"
 echo "INNER OK"
 EOF
-unshare -rm bash "$W/inner.sh" || { echo "inner smoke FAILED"; exit 1; }
+if [ "$(id -u)" = 0 ]; then
+  bash "$W/inner.sh" || { echo "inner smoke FAILED"; exit 1; }
+else
+  unshare -rm bash "$W/inner.sh" || { echo "inner smoke FAILED"; exit 1; }
+fi
 
 echo "SMOKE OK"
