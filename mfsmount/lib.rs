@@ -12,6 +12,11 @@
 extern crate c2rust_bitfields;
 extern crate libc;
 
+// Shared transpiled mfscommon modules (dedup, VC-05). The pub use makes
+// their #[no_mangle] extern "C" symbols reachable so LTO retains them; the
+// daemon's extern blocks resolve to these definitions at link time.
+pub use mfscommon::{clocks, conncache, crc, delayrun, labelparser, lwthread, md5, mfslog, processname, sockets};
+
 pub mod src {
     pub mod mfsclient {
         pub mod chunkrwlock;
@@ -44,17 +49,7 @@ pub mod src {
         pub mod xattrcache;
     } // mod mfsclient
     pub mod mfscommon {
-        pub mod clocks;
-        pub mod conncache;
-        pub mod crc;
-        pub mod delayrun;
-        pub mod labelparser;
-        pub mod lwthread;
-        pub mod md5;
-        pub mod mfslog;
         pub mod pcqueue;
-        pub mod processname;
-        pub mod sockets;
         pub mod strerr;
     } // mod mfscommon
 } // mod src

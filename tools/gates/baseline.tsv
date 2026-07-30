@@ -7,25 +7,31 @@
 # (e.g. a migrated module legitimately removes wrapping_* sites → lower the
 # wrapping_ops floor for that crate with the claim ID in the commit message).
 # Frozen 2026-07-30 at commit 2e49c26 (unmigrated baseline). Evidence: VC-01/VC-02.
-unsafe_sites	mfsmaster	le	3284
-unsafe_sites	mfschunkserver	le	1288
-unsafe_sites	mfsmetalogger	le	469
-unsafe_sites	mfsmount	le	1764
-unsafe_sites	mfsbdev	le	1403
-unsafe_sites	mfsgui	le	475
+# Baseline change (P0 dedup): mfscommon extraction moved shared modules out of
+# the 6 daemon crates into the mfscommon crate; unsafe 8,727 → 7,673 total and
+# wrapping 11,498 → 9,183 total (duplicate copies eliminated, VC-05).
+unsafe_sites	mfsmaster	le	3023
+unsafe_sites	mfschunkserver	le	1011
+unsafe_sites	mfsmetalogger	le	303
+unsafe_sites	mfsmount	le	1504
+unsafe_sites	mfsbdev	le	1143
+unsafe_sites	mfsgui	le	309
 unsafe_sites	mfsnetdump	le	44
-unsafe_no_safety	mfsmaster	le	3284
-unsafe_no_safety	mfschunkserver	le	1288
-unsafe_no_safety	mfsmetalogger	le	469
-unsafe_no_safety	mfsmount	le	1764
-unsafe_no_safety	mfsbdev	le	1403
-unsafe_no_safety	mfsgui	le	475
+unsafe_sites	mfscommon	le	336
+unsafe_no_safety	mfsmaster	le	3023
+unsafe_no_safety	mfschunkserver	le	1011
+unsafe_no_safety	mfsmetalogger	le	303
+unsafe_no_safety	mfsmount	le	1504
+unsafe_no_safety	mfsbdev	le	1143
+unsafe_no_safety	mfsgui	le	309
 unsafe_no_safety	mfsnetdump	le	44
+unsafe_no_safety	mfscommon	le	336
 migration_iou	workspace	le	0
-wrapping_ops	mfsmaster	ge	4973
-wrapping_ops	mfschunkserver	ge	2198
-wrapping_ops	mfsmetalogger	ge	490
-wrapping_ops	mfsmount	ge	1850
-wrapping_ops	mfsbdev	ge	1431
-wrapping_ops	mfsgui	ge	488
+wrapping_ops	mfsmaster	ge	4068
+wrapping_ops	mfschunkserver	ge	1316
+wrapping_ops	mfsmetalogger	ge	151
+wrapping_ops	mfsmount	ge	1455
+wrapping_ops	mfsbdev	ge	1036
+wrapping_ops	mfsgui	ge	149
 wrapping_ops	mfsnetdump	ge	68
+wrapping_ops	mfscommon	ge	940
