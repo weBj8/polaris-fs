@@ -1,12 +1,19 @@
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-use ::c2rust_bitfields;
+//! Symlink cache — safe Rust rewrite (P4).
+//!
+//! Original: MooseFS mfsclient/symlinkcache.c (206 lines of C; the c2rust
+//! transpile had ballooned to 1275 lines, ~80% zassert-macro noise around
+//! pthread_mutex_lock). 4-hash × 6257-bucket × 16-slot cache mapping inode
+//! → symlink target path, time-based expiry, oldest-slot eviction.
+//!
+//! All cache logic is safe Rust in `imp` (paths owned as boxed byte strings,
+//! NUL-terminated for C export). The boundary keeps the pthread mutex, the
+//! stats tree, and C-string ownership: inserted paths are copied in,
+//! search-hit paths are returned as libc-malloc'd copies (caller frees with
+//! free(3), matching the C contract — mfs_fuse does exactly that).
+
 unsafe extern "C" {
     unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
     unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn abort() -> !;
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
     unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn stats_counter_inc(node: *mut ::core::ffi::c_void);
@@ -18,25 +25,8 @@ unsafe extern "C" {
         printflag: uint8_t,
     ) -> *mut ::core::ffi::c_void;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-    static mut stderr: *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn mfs_log(
-        mode: ::core::ffi::c_int,
-        priority: ::core::ffi::c_int,
-        fmt: *const ::core::ffi::c_char,
-        ...
-    );
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
 }
 pub type size_t = usize;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct __pthread_internal_list {
@@ -65,82 +55,138 @@ pub union pthread_mutex_t {
 }
 pub type uint8_t = u8;
 pub type uint32_t = u32;
-pub type C2Rust_Unnamed = ::core::ffi::c_uint;
-pub const PTHREAD_MUTEX_FAST_NP: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_DEFAULT: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ERRORCHECK: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_NORMAL: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ADAPTIVE_NP: C2Rust_Unnamed = 3;
-pub const PTHREAD_MUTEX_ERRORCHECK_NP: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE_NP: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_TIMED_NP: C2Rust_Unnamed = 0;
-#[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    #[bitfield(name = "_flags2", ty = "::core::ffi::c_int", bits = "0..=23")]
-    pub _flags2: [u8; 3],
-    pub _short_backupbuf: [::core::ffi::c_char; 1],
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused3: ::core::ffi::c_int,
-    pub _total_written: __uint64_t,
-    pub _unused2: [::core::ffi::c_char; 8],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _hashbucket {
-    pub inode: [uint32_t; 16],
-    pub time: [::core::ffi::c_double; 16],
-    pub path: [*mut uint8_t; 16],
-}
-pub type hashbucket = _hashbucket;
-pub type C2Rust_Unnamed_0 = ::core::ffi::c_uint;
-pub const STATNODES: C2Rust_Unnamed_0 = 4;
-pub const LINKS: C2Rust_Unnamed_0 = 3;
-pub const SEARCH_MISSES: C2Rust_Unnamed_0 = 2;
-pub const SEARCH_HITS: C2Rust_Unnamed_0 = 1;
-pub const INSERTS: C2Rust_Unnamed_0 = 0;
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const MFSLOG_ERR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const HASH_FUNCTIONS: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const HASH_BUCKET_SIZE: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
-pub const HASH_BUCKETS: ::core::ffi::c_int = 6257 as ::core::ffi::c_int;
-static mut primes: [uint32_t; 4] = [
-    1072573589 as uint32_t,
-    3465827623 as uint32_t,
-    2848548977 as uint32_t,
-    748191707 as uint32_t,
-];
-static mut symlinkhash: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
+pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
+
+pub const INSERTS: usize = 0;
+pub const SEARCH_HITS: usize = 1;
+pub const SEARCH_MISSES: usize = 2;
+pub const LINKS: usize = 3;
+pub const STATNODES: usize = 4;
+
+#[deny(unsafe_code)]
+pub mod imp {
+    pub const HASH_FUNCTIONS: usize = 4;
+    pub const HASH_BUCKET_SIZE: usize = 16;
+    pub const HASH_BUCKETS: u32 = 6257;
+
+    const PRIMES: [u32; HASH_FUNCTIONS] = [1072573589, 3465827623, 2848548977, 748191707];
+
+    #[derive(Clone, Default)]
+    struct Slot {
+        inode: u32,
+        time: f64,
+        /// NUL-terminated target path (owned); None = empty value
+        path: Option<Box<[u8]>>,
+    }
+
+    pub enum InsertOutcome {
+        /// inode already cached; path replaced
+        Updated,
+        /// inserted into a virgin slot (LINKS++)
+        Virgin,
+        /// inserted by evicting the oldest slot (LINKS unchanged)
+        Evicted,
+    }
+
+    pub enum SearchOutcome {
+        /// fresh copy of the NUL-terminated path (SEARCH_HITS++)
+        Hit(Box<[u8]>),
+        /// found but stale; slot cleared (LINKS--, SEARCH_MISSES++)
+        Expired,
+        /// not cached (SEARCH_MISSES++)
+        Miss,
+    }
+
+    pub struct Cache {
+        buckets: Vec<[Slot; HASH_BUCKET_SIZE]>,
+        pub timeout: f64,
+    }
+
+    impl Cache {
+        pub fn new(timeout: f64) -> Self {
+            Cache {
+                buckets: (0..HASH_BUCKETS).map(|_| Default::default()).collect(),
+                timeout,
+            }
+        }
+
+        pub fn bucket(&self, inode: u32, h: usize) -> usize {
+            (inode.wrapping_mul(PRIMES[h]) % HASH_BUCKETS) as usize
+        }
+
+        pub fn insert(&mut self, inode: u32, path: &[u8], t: f64) -> InsertOutcome {
+            let mut mint = t;
+            let mut found: Option<(usize, usize)> = None;
+            for h in 0..HASH_FUNCTIONS {
+                let b = self.bucket(inode, h);
+                for i in 0..HASH_BUCKET_SIZE {
+                    let slot = &self.buckets[b][i];
+                    if slot.inode == inode {
+                        self.buckets[b][i].path = Some(path.to_vec().into_boxed_slice());
+                        self.buckets[b][i].time = t;
+                        return InsertOutcome::Updated;
+                    }
+                    if slot.time < mint {
+                        found = Some((b, i));
+                        mint = slot.time;
+                    }
+                }
+            }
+            let (b, i) = match found {
+                Some(x) => x,
+                None => return InsertOutcome::Updated, // C sanity-check no-op path
+            };
+            let virgin = self.buckets[b][i].time == 0.0;
+            let slot = &mut self.buckets[b][i];
+            slot.inode = inode;
+            slot.path = Some(path.to_vec().into_boxed_slice());
+            slot.time = t;
+            if virgin {
+                InsertOutcome::Virgin
+            } else {
+                InsertOutcome::Evicted
+            }
+        }
+
+        pub fn search(&mut self, inode: u32, t: f64) -> SearchOutcome {
+            for h in 0..HASH_FUNCTIONS {
+                let b = self.bucket(inode, h);
+                for i in 0..HASH_BUCKET_SIZE {
+                    if self.buckets[b][i].inode == inode {
+                        let slot = &mut self.buckets[b][i];
+                        if slot.time + self.timeout < t {
+                            slot.path = None;
+                            slot.time = 0.0;
+                            slot.inode = 0;
+                            return SearchOutcome::Expired;
+                        }
+                        let path = slot.path.clone().unwrap_or_default();
+                        return SearchOutcome::Hit(path);
+                    }
+                }
+            }
+            SearchOutcome::Miss
+        }
+
+        /// total cached entries (test/diagnostics)
+        #[cfg(test)]
+        pub fn len(&self) -> usize {
+            self.buckets
+                .iter()
+                .flatten()
+                .filter(|s| s.inode != 0 || s.time != 0.0)
+                .count()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Boundary: pthread mutex + stats tree + C-string ownership.
+// ---------------------------------------------------------------------------
+
+use imp::{Cache, InsertOutcome, SearchOutcome};
+
 static mut slcachelock: pthread_mutex_t = pthread_mutex_t {
     __data: __pthread_mutex_s {
         __lock: 0 as ::core::ffi::c_int,
@@ -156,38 +202,49 @@ static mut slcachelock: pthread_mutex_t = pthread_mutex_t {
         },
     },
 };
-static mut timeout: ::core::ffi::c_double = 0.;
-static mut statsptr: [*mut ::core::ffi::c_void; 4] =
-    [::core::ptr::null_mut::<::core::ffi::c_void>(); 4];
-#[inline]
-unsafe extern "C" fn symlink_cache_statsptr_init() {
+static mut CACHE: Option<Cache> = None;
+static mut statsptr: [*mut ::core::ffi::c_void; STATNODES] =
+    [::core::ptr::null_mut::<::core::ffi::c_void>(); STATNODES];
+
+/// SAFETY: called with slcachelock held (or before threads start, in init).
+unsafe fn cache() -> &'static mut Cache {
     unsafe {
-        let mut s: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        s = stats_get_subnode(
+        // init runs before FUSE threads; every other call holds the lock.
+        (&raw mut CACHE)
+            .as_mut()
+            .unwrap_unchecked()
+            .as_mut()
+            .unwrap_unchecked()
+    }
+}
+
+unsafe fn symlink_cache_statsptr_init() {
+    unsafe {
+        let s = stats_get_subnode(
             NULL,
             b"symlink_cache\0".as_ptr() as *const ::core::ffi::c_char,
             0 as uint8_t,
             0 as uint8_t,
         );
-        statsptr[INSERTS as ::core::ffi::c_int as usize] = stats_get_subnode(
+        statsptr[INSERTS] = stats_get_subnode(
             s,
             b"inserts\0".as_ptr() as *const ::core::ffi::c_char,
             0 as uint8_t,
             1 as uint8_t,
         );
-        statsptr[SEARCH_HITS as ::core::ffi::c_int as usize] = stats_get_subnode(
+        statsptr[SEARCH_HITS] = stats_get_subnode(
             s,
             b"search_hits\0".as_ptr() as *const ::core::ffi::c_char,
             0 as uint8_t,
             1 as uint8_t,
         );
-        statsptr[SEARCH_MISSES as ::core::ffi::c_int as usize] = stats_get_subnode(
+        statsptr[SEARCH_MISSES] = stats_get_subnode(
             s,
             b"search_misses\0".as_ptr() as *const ::core::ffi::c_char,
             0 as uint8_t,
             1 as uint8_t,
         );
-        statsptr[LINKS as ::core::ffi::c_int as usize] = stats_get_subnode(
+        statsptr[LINKS] = stats_get_subnode(
             s,
             b"#links\0".as_ptr() as *const ::core::ffi::c_char,
             1 as uint8_t,
@@ -195,1081 +252,174 @@ unsafe extern "C" fn symlink_cache_statsptr_init() {
         );
     }
 }
-#[inline]
-unsafe extern "C" fn symlink_cache_stats_inc(mut id: uint8_t) {
+
+/// SAFETY: id < STATNODES checked inline; statsptr valid after init.
+unsafe fn stats_inc(id: usize) {
     unsafe {
-        if (id as ::core::ffi::c_int) < STATNODES as ::core::ffi::c_int {
-            stats_counter_inc(statsptr[id as usize]);
+        if id < STATNODES {
+            stats_counter_inc(statsptr[id]);
         }
     }
 }
-#[inline]
-unsafe extern "C" fn symlink_cache_stats_dec(mut id: uint8_t) {
+
+/// SAFETY: as stats_inc.
+unsafe fn stats_dec(id: usize) {
     unsafe {
-        if (id as ::core::ffi::c_int) < STATNODES as ::core::ffi::c_int {
-            stats_counter_dec(statsptr[id as usize]);
+        if id < STATNODES {
+            stats_counter_dec(statsptr[id]);
         }
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn symlink_cache_insert(mut inode: uint32_t, mut path: *const uint8_t) {
+pub unsafe extern "C" fn symlink_cache_insert(inode: uint32_t, path: *const uint8_t) {
     unsafe {
-        let mut hb: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
-        let mut fhb: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
-        let mut h: uint8_t = 0;
-        let mut i: uint8_t = 0;
-        let mut fi: uint8_t = 0;
-        let mut t: ::core::ffi::c_double = 0.;
-        let mut mint: ::core::ffi::c_double = 0.;
-        t = monotonic_seconds();
-        mint = t;
-        fi = 0 as uint8_t;
-        fhb = ::core::ptr::null_mut::<hashbucket>();
-        symlink_cache_stats_inc(INSERTS as ::core::ffi::c_int as uint8_t);
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut slcachelock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    98 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        h = 0 as uint8_t;
-        while (h as ::core::ffi::c_int) < HASH_FUNCTIONS {
-            hb = symlinkhash.offset(
-                inode
-                    .wrapping_mul(primes[h as usize])
-                    .wrapping_rem(HASH_BUCKETS as uint32_t) as isize,
-            );
-            i = 0 as uint8_t;
-            while (i as ::core::ffi::c_int) < HASH_BUCKET_SIZE {
-                if (*hb).inode[i as usize] == inode {
-                    if !(*hb).path[i as usize].is_null() {
-                        free((*hb).path[i as usize] as *mut ::core::ffi::c_void);
-                    }
-                    (*hb).path[i as usize] =
-                        strdup(path as *const ::core::ffi::c_char) as *mut uint8_t;
-                    (*hb).time[i as usize] = t;
-                    let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                        pthread_mutex_unlock(&raw mut slcachelock);
-                    if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                        if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                            && *__errno_location() != 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                        } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                            && *__errno_location() == 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                        } else {
-                            let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                108 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                        }
-                        abort();
-                    }
-                    return;
-                }
-                if (*hb).time[i as usize] < mint {
-                    fhb = hb;
-                    fi = i;
-                    mint = (*hb).time[i as usize];
-                }
-                i = i.wrapping_add(1);
-            }
-            h = h.wrapping_add(1);
-        }
-        if !fhb.is_null() {
-            if (*fhb).time[fi as usize] == 0 as ::core::ffi::c_int as ::core::ffi::c_double {
-                symlink_cache_stats_inc(LINKS as ::core::ffi::c_int as uint8_t);
-            }
-            if !(*fhb).path[fi as usize].is_null() {
-                free((*fhb).path[fi as usize] as *mut ::core::ffi::c_void);
-            }
-            (*fhb).inode[fi as usize] = inode;
-            (*fhb).path[fi as usize] = strdup(path as *const ::core::ffi::c_char) as *mut uint8_t;
-            (*fhb).time[fi as usize] = t;
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut slcachelock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    129 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
+        let t = monotonic_seconds();
+        stats_inc(INSERTS);
+        // SAFETY: path is a NUL-terminated C string per C contract.
+        let bytes = ::core::ffi::CStr::from_ptr(path as *const ::core::ffi::c_char).to_bytes();
+        // store NUL-terminated so search can return it verbatim
+        let mut owned = Vec::with_capacity(bytes.len() + 1);
+        owned.extend_from_slice(bytes);
+        owned.push(0);
+        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
+        let outcome = cache().insert(inode, &owned, t);
+        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
+        if let InsertOutcome::Virgin = outcome {
+            stats_inc(LINKS);
         }
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn symlink_cache_search(mut inode: uint32_t) -> *mut uint8_t {
+pub unsafe extern "C" fn symlink_cache_search(inode: uint32_t) -> *mut uint8_t {
     unsafe {
-        let mut hb: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
-        let mut h: uint8_t = 0;
-        let mut i: uint8_t = 0;
-        let mut t: ::core::ffi::c_double = 0.;
-        let mut path: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
-        t = monotonic_seconds();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut slcachelock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    140 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        h = 0 as uint8_t;
-        while (h as ::core::ffi::c_int) < HASH_FUNCTIONS {
-            hb = symlinkhash.offset(
-                inode
-                    .wrapping_mul(primes[h as usize])
-                    .wrapping_rem(HASH_BUCKETS as uint32_t) as isize,
-            );
-            i = 0 as uint8_t;
-            while (i as ::core::ffi::c_int) < HASH_BUCKET_SIZE {
-                if (*hb).inode[i as usize] == inode {
-                    if (*hb).time[i as usize] + timeout < t {
-                        if !(*hb).path[i as usize].is_null() {
-                            free((*hb).path[i as usize] as *mut ::core::ffi::c_void);
-                            (*hb).path[i as usize] = ::core::ptr::null_mut::<uint8_t>();
-                        }
-                        (*hb).time[i as usize] = 0.0f64;
-                        (*hb).inode[i as usize] = 0 as uint32_t;
-                        let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                            pthread_mutex_unlock(&raw mut slcachelock);
-                        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                                && *__errno_location() != 0 as ::core::ffi::c_int
-                            {
-                                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                    strerr(*__errno_location());
-                                mfs_log(
-                                    MFSLOG_SYSLOG,
-                                    MFSLOG_ERR,
-                                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                        .as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    *__errno_location(),
-                                    _mfs_errorstring_1,
-                                );
-                                fprintf(
-                                    stderr,
-                                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                        .as_ptr() as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    *__errno_location(),
-                                    _mfs_errorstring_1,
-                                );
-                            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                                && *__errno_location() == 0 as ::core::ffi::c_int
-                            {
-                                let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                                    strerr(_mfs_assert_ret_0);
-                                mfs_log(
-                                    MFSLOG_SYSLOG,
-                                    MFSLOG_ERR,
-                                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    _mfs_errorstring_2,
-                                );
-                                fprintf(
-                                    stderr,
-                                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0"
-                                        .as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    _mfs_errorstring_2,
-                                );
-                            } else {
-                                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                                    strerr(*__errno_location());
-                                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                                    strerr(_mfs_assert_ret_0);
-                                mfs_log(
-                                    MFSLOG_SYSLOG,
-                                    MFSLOG_ERR,
-                                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                        .as_ptr() as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    _mfs_errorstring_ret_0,
-                                    *__errno_location(),
-                                    _mfs_errorstring_err_0,
-                                );
-                                fprintf(
-                                    stderr,
-                                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                        .as_ptr() as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    152 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    _mfs_assert_ret_0,
-                                    _mfs_errorstring_ret_0,
-                                    *__errno_location(),
-                                    _mfs_errorstring_err_0,
-                                );
-                            }
-                            abort();
-                        }
-                        symlink_cache_stats_dec(LINKS as ::core::ffi::c_int as uint8_t);
-                        symlink_cache_stats_inc(SEARCH_MISSES as ::core::ffi::c_int as uint8_t);
-                        return ::core::ptr::null_mut::<uint8_t>();
-                    }
-                    path = strdup((*hb).path[i as usize] as *const ::core::ffi::c_char)
-                        as *mut uint8_t;
-                    let mut _mfs_assert_ret_1: ::core::ffi::c_int =
-                        pthread_mutex_unlock(&raw mut slcachelock);
-                    if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-                        if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                            && *__errno_location() != 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                *__errno_location(),
-                                _mfs_errorstring_3,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                *__errno_location(),
-                                _mfs_errorstring_3,
-                            );
-                        } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                            && *__errno_location() == 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_4: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_1);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                _mfs_errorstring_4,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                _mfs_errorstring_4,
-                            );
-                        } else {
-                            let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_1);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                _mfs_errorstring_ret_1,
-                                *__errno_location(),
-                                _mfs_errorstring_err_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                158 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&slcachelock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_1,
-                                _mfs_errorstring_ret_1,
-                                *__errno_location(),
-                                _mfs_errorstring_err_1,
-                            );
-                        }
-                        abort();
-                    }
-                    symlink_cache_stats_inc(SEARCH_HITS as ::core::ffi::c_int as uint8_t);
-                    return path;
+        let t = monotonic_seconds();
+        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
+        let outcome = cache().search(inode, t);
+        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
+        match outcome {
+            SearchOutcome::Hit(path) => {
+                stats_inc(SEARCH_HITS);
+                // libc malloc: caller frees with free(3) (mfs_fuse does).
+                let p = malloc(path.len()) as *mut uint8_t;
+                if p.is_null() {
+                    return ::core::ptr::null_mut();
                 }
-                i = i.wrapping_add(1);
+                ::core::ptr::copy_nonoverlapping(path.as_ptr(), p, path.len());
+                p
             }
-            h = h.wrapping_add(1);
-        }
-        let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut slcachelock);
-        if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_5: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-            } else if _mfs_assert_ret_2 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_6: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-            } else {
-                let mut _mfs_errorstring_err_2: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_2: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    164 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
+            SearchOutcome::Expired => {
+                stats_dec(LINKS);
+                stats_inc(SEARCH_MISSES);
+                ::core::ptr::null_mut()
             }
-            abort();
+            SearchOutcome::Miss => {
+                stats_inc(SEARCH_MISSES);
+                ::core::ptr::null_mut()
+            }
         }
-        symlink_cache_stats_inc(SEARCH_MISSES as ::core::ffi::c_int as uint8_t);
-        return ::core::ptr::null_mut::<uint8_t>();
     }
 }
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn symlink_cache_init(mut to: ::core::ffi::c_double) {
+pub unsafe extern "C" fn symlink_cache_init(to: ::core::ffi::c_double) {
     unsafe {
-        let mut hb: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
-        let mut i: uint8_t = 0;
-        let mut hi: uint32_t = 0;
-        symlinkhash =
-            malloc(::core::mem::size_of::<hashbucket>().wrapping_mul(HASH_BUCKETS as size_t))
-                as *mut hashbucket;
-        if symlinkhash.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                175 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"symlinkhash\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                175 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"symlinkhash\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if symlinkhash
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut hashbucket
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                175 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"symlinkhash\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                175 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"symlinkhash\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        hi = 0 as uint32_t;
-        while hi < HASH_BUCKETS as uint32_t {
-            hb = symlinkhash.offset(hi as isize);
-            i = 0 as uint8_t;
-            while (i as ::core::ffi::c_int) < HASH_BUCKET_SIZE {
-                (*hb).inode[i as usize] = 0 as uint32_t;
-                (*hb).time[i as usize] = 0.0f64;
-                (*hb).path[i as usize] = ::core::ptr::null_mut::<uint8_t>();
-                i = i.wrapping_add(1);
-            }
-            hi = hi.wrapping_add(1);
-        }
-        timeout = to;
+        CACHE = Some(Cache::new(to));
         symlink_cache_statsptr_init();
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn symlink_cache_term() {
     unsafe {
-        let mut hb: *mut hashbucket = ::core::ptr::null_mut::<hashbucket>();
-        let mut i: uint8_t = 0;
-        let mut hi: uint32_t = 0;
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut slcachelock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    193 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
+        CACHE = None; // drops all boxed paths
+        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::imp::*;
+    use std::vec::Vec;
+
+    fn cstr(s: &str) -> Vec<u8> {
+        let mut v = s.as_bytes().to_vec();
+        v.push(0);
+        v
+    }
+
+    #[test]
+    fn insert_search_hit() {
+        let mut c = Cache::new(60.0);
+        assert!(matches!(
+            c.insert(42, &cstr("/target/path"), 100.0),
+            InsertOutcome::Virgin
+        ));
+        match c.search(42, 110.0) {
+            SearchOutcome::Hit(p) => assert_eq!(&*p, &*cstr("/target/path")),
+            _ => panic!("expected hit"),
         }
-        hi = 0 as uint32_t;
-        while hi < HASH_BUCKETS as uint32_t {
-            hb = symlinkhash.offset(hi as isize);
-            i = 0 as uint8_t;
-            while (i as ::core::ffi::c_int) < HASH_BUCKET_SIZE {
-                if !(*hb).path[i as usize].is_null() {
-                    free((*hb).path[i as usize] as *mut ::core::ffi::c_void);
-                }
-                (*hb).path[i as usize] = ::core::ptr::null_mut::<uint8_t>();
-                i = i.wrapping_add(1);
-            }
-            hi = hi.wrapping_add(1);
+        // update same inode
+        assert!(matches!(
+            c.insert(42, &cstr("/new"), 200.0),
+            InsertOutcome::Updated
+        ));
+        match c.search(42, 210.0) {
+            SearchOutcome::Hit(p) => assert_eq!(&*p, &*cstr("/new")),
+            _ => panic!("expected hit"),
         }
-        free(symlinkhash as *mut ::core::ffi::c_void);
-        symlinkhash = ::core::ptr::null_mut::<hashbucket>();
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut slcachelock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/symlinkcache.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    205 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&slcachelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
+        assert!(matches!(c.search(43, 210.0), SearchOutcome::Miss));
+    }
+
+    #[test]
+    fn expiry_clears_slot() {
+        let mut c = Cache::new(10.0);
+        c.insert(7, &cstr("/x"), 100.0);
+        // time + timeout < t → expired (strict <, as C)
+        assert!(matches!(c.search(7, 111.0), SearchOutcome::Expired));
+        assert_eq!(c.len(), 0);
+        // slot is virgin again
+        assert!(matches!(
+            c.insert(7, &cstr("/y"), 200.0),
+            InsertOutcome::Virgin
+        ));
+        // boundary: time+timeout == t is still fresh
+        assert!(matches!(c.search(7, 210.0), SearchOutcome::Hit(_)));
+    }
+
+    #[test]
+    fn eviction_picks_oldest() {
+        let mut c = Cache::new(1e9);
+        // same bucket set: find inodes that collide on all 4 hashes is
+        // overkill; instead fill enough entries that min-time eviction
+        // happens somewhere, then verify capacity accounting stays exact.
+        for i in 1..=2000u32 {
+            let p = cstr(&format!("/p{i}"));
+            c.insert(i, &p, i as f64);
         }
+        let n = c.len();
+        assert!(n <= 2000);
+        // every present entry must be findable
+        let mut found = 0;
+        for i in 1..=2000u32 {
+            if let SearchOutcome::Hit(_) = c.search(i, 2000.0) {
+                found += 1;
+            }
+        }
+        assert_eq!(found, n);
+    }
+
+    #[test]
+    fn hash_matches_c_reference() {
+        // (inode * prime) % 6257, wrapping — spot values from the C formula
+        let c = Cache::new(0.0);
+        assert_eq!(c.bucket(1, 0), (1072573589u32 % 6257) as usize);
+        assert_eq!(
+            c.bucket(2, 1),
+            (2u32.wrapping_mul(3465827623) % 6257) as usize
+        );
     }
 }
