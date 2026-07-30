@@ -191,11 +191,7 @@ pub mod imp {
         /// Diff current scan against the previous one; `open`/`close` are
         /// fs_add_entry/fs_forget_entry at the boundary. Ends with
         /// last = current, current cleared (exact C merge order).
-        pub fn end(
-            &mut self,
-            open: &mut dyn FnMut(u32),
-            close: &mut dyn FnMut(u32),
-        ) {
+        pub fn end(&mut self, open: &mut dyn FnMut(u32), close: &mut dyn FnMut(u32)) {
             let mut l = 0usize; // cursor into last
             let mut c = 0usize; // cursor into current
             while l < self.last.len() || c < self.current.len() {
@@ -511,13 +507,7 @@ mod tests {
         // sorted order: inode 1 (open, parent 100), 2 (open, parent 100), 3
         assert_eq!(
             *m.log.borrow(),
-            std::vec![
-                (true, 1),
-                (true, 100),
-                (true, 2),
-                (true, 100),
-                (true, 3)
-            ]
+            std::vec![(true, 1), (true, 100), (true, 2), (true, 100), (true, 3)]
         );
     }
 
@@ -552,13 +542,7 @@ mod tests {
         // (parent 100 closed first), 3 closed, 4 opened (+parent 200)
         assert_eq!(
             *m.log.borrow(),
-            std::vec![
-                (false, 100),
-                (false, 2),
-                (false, 3),
-                (true, 4),
-                (true, 200)
-            ]
+            std::vec![(false, 100), (false, 2), (false, 3), (true, 4), (true, 200)]
         );
     }
 

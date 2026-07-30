@@ -147,7 +147,13 @@ pub mod imp {
                     e.lastrefresh = now;
                 }
                 None if createflag => {
-                    b.insert(inode, Entry { attr, lastrefresh: now });
+                    b.insert(
+                        inode,
+                        Entry {
+                            attr,
+                            lastrefresh: now,
+                        },
+                    );
                 }
                 None => {}
             }
@@ -210,11 +216,7 @@ pub unsafe extern "C" fn sstats_get(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sstats_set(
-    inode: uint32_t,
-    attr: *const uint8_t,
-    createflag: uint8_t,
-) {
+pub unsafe extern "C" fn sstats_set(inode: uint32_t, attr: *const uint8_t, createflag: uint8_t) {
     unsafe {
         let now = monotonic_seconds();
         let a: [u8; 35] = ::core::ptr::read(attr as *const [u8; 35]);

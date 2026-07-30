@@ -382,7 +382,7 @@ mod imp {
     }
 }
 
-use imp::{Oplog, LINELENG, OPBUFFSIZE};
+use imp::{LINELENG, OPBUFFSIZE, Oplog};
 
 // Global core state. SAFETY: only touched with opbufflock held (the getdata
 // → releasedata pair hands the locked mutex to the caller thread, exactly
@@ -608,7 +608,8 @@ pub unsafe extern "C" fn oplog_getdata(
             ts.tv_sec = tv.tv_sec + 1 as __time_t;
             ts.tv_nsec = (tv.tv_usec * 1000 as __suseconds_t) as __syscall_slong_t;
             c.waiting = true;
-            if pthread_cond_timedwait(&raw mut nodata, &raw mut opbufflock, &raw const ts) == ETIMEDOUT
+            if pthread_cond_timedwait(&raw mut nodata, &raw mut opbufflock, &raw const ts)
+                == ETIMEDOUT
             {
                 *buff = b"#\n\0".as_ptr() as *const ::core::ffi::c_char as *mut uint8_t;
                 *leng = 2 as uint32_t;
@@ -640,7 +641,9 @@ mod tests {
     fn ring_roundtrip_and_wrap() {
         let mut o = Oplog::new();
         // fill past the end to force wrap
-        let big: Vec<u8> = (0..OPBUFFSIZE + 12345usize).map(|i| (i % 251) as u8).collect();
+        let big: Vec<u8> = (0..OPBUFFSIZE + 12345usize)
+            .map(|i| (i % 251) as u8)
+            .collect();
         o.put(&big[..OPBUFFSIZE - 10]);
         let fh = o.newhandle(false);
         o.put(&big[..20]);

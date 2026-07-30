@@ -316,10 +316,7 @@ mod tests {
             _ => panic!("expected invalidate"),
         }
         // "a" now fresh at 200 → stops
-        assert!(matches!(
-            d.reap_step(200.0, &|_| false),
-            ReapAction::Stop
-        ));
+        assert!(matches!(d.reap_step(200.0, &|_| false), ReapAction::Stop));
     }
 
     #[test]

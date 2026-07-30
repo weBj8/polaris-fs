@@ -76,7 +76,14 @@ pub mod imp {
     }
 
     /// Registry matching: does a dircache belong to (ctx, parent)?
-    pub fn ctx_matches(c_pid: i32, c_uid: u32, c_gid: u32, d_pid: i32, d_uid: u32, d_gid: u32) -> bool {
+    pub fn ctx_matches(
+        c_pid: i32,
+        c_uid: u32,
+        c_gid: u32,
+        d_pid: i32,
+        d_uid: u32,
+        d_gid: u32,
+    ) -> bool {
         c_pid == d_pid && c_uid == d_uid && c_gid == d_gid
     }
 }
@@ -158,7 +165,12 @@ unsafe fn make_node_index(inner: &mut Inner, attrsize: u8) {
 
 /// dcache_namehash_get: find name, read inode + attr record.
 /// SAFETY: d.lock held; blobs alive. Returns (inode, attr) on valid hit.
-unsafe fn namehash_get(inner: &mut Inner, attrsize: u8, nleng: uint8_t, name: *const uint8_t) -> Option<(uint32_t, [u8; 36])> {
+unsafe fn namehash_get(
+    inner: &mut Inner,
+    attrsize: u8,
+    nleng: uint8_t,
+    name: *const uint8_t,
+) -> Option<(uint32_t, [u8; 36])> {
     unsafe {
         if inner.name_index.is_null() {
             make_name_index(inner, attrsize);
@@ -199,7 +211,12 @@ unsafe fn inodehash_get(inner: &mut Inner, attrsize: u8, inode: uint32_t) -> Opt
 }
 
 /// SAFETY: d.lock held; blobs alive.
-unsafe fn inodehash_set(inner: &mut Inner, attrsize: u8, inode: uint32_t, attr: *const uint8_t) -> bool {
+unsafe fn inodehash_set(
+    inner: &mut Inner,
+    attrsize: u8,
+    inode: uint32_t,
+    attr: *const uint8_t,
+) -> bool {
     unsafe {
         if inner.node_index.is_null() {
             make_node_index(inner, attrsize);
@@ -232,7 +249,12 @@ unsafe fn inodehash_invalidate_attr(inner: &mut Inner, attrsize: u8, inode: uint
 }
 
 /// SAFETY: d.lock held; blobs alive.
-unsafe fn namehash_invalidate(inner: &mut Inner, attrsize: u8, nleng: uint8_t, name: *const uint8_t) {
+unsafe fn namehash_invalidate(
+    inner: &mut Inner,
+    attrsize: u8,
+    nleng: uint8_t,
+    name: *const uint8_t,
+) {
     unsafe {
         if inner.name_index.is_null() {
             make_name_index(inner, attrsize);
@@ -285,7 +307,11 @@ fn registry_all_ctx(ctx: *const fuse_ctx) -> Vec<usize> {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_new(ctx: *const fuse_ctx, parent: uint32_t, attrsize: uint8_t) -> *mut ::core::ffi::c_void {
+pub unsafe extern "C" fn dcache_new(
+    ctx: *const fuse_ctx,
+    parent: uint32_t,
+    attrsize: uint8_t,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         let d = Box::new(DirCache {
             pid: (*ctx).pid,
@@ -327,7 +353,11 @@ pub unsafe extern "C" fn dcache_release(r: *mut ::core::ffi::c_void) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_append(r: *mut ::core::ffi::c_void, dbuff: *mut uint8_t, dsize: uint32_t) {
+pub unsafe extern "C" fn dcache_append(
+    r: *mut ::core::ffi::c_void,
+    dbuff: *mut uint8_t,
+    dsize: uint32_t,
+) {
     unsafe {
         // SAFETY: handle from dcache_new; blob stays caller-owned.
         let d = &*(r as *const DirCache);
@@ -431,7 +461,11 @@ pub unsafe extern "C" fn dcache_invalidate_attr(inode: uint32_t) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dcache_invalidate_name(parent: uint32_t, nleng: uint8_t, name: *const uint8_t) {
+pub unsafe extern "C" fn dcache_invalidate_name(
+    parent: uint32_t,
+    nleng: uint8_t,
+    name: *const uint8_t,
+) {
     let all: Vec<usize> = {
         let g = REGISTRY.lock().unwrap();
         g.iter()

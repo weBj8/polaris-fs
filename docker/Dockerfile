@@ -8,7 +8,7 @@ COPY docker/mfscgi/ /usr/share/mfscgi/
 RUN printf '#!/bin/sh\nPYTHONPATH=/usr/share/mfscgi exec /usr/bin/python3 /usr/share/mfscgi/mfscli "$@"\n' > /usr/local/bin/mfscli \
  && chmod +x /usr/local/bin/mfscli /usr/share/mfscgi/mfscli
 
-COPY dist/ /usr/local/sbin/
+COPY target/release/mfsbdev target/release/mfschunkserver target/release/mfsgui target/release/mfsmaster target/release/mfsmetalogger target/release/mfsmount target/release/mfsnetdump /usr/local/sbin/
 COPY docker/mfs-entry.sh /usr/local/bin/mfs-entry.sh
 RUN chmod +x /usr/local/bin/mfs-entry.sh /usr/local/sbin/mfs*
 

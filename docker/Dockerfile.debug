@@ -5,4 +5,4 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # unstripped binary for symbolized backtraces
-COPY dist/mfsmount.nostrip /usr/local/sbin/mfsmount
+COPY target/release/mfsmount /usr/local/sbin/mfsmount

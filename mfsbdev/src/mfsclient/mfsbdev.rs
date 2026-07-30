@@ -926,10 +926,7 @@ pub unsafe extern "C" fn skipall(mut sock: ::core::ffi::c_int, mut leng: uint32_
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nbd_worker_fn(
-    mut data: *mut ::core::ffi::c_void,
-    _workerscnt: uint32_t,
-) {
+pub unsafe extern "C" fn nbd_worker_fn(mut data: *mut ::core::ffi::c_void, _workerscnt: uint32_t) {
     unsafe {
         let mut r: *mut nbdrequest = data as *mut nbdrequest;
         let mut nbdcp: *mut nbdcommon = (*r).nbdcp;

@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "mfsbdev",
+    "mfschunkserver",
+    "mfsclient",
+    "mfscommon",
+    "mfsgui",
+    "mfsmaster",
+    "mfsmetalogger",
+    "mfsmount",
+    "mfsnetdump",
+]
+exclude = ["vendor"]
+resolver = "3"
+
+[profile.dev]
+overflow-checks = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.release.package.mfsmount]
+strip = "none"
+debug = true

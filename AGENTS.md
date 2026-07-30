@@ -19,8 +19,8 @@ behavior frozen at every merge point. License: GPLv2 (see LICENSE).
 ## Build / verify (always in this order)
 
 ```bash
-cd mfsmount && cargo test --release --lib          # unit tests (78)
-RUSTFLAGS="-L $PWD/target/fuse318/fuse-3.18.2/build/lib" ./build-all.sh
+cargo test --release -p mfsmount --lib            # unit tests (78)
+RUSTFLAGS="-L $PWD/target/fuse318/fuse-3.18.2/build/lib" cargo build --release --workspace --locked
 LD_LIBRARY_PATH=$PWD/target/fuse318/fuse-3.18.2/build/lib bash tools/smoke_test.sh   # SMOKE OK
 bash tools/gates/check.sh                          # exit 0
 ```

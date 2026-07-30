@@ -561,18 +561,18 @@ pub mod imp {
     /// MFS status → errno (mfs_errorconv)
     pub fn errorconv(status: i32) -> i32 {
         match status {
-            0 => 0,               // MFS_STATUS_OK
-            1 => 1,               // EPERM
-            2 => 20,              // ENOTDIR
-            3 => 2,               // ENOENT
-            4 => 13,              // EACCES
-            5 => 17,              // EEXIST
-            6 => 22,              // EINVAL
-            7 => 39,              // ENOTEMPTY
-            8 => 5,               // EIO (MFS_ERROR_IO)
-            33 => 30,             // EROFS
-            40 => 122,            // EDQUOT (MFS_ERROR_QUOTA)
-            _ => 22,              // EINVAL
+            0 => 0,    // MFS_STATUS_OK
+            1 => 1,    // EPERM
+            2 => 20,   // ENOTDIR
+            3 => 2,    // ENOENT
+            4 => 13,   // EACCES
+            5 => 17,   // EEXIST
+            6 => 22,   // EINVAL
+            7 => 39,   // ENOTEMPTY
+            8 => 5,    // EIO (MFS_ERROR_IO)
+            33 => 30,  // EROFS
+            40 => 122, // EDQUOT (MFS_ERROR_QUOTA)
+            _ => 22,   // EINVAL
         }
     }
 
@@ -741,7 +741,12 @@ pub mod imp {
                 put_entry(&mut out, b".", META_ROOT_INODE, TYPE_DIRECTORY);
                 put_entry(&mut out, b"..", META_ROOT_INODE, TYPE_DIRECTORY);
                 put_entry(&mut out, META_TRASH_NAME, META_TRASH_INODE, TYPE_DIRECTORY);
-                put_entry(&mut out, META_SUSTAINED_NAME, META_SUSTAINED_INODE, TYPE_DIRECTORY);
+                put_entry(
+                    &mut out,
+                    META_SUSTAINED_NAME,
+                    META_SUSTAINED_INODE,
+                    TYPE_DIRECTORY,
+                );
             }
             META_TRASH_INODE => {
                 put_entry(&mut out, b".", META_TRASH_INODE, TYPE_DIRECTORY);
@@ -757,7 +762,12 @@ pub mod imp {
                         name.push(HEX[((tid >> 8) & 15) as usize]);
                         name.push(HEX[((tid >> 4) & 15) as usize]);
                         name.push(HEX[(tid & 15) as usize]);
-                        put_entry(&mut out, &name, META_SUBTRASH_INODE_MIN + tid, TYPE_DIRECTORY);
+                        put_entry(
+                            &mut out,
+                            &name,
+                            META_SUBTRASH_INODE_MIN + tid,
+                            TYPE_DIRECTORY,
+                        );
                     }
                 }
             }
@@ -849,7 +859,12 @@ pub mod imp {
         NotFound,
     }
 
-    pub fn resolve_lookup(parent: u32, name: &[u8], master_ge_3064: bool, flat_trash: bool) -> Lookup {
+    pub fn resolve_lookup(
+        parent: u32,
+        name: &[u8],
+        master_ge_3064: bool,
+        flat_trash: bool,
+    ) -> Lookup {
         match parent {
             META_ROOT_INODE => {
                 if name == b"." || name == b".." {
@@ -973,8 +988,8 @@ static mut attr_cache_timeout: ::core::ffi::c_double = 1.0;
 
 /// .masterinfo file content attr (masterinfoattr in C)
 static MASTERINFOATTR: [uint8_t; 36] = [
-    b'f', 0x01, 0x24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
-    0, 0, 0, 0, 0, 0, 22, 0,
+    b'f', 0x01, 0x24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0, 22, 0,
 ];
 
 /// SAFETY: config statics set once in mfs_meta_init before FUSE threads.
@@ -1252,8 +1267,11 @@ unsafe fn dirbuf_meta_fill(ino: uint32_t) -> Option<Vec<u8>> {
             && master_ge_3064()
             && !flat_trash_on()
         {
-            if fs_gettrash(ino - imp::META_SUBTRASH_INODE_MIN, &raw mut dbuff, &raw mut dsize)
-                == MFS_STATUS_OK as uint8_t
+            if fs_gettrash(
+                ino - imp::META_SUBTRASH_INODE_MIN,
+                &raw mut dbuff,
+                &raw mut dsize,
+            ) == MFS_STATUS_OK as uint8_t
             {
                 let blob = ::core::slice::from_raw_parts(dbuff, dsize as usize);
                 let (conv, _) = imp::dir_dataentries_convert(blob);
@@ -1279,7 +1297,11 @@ unsafe fn dirbuf_meta_fill(ino: uint32_t) -> Option<Vec<u8>> {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_opendir(req: fuse_req_t, ino: fuse_ino_t, fi: *mut fuse_file_info) {
+pub unsafe extern "C" fn mfs_meta_opendir(
+    req: fuse_req_t,
+    ino: fuse_ino_t,
+    fi: *mut fuse_file_info,
+) {
     unsafe {
         let inode = ino as uint32_t;
         if inode == imp::META_ROOT_INODE
@@ -1734,7 +1756,10 @@ mod tests {
         );
         // flat trash: no buckets
         let flat = dir_metaentries_fill(META_TRASH_INODE, false, false);
-        assert_eq!(flat.len() as u32, dir_metaentries_size(META_TRASH_INODE, false, false));
+        assert_eq!(
+            flat.len() as u32,
+            dir_metaentries_size(META_TRASH_INODE, false, false)
+        );
         assert_eq!(flat.len(), prefix_len);
     }
 

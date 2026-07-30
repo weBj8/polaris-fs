@@ -1882,14 +1882,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
             }
             if fd == -1 as ::core::ffi::c_int {
                 pthread_mutex_unlock(&raw mut fdlock);
-                usecto = (1000 as uint32_t).wrapping_add(
-                    if cnt < 30 as uint32_t {
-                        cnt.wrapping_sub(1 as uint32_t)
-                            .wrapping_mul(300000 as uint32_t)
-                    } else {
-                        10000000 as uint32_t
-                    },
-                ) as uint64_t;
+                usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                    cnt.wrapping_sub(1 as uint32_t)
+                        .wrapping_mul(300000 as uint32_t)
+                } else {
+                    10000000 as uint32_t
+                }) as uint64_t;
                 if usectimeout > 0 as uint64_t {
                     period = monotonic_useconds().wrapping_sub(start);
                     if period >= usectimeout {
@@ -1923,14 +1921,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                     >(&raw mut disconnect, 1 as ::core::ffi::c_int);
                     pthread_mutex_unlock(&raw mut (*rec).mutex);
                     pthread_mutex_unlock(&raw mut fdlock);
-                    usecto = (1000 as uint32_t).wrapping_add(
-                        if cnt < 30 as uint32_t {
-                            cnt.wrapping_sub(1 as uint32_t)
-                                .wrapping_mul(300000 as uint32_t)
-                        } else {
-                            10000000 as uint32_t
-                        },
-                    ) as uint64_t;
+                    usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                        cnt.wrapping_sub(1 as uint32_t)
+                            .wrapping_mul(300000 as uint32_t)
+                    } else {
+                        10000000 as uint32_t
+                    }) as uint64_t;
                     if usectimeout > 0 as uint64_t {
                         period = monotonic_useconds().wrapping_sub(start);
                         if period >= usectimeout {
@@ -1995,14 +1991,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                     *answer_leng = (*rec).idataleng;
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
                         pthread_mutex_unlock(&raw mut (*rec).mutex);
-                        usecto = (1000 as uint32_t).wrapping_add(
-                            if cnt < 30 as uint32_t {
-                                cnt.wrapping_sub(1 as uint32_t)
-                                    .wrapping_mul(300000 as uint32_t)
-                            } else {
-                                10000000 as uint32_t
-                            },
-                        ) as uint64_t;
+                        usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                            cnt.wrapping_sub(1 as uint32_t)
+                                .wrapping_mul(300000 as uint32_t)
+                        } else {
+                            10000000 as uint32_t
+                        }) as uint64_t;
                         if usectimeout > 0 as uint64_t {
                             period = monotonic_useconds().wrapping_sub(start);
                             if period >= usectimeout {
@@ -2024,14 +2018,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                         if (*rec).rcvd_cmd != expected_cmd {
                             pthread_mutex_unlock(&raw mut (*rec).mutex);
                             fs_disconnect();
-                            usecto = (1000 as uint32_t).wrapping_add(
-                                if cnt < 30 as uint32_t {
-                                    cnt.wrapping_sub(1 as uint32_t)
-                                        .wrapping_mul(300000 as uint32_t)
-                                } else {
-                                    10000000 as uint32_t
-                                },
-                            ) as uint64_t;
+                            usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                                cnt.wrapping_sub(1 as uint32_t)
+                                    .wrapping_mul(300000 as uint32_t)
+                            } else {
+                                10000000 as uint32_t
+                            }) as uint64_t;
                             if usectimeout > 0 as uint64_t {
                                 period = monotonic_useconds().wrapping_sub(start);
                                 if period >= usectimeout {
@@ -2078,14 +2070,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
             }
             if fd == -1 as ::core::ffi::c_int {
                 pthread_mutex_unlock(&raw mut fdlock);
-                usecto = (1000 as uint32_t).wrapping_add(
-                    if cnt < 30 as uint32_t {
-                        cnt.wrapping_sub(1 as uint32_t)
-                            .wrapping_mul(300000 as uint32_t)
-                    } else {
-                        10000000 as uint32_t
-                    },
-                ) as uint64_t;
+                usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                    cnt.wrapping_sub(1 as uint32_t)
+                        .wrapping_mul(300000 as uint32_t)
+                } else {
+                    10000000 as uint32_t
+                }) as uint64_t;
                 if usectimeout > 0 as uint64_t {
                     period = monotonic_useconds().wrapping_sub(start);
                     if period >= usectimeout {
@@ -2119,14 +2109,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                     >(&raw mut disconnect, 1 as ::core::ffi::c_int);
                     pthread_mutex_unlock(&raw mut (*rec).mutex);
                     pthread_mutex_unlock(&raw mut fdlock);
-                    usecto = (1000 as uint32_t).wrapping_add(
-                        if cnt < 30 as uint32_t {
-                            cnt.wrapping_sub(1 as uint32_t)
-                                .wrapping_mul(300000 as uint32_t)
-                        } else {
-                            10000000 as uint32_t
-                        },
-                    ) as uint64_t;
+                    usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                        cnt.wrapping_sub(1 as uint32_t)
+                            .wrapping_mul(300000 as uint32_t)
+                    } else {
+                        10000000 as uint32_t
+                    }) as uint64_t;
                     if usectimeout > 0 as uint64_t {
                         period = monotonic_useconds().wrapping_sub(start);
                         if period >= usectimeout {
@@ -2191,14 +2179,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                     *answer_leng = (*rec).idataleng;
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
                         pthread_mutex_unlock(&raw mut (*rec).mutex);
-                        usecto = (1000 as uint32_t).wrapping_add(
-                            if cnt < 30 as uint32_t {
-                                cnt.wrapping_sub(1 as uint32_t)
-                                    .wrapping_mul(300000 as uint32_t)
-                            } else {
-                                10000000 as uint32_t
-                            },
-                        ) as uint64_t;
+                        usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
+                            cnt.wrapping_sub(1 as uint32_t)
+                                .wrapping_mul(300000 as uint32_t)
+                        } else {
+                            10000000 as uint32_t
+                        }) as uint64_t;
                         if usectimeout > 0 as uint64_t {
                             period = monotonic_useconds().wrapping_sub(start);
                             if period >= usectimeout {
@@ -4372,9 +4358,7 @@ pub unsafe extern "C" fn fs_send_working_flags() {
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fs_nop_thread(
-    _arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+pub unsafe extern "C" fn fs_nop_thread(_arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut hdr: [uint8_t; 12] = [0; 12];

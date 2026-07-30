@@ -432,10 +432,7 @@ mod tests {
     #[test]
     fn insert_search_refresh() {
         let mut c = NegCache::new(10.0);
-        assert!(matches!(
-            c.insert(5, b"foo", 100.0),
-            InsertOutcome::Virgin
-        ));
+        assert!(matches!(c.insert(5, b"foo", 100.0), InsertOutcome::Virgin));
         assert_eq!(c.search(5, b"foo", 101.0).0, true);
         // refresh keeps it alive
         assert!(matches!(

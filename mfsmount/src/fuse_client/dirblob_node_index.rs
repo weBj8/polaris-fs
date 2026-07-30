@@ -264,7 +264,11 @@ mod tests {
             ptrs.push(p);
         }
         for (i, &p) in (1..=1000u32).zip(ptrs.iter()) {
-            assert_eq!(unsafe { node_index_find(idx, i) }, p, "lookup failed for {i}");
+            assert_eq!(
+                unsafe { node_index_find(idx, i) },
+                p,
+                "lookup failed for {i}"
+            );
         }
         assert!(unsafe { node_index_find(idx, 1001) }.is_null());
         assert!(unsafe { node_index_find(idx, 0) }.is_null());
@@ -327,7 +331,10 @@ mod tests {
             assert_eq!(unsafe { node_index_find(idx, i) }, p, "lost node {i}");
         }
         for i in 1..=50u32 {
-            assert!(unsafe { node_index_find(idx, i) }.is_null(), "zombie node {i}");
+            assert!(
+                unsafe { node_index_find(idx, i) }.is_null(),
+                "zombie node {i}"
+            );
         }
         // SAFETY: test-only; blobs outlive the index.
         unsafe { node_index_destroy(idx) };

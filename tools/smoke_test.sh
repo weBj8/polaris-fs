@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Cluster smoke gate — the behavioral oracle for every migration PR.
-# Boots master + chunkserver + metalogger from dist/, FUSE-mounts (as root:
+# Boots master + chunkserver + metalogger from target/release/, FUSE-mounts (as root:
 # direct; unprivileged: inside `unshare -rm`), exercises write/read (md5-verified), mkdir/ln/mv/rm/symlink, df; tears down.
-# Requires: dist/ binaries (./build-all.sh), /dev/fuse, unshare, and
+# Requires: release binaries (cargo build --release), /dev/fuse, unshare, and
 # LD_LIBRARY_PATH pointing at a libfuse3 >= 3.17 if the system one is older.
 # Usage: tools/smoke_test.sh [workdir]   (default: target/smoke)
 set -euo pipefail
@@ -10,14 +10,14 @@ cd "$(dirname "$0")/.."
 
 W="${1:-target/smoke}"
 mkdir -p "$W"; W=$(realpath "$W")
-BIN=$(realpath dist)
+BIN=$(realpath "${MFS_BIN_DIR:-target/release}")
 ML_PORT=19419 CS_PORT=19420 CL_PORT=19421 CSS_PORT=19422
 # chunkserver refuses a loopback MASTER_HOST ("use ip address of network controller")
 HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 HOST_IP=${HOST_IP:-127.0.0.1}
 
 for b in mfsmaster mfschunkserver mfsmetalogger mfsmount; do
-  [ -x "$BIN/$b" ] || { echo "missing $BIN/$b — run ./build-all.sh"; exit 1; }
+  [ -x "$BIN/$b" ] || { echo "missing $BIN/$b - run cargo build --release"; exit 1; }
 done
 [ -e /dev/fuse ] || { echo "/dev/fuse unavailable"; exit 1; }
 

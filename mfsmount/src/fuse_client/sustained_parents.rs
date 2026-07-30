@@ -125,7 +125,10 @@ pub mod imp {
         /// 0 when unknown (no validity check on read, as C)
         pub fn get(&self, inode: u32) -> u32 {
             let b = self.buckets[(inode as usize) % HASH_SIZE].lock().unwrap();
-            b.iter().find(|e| e.inode == inode).map(|e| e.parent).unwrap_or(0)
+            b.iter()
+                .find(|e| e.inode == inode)
+                .map(|e| e.parent)
+                .unwrap_or(0)
         }
 
         /// Drop entries with validtime < current_time; now == u32::MAX
@@ -170,7 +173,9 @@ pub unsafe extern "C" fn sparents_get(inode: uint32_t) -> uint32_t {
     unsafe { sparents().get(inode) }
 }
 
-unsafe extern "C" fn sparents_cleanupthread(_arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn sparents_cleanupthread(
+    _arg: *mut ::core::ffi::c_void,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut cuhashpos: usize = 0;
         loop {

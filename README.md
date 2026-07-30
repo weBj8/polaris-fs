@@ -54,12 +54,13 @@ dependencies whose symbols the daemons' own extern blocks resolve against.
 
 ## Building
 
-Requires recent Rust **nightly** (`c_variadic`, `core_intrinsics`; each crate
-has `rust-toolchain.toml`). Release mode is **required** — the C code relies
-on wrapping arithmetic and debug builds panic on overflow checks.
+Requires recent Rust **nightly** (`c_variadic`, `core_intrinsics`; selected by
+the root `rust-toolchain.toml`). The workspace disables debug overflow checks
+because the translated C code relies on wrapping arithmetic.
 
 ```sh
-./build-all.sh        # builds all 7 daemons → dist/
+cargo build                    # builds the full workspace -> target/debug/
+cargo build --release --locked # production binaries -> target/release/
 ```
 
 Native deps: zlib, libpcap (mfsnetdump only), and **libfuse3 ≥ 3.17** for
@@ -71,10 +72,10 @@ builds 3.18 from source; locally the same build lives under
 ## Testing and gates
 
 ```sh
-bash tools/smoke_test.sh      # full cluster gate: master+chunkserver+metalogger
-                              # + FUSE mount, md5-verified ops (root or unshare -rm)
-bash tools/gates/check.sh     # unsafe/IOU/SAFETY/wrapping counters vs frozen baseline
-cd mfscommon && cargo test    # unit tests for migrated shared modules
+bash tools/smoke_test.sh       # full cluster gate: master+chunkserver+metalogger
+                               # + FUSE mount, md5-verified ops (root or unshare -rm)
+bash tools/gates/check.sh      # unsafe/IOU/SAFETY/wrapping counters vs frozen baseline
+cargo test -p mfscommon        # unit tests for migrated shared modules
 ```
 
 CI (`.github/workflows/release.yml`) runs the counter gates, builds all

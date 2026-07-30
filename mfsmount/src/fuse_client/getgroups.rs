@@ -346,7 +346,9 @@ pub unsafe extern "C" fn groups_rel(g: *mut groups) {
     }
 }
 
-unsafe extern "C" fn groups_cleanup_thread(arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn groups_cleanup_thread(
+    arg: *mut ::core::ffi::c_void,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         loop {
             {

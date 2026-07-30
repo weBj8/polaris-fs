@@ -69,7 +69,9 @@ pub mod imp {
     impl FdCache {
         pub fn new() -> Self {
             FdCache {
-                buckets: (0..FDCACHE_HASHSIZE).map(|_| Mutex::new(Vec::new())).collect(),
+                buckets: (0..FDCACHE_HASHSIZE)
+                    .map(|_| Mutex::new(Vec::new()))
+                    .collect(),
             }
         }
 
@@ -144,7 +146,14 @@ pub mod imp {
         }
 
         /// Fresh entry for (ctx,inode) → (attr, lflags)
-        pub fn find(&self, uid: u32, gid: u32, pid: i32, inode: u32, now: f64) -> Option<([u8; 35], u16)> {
+        pub fn find(
+            &self,
+            uid: u32,
+            gid: u32,
+            pid: i32,
+            inode: u32,
+            now: f64,
+        ) -> Option<([u8; 35], u16)> {
             let b = self.bucket(inode).lock().unwrap();
             b.iter()
                 .find(|e| {
@@ -159,7 +168,14 @@ pub mod imp {
 
         /// Like find but removes the entry and hands ownership to the
         /// caller (C: unlinked pointer + later fdcache_release).
-        pub fn acquire(&self, uid: u32, gid: u32, pid: i32, inode: u32, now: f64) -> Option<FdEntry> {
+        pub fn acquire(
+            &self,
+            uid: u32,
+            gid: u32,
+            pid: i32,
+            inode: u32,
+            now: f64,
+        ) -> Option<FdEntry> {
             let mut b = self.bucket(inode).lock().unwrap();
             let i = b.iter().position(|e| {
                 e.inode == inode
@@ -315,8 +331,8 @@ pub unsafe extern "C" fn fdcache_init() {
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::imp::*;
     use super::LOOKUP_CHUNK_ZERO_DATA;
+    use super::imp::*;
 
     const UID: u32 = 1000;
     const GID: u32 = 1000;
@@ -358,14 +374,38 @@ mod tests {
         let c = FdCache::new();
         let mut a = [0u8; 35];
         // flag set, data fits → kept
-        c.insert(UID, GID, PID, 7, a, LOOKUP_CHUNK_ZERO_DATA, 3, 55, 9, &[1u8; 20], 100.0);
+        c.insert(
+            UID,
+            GID,
+            PID,
+            7,
+            a,
+            LOOKUP_CHUNK_ZERO_DATA,
+            3,
+            55,
+            9,
+            &[1u8; 20],
+            100.0,
+        );
         let e = c.acquire(UID, GID, PID, 7, 100.1).unwrap();
         assert_eq!(e.lflags & LOOKUP_CHUNK_ZERO_DATA, LOOKUP_CHUNK_ZERO_DATA);
         assert_eq!(e.csdata.len(), 20);
         assert_eq!(e.chunkid, 55);
         // oversized data → flag cleared, fields zeroed
         a[0] = 1;
-        c.insert(UID, GID, PID, 8, a, LOOKUP_CHUNK_ZERO_DATA, 3, 55, 9, &[1u8; CSDATA_MAX + 1], 100.0);
+        c.insert(
+            UID,
+            GID,
+            PID,
+            8,
+            a,
+            LOOKUP_CHUNK_ZERO_DATA,
+            3,
+            55,
+            9,
+            &[1u8; CSDATA_MAX + 1],
+            100.0,
+        );
         let e = c.acquire(UID, GID, PID, 8, 100.1).unwrap();
         assert_eq!(e.lflags & LOOKUP_CHUNK_ZERO_DATA, 0);
         assert!(e.csdata.is_empty());
@@ -379,6 +419,9 @@ mod tests {
         ins(&c, 5 + FDCACHE_HASHSIZE as u32, 2, 100.0); // same bucket
         c.invalidate(5);
         assert!(c.find(UID, GID, PID, 5, 100.1).is_none());
-        assert!(c.find(UID, GID, PID, 5 + FDCACHE_HASHSIZE as u32, 100.1).is_some());
+        assert!(
+            c.find(UID, GID, PID, 5 + FDCACHE_HASHSIZE as u32, 100.1)
+                .is_some()
+        );
     }
 }

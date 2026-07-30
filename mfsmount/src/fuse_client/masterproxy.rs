@@ -96,8 +96,7 @@ unsafe extern "C" {
         __oset: *mut sigset_t,
     ) -> ::core::ffi::c_int;
     unsafe fn sigemptyset(__set: *mut sigset_t) -> ::core::ffi::c_int;
-    unsafe fn sigaddset(__set: *mut sigset_t, __signo: ::core::ffi::c_int)
-        -> ::core::ffi::c_int;
+    unsafe fn sigaddset(__set: *mut sigset_t, __signo: ::core::ffi::c_int) -> ::core::ffi::c_int;
     unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
 }
 pub type size_t = usize;
@@ -315,7 +314,9 @@ unsafe fn free_conn_data(cd: *mut ConnData) {
     }
 }
 
-unsafe extern "C" fn masterproxy_keepalive(args: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn masterproxy_keepalive(
+    args: *mut ::core::ffi::c_void,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         let cd = args as *mut ConnData;
         let nopbuff = imp::nop_packet();
@@ -352,7 +353,9 @@ unsafe extern "C" fn masterproxy_keepalive(args: *mut ::core::ffi::c_void) -> *m
     }
 }
 
-unsafe extern "C" fn masterproxy_server(args: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn masterproxy_server(
+    args: *mut ::core::ffi::c_void,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         let cd = args as *mut ConnData;
         let mut header = [0u8; 8];
@@ -499,7 +502,9 @@ unsafe fn sigmask_block(oldset: *mut sigset_t) {
     }
 }
 
-unsafe extern "C" fn masterproxy_acceptor(_args: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn masterproxy_acceptor(
+    _args: *mut ::core::ffi::c_void,
+) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut thattr: pthread_attr_t = ::core::mem::zeroed();
         pthread_attr_init(&raw mut thattr);
@@ -558,7 +563,9 @@ pub unsafe extern "C" fn masterproxy_term() {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn masterproxy_init(masterproxyip: *const ::core::ffi::c_char) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn masterproxy_init(
+    masterproxyip: *const ::core::ffi::c_char,
+) -> ::core::ffi::c_int {
     unsafe {
         lsock = tcpsocket();
         if lsock < 0 {

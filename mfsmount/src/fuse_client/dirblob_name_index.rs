@@ -135,8 +135,6 @@ mod imp {
             }
         }
 
-
-
         /// `hash` must be hash_function over the blob's name bytes.
         pub fn add(&mut self, ptr: *mut u8, hash: u32) {
             self.incremental_rehash_step();
@@ -236,8 +234,10 @@ mod tests {
             b.extend_from_slice(name);
             let boxed = b.into_boxed_slice();
             let p = boxed.as_ptr() as *mut uint8_t;
-            assert!(!self.mem.iter().any(|x| x.as_ptr() as *mut uint8_t == p),
-                "blob address reuse: {p:p}");
+            assert!(
+                !self.mem.iter().any(|x| x.as_ptr() as *mut uint8_t == p),
+                "blob address reuse: {p:p}"
+            );
             self.mem.push(boxed);
             p
         }
@@ -253,8 +253,9 @@ mod tests {
         let mut blobs = Blobs { mem: Vec::new() };
         let idx = unsafe { name_index_create(4) };
         // 1000 entries forces several growth + incremental rehash cycles.
-        let names: Vec<std::string::String> =
-            (0..1000u32).map(|i| format!("file-name-{:04}", i)).collect();
+        let names: Vec<std::string::String> = (0..1000u32)
+            .map(|i| format!("file-name-{:04}", i))
+            .collect();
         let mut ptrs = Vec::new();
         for n in &names {
             let p = blobs.add(n.as_bytes());
@@ -273,9 +274,6 @@ mod tests {
         // SAFETY: test-only; blobs outlive the index.
         unsafe { name_index_destroy(idx) };
     }
-
-
-
 
     #[test]
     fn hash_matches_c_reference() {

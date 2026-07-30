@@ -4522,15 +4522,13 @@ pub unsafe extern "C" fn read_worker(
                                 }
                                 read_delayed_enqueue(
                                     rreq,
-                                    (1000 as uint32_t).wrapping_add(
-                                        if trycnt < 30 as uint32_t {
-                                            trycnt
-                                                .wrapping_sub(1 as uint32_t)
-                                                .wrapping_mul(300000 as uint32_t)
-                                        } else {
-                                            10000000 as uint32_t
-                                        },
-                                    ),
+                                    (1000 as uint32_t).wrapping_add(if trycnt < 30 as uint32_t {
+                                        trycnt
+                                            .wrapping_sub(1 as uint32_t)
+                                            .wrapping_mul(300000 as uint32_t)
+                                    } else {
+                                        10000000 as uint32_t
+                                    }),
                                 );
                             }
                         }

@@ -12,9 +12,6 @@ MODS="charts clocks conncache cpuusage crc delayrun labelparser lwthread md5 mem
 # 1. shared crate skeleton
 mkdir -p mfscommon/src
 cat > mfscommon/Cargo.toml <<'EOF'
-[workspace]
-members = [
-]
 [package]
 name = "mfscommon"
 version = "0.0.0"
@@ -29,12 +26,7 @@ crate-type = ["rlib"]
 [dependencies]
 c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
 libc = "0.2"
-
-[profile.release]
-lto = true
-codegen-units = 1
 EOF
-cp mfsmaster/rust-toolchain.toml mfscommon/ 2>/dev/null || true
 
 {
 cat <<'EOF'

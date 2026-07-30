@@ -86,27 +86,27 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'vendor/**/Cargo.lock') }}
           restore-keys: |
             cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build all daemons
+      - name: Build workspace
         env:
           RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
-        run: ./build-all.sh
+        run: cargo build --release --workspace --locked
 
       - name: Smoke-test executables
         shell: bash
         run: |
           set -euo pipefail
-          dist/mfsmaster -v
-          dist/mfschunkserver -v
-          dist/mfsmetalogger -v
-          dist/mfsgui -v
-          dist/mfsmount --version
-          dist/mfsbdev --help >/dev/null || true
-          file dist/mfsmaster dist/mfsmount
-          readelf --version-info dist/mfsmaster \
+          target/release/mfsmaster -v
+          target/release/mfschunkserver -v
+          target/release/mfsmetalogger -v
+          target/release/mfsgui -v
+          target/release/mfsmount --version
+          target/release/mfsbdev --help >/dev/null || true
+          file target/release/mfsmaster target/release/mfsmount
+          readelf --version-info target/release/mfsmaster \
             | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -3
 
       - name: Cluster smoke test (master+chunkserver+metalogger+FUSE mount)
@@ -121,7 +121,7 @@ jobs:
           # Preserve crash artifacts before cleanup. The mfsmount binary is
           # bundled so the core can be symbolized against the exact build.
           mkdir -p target/smoke-artifacts
-          sudo sh -c 'cp -f dist/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null'
+          sudo sh -c 'cp -f target/release/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null'
           sudo chown -R "$(id -u):$(id -g)" target/smoke-artifacts
           sudo rm -rf target/smoke core*   # drop root-owned artifacts so later cache hashFiles works
           exit $rc
@@ -140,13 +140,13 @@ jobs:
         with:
           name: mfs-dist-x86_64-unknown-linux-gnu
           path: |
-            dist/mfsmaster
-            dist/mfschunkserver
-            dist/mfsmetalogger
-            dist/mfsgui
-            dist/mfsmount
-            dist/mfsbdev
-            dist/mfsnetdump
+            target/release/mfsmaster
+            target/release/mfschunkserver
+            target/release/mfsmetalogger
+            target/release/mfsgui
+            target/release/mfsmount
+            target/release/mfsbdev
+            target/release/mfsnetdump
           if-no-files-found: error
           retention-days: 90
           compression-level: 9
