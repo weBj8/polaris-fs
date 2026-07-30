@@ -264,16 +264,17 @@ pub unsafe extern "C" fn queue_put(
     // transferred per C contract.
     let q = unsafe { &*(que as *const Queue) };
     let e = QEntry { id, op, data, leng };
+    // C frees only the qentry wrapper on error — the DATA stays owned by
+    // the caller (shutdown cleanup paths may still hold it → freeing here
+    // would double-free). My Queue has no wrapper, so: no free at all.
     match q.put(e) {
         Ok(()) => 0,
         Err(PutError::TooLarge) => unsafe {
             set_errno(EDEADLK);
-            free(data as *mut ::core::ffi::c_void);
             -1
         },
         Err(PutError::Closed) => unsafe {
             set_errno(EIO);
-            free(data as *mut ::core::ffi::c_void);
             -1
         },
         Err(PutError::Busy) => unreachable!(),
