@@ -16,12 +16,19 @@ const MFSLOG_ERR: ::core::ffi::c_int = 4;
 const MFSLOG_SYSLOG: ::core::ffi::c_int = 0;
 
 unsafe extern "C" {
-    fn mfs_log(mode: ::core::ffi::c_int, priority: ::core::ffi::c_int, fmt: *const ::core::ffi::c_char, ...);
+    fn mfs_log(
+        mode: ::core::ffi::c_int,
+        priority: ::core::ffi::c_int,
+        fmt: *const ::core::ffi::c_char,
+        ...
+    );
     // own decl: libc's takes a *safe* fn pointer; C callers hand us unsafe fns
     fn pthread_create(
         newthread: *mut pthread_t,
         attr: *const libc::pthread_attr_t,
-        start_routine: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
+        start_routine: Option<
+            unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
+        >,
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
 }
@@ -57,9 +64,19 @@ pub unsafe extern "C" fn lwt_thread_create(
     unsafe {
         libc::sigemptyset(&mut newset);
         for sig in [
-            libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT, libc::SIGPIPE,
-            libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU, libc::SIGUSR1, libc::SIGUSR2,
-            libc::SIGALRM, libc::SIGVTALRM, libc::SIGPROF,
+            libc::SIGTERM,
+            libc::SIGINT,
+            libc::SIGHUP,
+            libc::SIGQUIT,
+            libc::SIGPIPE,
+            libc::SIGTSTP,
+            libc::SIGTTIN,
+            libc::SIGTTOU,
+            libc::SIGUSR1,
+            libc::SIGUSR2,
+            libc::SIGALRM,
+            libc::SIGVTALRM,
+            libc::SIGPROF,
         ] {
             libc::sigaddset(&mut newset, sig);
         }

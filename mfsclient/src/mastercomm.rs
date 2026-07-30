@@ -1883,12 +1883,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
             if fd == -1 as ::core::ffi::c_int {
                 pthread_mutex_unlock(&raw mut fdlock);
                 usecto = (1000 as uint32_t).wrapping_add(
-                    (if cnt < 30 as uint32_t {
+                    if cnt < 30 as uint32_t {
                         cnt.wrapping_sub(1 as uint32_t)
                             .wrapping_mul(300000 as uint32_t)
                     } else {
                         10000000 as uint32_t
-                    }),
+                    },
                 ) as uint64_t;
                 if usectimeout > 0 as uint64_t {
                     period = monotonic_useconds().wrapping_sub(start);
@@ -1924,12 +1924,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                     pthread_mutex_unlock(&raw mut (*rec).mutex);
                     pthread_mutex_unlock(&raw mut fdlock);
                     usecto = (1000 as uint32_t).wrapping_add(
-                        (if cnt < 30 as uint32_t {
+                        if cnt < 30 as uint32_t {
                             cnt.wrapping_sub(1 as uint32_t)
                                 .wrapping_mul(300000 as uint32_t)
                         } else {
                             10000000 as uint32_t
-                        }),
+                        },
                     ) as uint64_t;
                     if usectimeout > 0 as uint64_t {
                         period = monotonic_useconds().wrapping_sub(start);
@@ -1996,12 +1996,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
                         pthread_mutex_unlock(&raw mut (*rec).mutex);
                         usecto = (1000 as uint32_t).wrapping_add(
-                            (if cnt < 30 as uint32_t {
+                            if cnt < 30 as uint32_t {
                                 cnt.wrapping_sub(1 as uint32_t)
                                     .wrapping_mul(300000 as uint32_t)
                             } else {
                                 10000000 as uint32_t
-                            }),
+                            },
                         ) as uint64_t;
                         if usectimeout > 0 as uint64_t {
                             period = monotonic_useconds().wrapping_sub(start);
@@ -2025,12 +2025,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                             pthread_mutex_unlock(&raw mut (*rec).mutex);
                             fs_disconnect();
                             usecto = (1000 as uint32_t).wrapping_add(
-                                (if cnt < 30 as uint32_t {
+                                if cnt < 30 as uint32_t {
                                     cnt.wrapping_sub(1 as uint32_t)
                                         .wrapping_mul(300000 as uint32_t)
                                 } else {
                                     10000000 as uint32_t
-                                }),
+                                },
                             ) as uint64_t;
                             if usectimeout > 0 as uint64_t {
                                 period = monotonic_useconds().wrapping_sub(start);
@@ -2079,12 +2079,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
             if fd == -1 as ::core::ffi::c_int {
                 pthread_mutex_unlock(&raw mut fdlock);
                 usecto = (1000 as uint32_t).wrapping_add(
-                    (if cnt < 30 as uint32_t {
+                    if cnt < 30 as uint32_t {
                         cnt.wrapping_sub(1 as uint32_t)
                             .wrapping_mul(300000 as uint32_t)
                     } else {
                         10000000 as uint32_t
-                    }),
+                    },
                 ) as uint64_t;
                 if usectimeout > 0 as uint64_t {
                     period = monotonic_useconds().wrapping_sub(start);
@@ -2120,12 +2120,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                     pthread_mutex_unlock(&raw mut (*rec).mutex);
                     pthread_mutex_unlock(&raw mut fdlock);
                     usecto = (1000 as uint32_t).wrapping_add(
-                        (if cnt < 30 as uint32_t {
+                        if cnt < 30 as uint32_t {
                             cnt.wrapping_sub(1 as uint32_t)
                                 .wrapping_mul(300000 as uint32_t)
                         } else {
                             10000000 as uint32_t
-                        }),
+                        },
                     ) as uint64_t;
                     if usectimeout > 0 as uint64_t {
                         period = monotonic_useconds().wrapping_sub(start);
@@ -2192,12 +2192,12 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
                         pthread_mutex_unlock(&raw mut (*rec).mutex);
                         usecto = (1000 as uint32_t).wrapping_add(
-                            (if cnt < 30 as uint32_t {
+                            if cnt < 30 as uint32_t {
                                 cnt.wrapping_sub(1 as uint32_t)
                                     .wrapping_mul(300000 as uint32_t)
                             } else {
                                 10000000 as uint32_t
-                            }),
+                            },
                         ) as uint64_t;
                         if usectimeout > 0 as uint64_t {
                             period = monotonic_useconds().wrapping_sub(start);
@@ -2296,15 +2296,11 @@ pub unsafe extern "C" fn fs_resolve(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_get_current_srcstrip() -> *const ::core::ffi::c_char {
-    unsafe {
-        return &raw mut srcstrip as *mut ::core::ffi::c_char;
-    }
+    return &raw mut srcstrip as *mut ::core::ffi::c_char;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_get_current_masterstrip() -> *const ::core::ffi::c_char {
-    unsafe {
-        return &raw mut masterstrip as *mut ::core::ffi::c_char;
-    }
+    return &raw mut masterstrip as *mut ::core::ffi::c_char;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_get_current_masterport() -> uint16_t {
@@ -4377,7 +4373,7 @@ pub unsafe extern "C" fn fs_send_working_flags() {
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_nop_thread(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
@@ -4498,7 +4494,7 @@ pub unsafe extern "C" fn fs_nop_thread(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_receive_thread(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
@@ -8171,21 +8167,19 @@ pub unsafe extern "C" fn fs_symlink(
 }
 #[inline]
 unsafe extern "C" fn fsnodes_type_back_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            TYPE_FILE => return DISP_TYPE_FILE as uint8_t,
-            TYPE_DIRECTORY => return DISP_TYPE_DIRECTORY as uint8_t,
-            TYPE_SYMLINK => return DISP_TYPE_SYMLINK as uint8_t,
-            TYPE_FIFO => return DISP_TYPE_FIFO as uint8_t,
-            TYPE_BLOCKDEV => return DISP_TYPE_BLOCKDEV as uint8_t,
-            TYPE_CHARDEV => return DISP_TYPE_CHARDEV as uint8_t,
-            TYPE_SOCKET => return DISP_TYPE_SOCKET as uint8_t,
-            TYPE_TRASH => return DISP_TYPE_TRASH as uint8_t,
-            TYPE_SUSTAINED => return DISP_TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return r#type;
+    match r#type as ::core::ffi::c_int {
+        TYPE_FILE => return DISP_TYPE_FILE as uint8_t,
+        TYPE_DIRECTORY => return DISP_TYPE_DIRECTORY as uint8_t,
+        TYPE_SYMLINK => return DISP_TYPE_SYMLINK as uint8_t,
+        TYPE_FIFO => return DISP_TYPE_FIFO as uint8_t,
+        TYPE_BLOCKDEV => return DISP_TYPE_BLOCKDEV as uint8_t,
+        TYPE_CHARDEV => return DISP_TYPE_CHARDEV as uint8_t,
+        TYPE_SOCKET => return DISP_TYPE_SOCKET as uint8_t,
+        TYPE_TRASH => return DISP_TYPE_TRASH as uint8_t,
+        TYPE_SUSTAINED => return DISP_TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return r#type;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_mknod(

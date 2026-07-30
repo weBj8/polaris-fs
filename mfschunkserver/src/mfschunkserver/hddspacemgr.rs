@@ -19898,7 +19898,7 @@ unsafe extern "C" fn hdd_sequential_mode_int(mut c: *mut chunk) {
         );
     }
 }
-unsafe extern "C" fn hdd_drop_caches_int(mut c: *mut chunk) {}
+unsafe extern "C" fn hdd_drop_caches_int(_c: *mut chunk) {}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hdd_precache_data(
     mut chunkid: uint64_t,
@@ -28612,7 +28612,7 @@ unsafe extern "C" fn hdd_rebalance_find_servers(
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hdd_move_finished(mut status: uint8_t, mut arg: *mut ::core::ffi::c_void) {
+pub unsafe extern "C" fn hdd_move_finished(_status: uint8_t, mut arg: *mut ::core::ffi::c_void) {
     unsafe {
         let mut r: *mut rebalance = arg as *mut rebalance;
         let mut monotonic_time: ::core::ffi::c_double = 0.;
@@ -43887,154 +43887,141 @@ pub unsafe extern "C" fn hdd_wantexit() {
     }
 }
 unsafe extern "C" fn hdd_info_scanstate_name(mut scanstate: uint8_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match scanstate as ::core::ffi::c_int {
-            SCST_WORKING => {
-                return b"WORKING\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_SCANNEEDED => {
-                return b"SCAN_NEEDED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_ATTRNEEDED => {
-                return b"ATTR_NEEDED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_SCANJOBINPROGRESS => {
-                return b"SCANJOB_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_ATTRJOBINPROGRESS => {
-                return b"ATTRJOB_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_BGJOBTERMINATE => {
-                return b"BGJOB_TERMINATE\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            SCST_BGJOBFINISHED => {
-                return b"BGJOB_FINISHED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match scanstate as ::core::ffi::c_int {
+        SCST_WORKING => {
+            return b"WORKING\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        SCST_SCANNEEDED => {
+            return b"SCAN_NEEDED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        SCST_ATTRNEEDED => {
+            return b"ATTR_NEEDED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        SCST_SCANJOBINPROGRESS => {
+            return b"SCANJOB_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        SCST_ATTRJOBINPROGRESS => {
+            return b"ATTRJOB_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        SCST_BGJOBTERMINATE => {
+            return b"BGJOB_TERMINATE\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        SCST_BGJOBFINISHED => {
+            return b"BGJOB_FINISHED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+    };
 }
 unsafe extern "C" fn hdd_info_removestate_name(
     mut removestate: uint8_t,
 ) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match removestate as ::core::ffi::c_int {
-            REMOVING_NO => {
-                return b"DO_NOT_REMOVE\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            REMOVING_INPROGRESS => {
-                return b"REMOVING_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            REMOVING_START => {
-                return b"REMOVING_STARTED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            REMOVING_END => {
-                return b"REMOVING_ENDED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match removestate as ::core::ffi::c_int {
+        REMOVING_NO => {
+            return b"DO_NOT_REMOVE\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        REMOVING_INPROGRESS => {
+            return b"REMOVING_IN_PROGRESS\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        REMOVING_START => {
+            return b"REMOVING_STARTED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        REMOVING_END => {
+            return b"REMOVING_ENDED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+    };
 }
 unsafe extern "C" fn hdd_info_markforremoval_name(mut mfr: uint8_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match mfr as ::core::ffi::c_int {
-            MFR_NO => {
-                return b"NO\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            MFR_YES => {
-                return b"YES\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            MFR_READONLY => {
-                return b"READ-ONLY\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match mfr as ::core::ffi::c_int {
+        MFR_NO => {
+            return b"NO\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        MFR_YES => {
+            return b"YES\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        MFR_READONLY => {
+            return b"READ-ONLY\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+    };
 }
 unsafe extern "C" fn hdd_info_balancemode_name(mut mfr: uint8_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match mfr as ::core::ffi::c_int {
-            REBALANCE_STD => {
-                return b"STD\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            REBALANCE_FORCE_SRC => {
-                return b"SRC\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            REBALANCE_FORCE_DST => {
-                return b"DST\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match mfr as ::core::ffi::c_int {
+        REBALANCE_STD => {
+            return b"STD\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        REBALANCE_FORCE_SRC => {
+            return b"SRC\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        REBALANCE_FORCE_DST => {
+            return b"DST\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+    };
 }
 unsafe extern "C" fn hdd_info_limit_mode_name(mut lmode: uint8_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match lmode as ::core::ffi::c_int {
-            LMODE_NONE => {
-                return b"NONE\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_LIMIT_TOTAL_POS_CONST => {
-                return b"LIMIT_TOTAL_POS_CONST\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_LIMIT_TOTAL_POS_PERCENT => {
-                return b"LIMIT_TOTAL_POS_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_LIMIT_TOTAL_NEG_CONST => {
-                return b"LIMIT_TOTAL_NEG_CONST\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_LIMIT_TOTAL_NEG_PERCENT => {
-                return b"LIMIT_TOTAL_NEG_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_SHARED => {
-                return b"SHARED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_SHARED_POS_CONST => {
-                return b"SHARED_POS_CONST\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_SHARED_POS_PERCENT => {
-                return b"SHARED_POS_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_SHARED_NEG_CONST => {
-                return b"SHARED_NEG_CONST\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            LMODE_SHARED_NEG_PERCENT => {
-                return b"SHARED_NEG_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match lmode as ::core::ffi::c_int {
+        LMODE_NONE => {
+            return b"NONE\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        LMODE_LIMIT_TOTAL_POS_CONST => {
+            return b"LIMIT_TOTAL_POS_CONST\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_LIMIT_TOTAL_POS_PERCENT => {
+            return b"LIMIT_TOTAL_POS_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_LIMIT_TOTAL_NEG_CONST => {
+            return b"LIMIT_TOTAL_NEG_CONST\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_LIMIT_TOTAL_NEG_PERCENT => {
+            return b"LIMIT_TOTAL_NEG_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_SHARED => {
+            return b"SHARED\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        LMODE_SHARED_POS_CONST => {
+            return b"SHARED_POS_CONST\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_SHARED_POS_PERCENT => {
+            return b"SHARED_POS_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_SHARED_NEG_CONST => {
+            return b"SHARED_NEG_CONST\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        LMODE_SHARED_NEG_PERCENT => {
+            return b"SHARED_NEG_PERCENT\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"???\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+    };
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hdd_info(mut fd: *mut FILE) {

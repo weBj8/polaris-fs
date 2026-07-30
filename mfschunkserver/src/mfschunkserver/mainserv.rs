@@ -823,7 +823,7 @@ unsafe extern "C" fn mainserv_sock_nop_remove(mut sn: *mut sock_nops) {
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mainserv_sock_nop_sender(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut monotonic_utime: uint64_t = 0;

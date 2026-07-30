@@ -163,20 +163,16 @@ static mut lock: pthread_mutex_t = pthread_mutex_t {
 };
 #[inline]
 unsafe extern "C" fn chunks_inode_hash_fn(mut inode: uint32_t) -> uint32_t {
-    unsafe {
-        return inode.wrapping_mul(0x72b5f387 as uint32_t)
-            & (CHUNKS_INODE_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
-    }
+    return inode.wrapping_mul(0x72b5f387 as uint32_t)
+        & (CHUNKS_INODE_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
 }
 #[inline]
 unsafe extern "C" fn chunks_data_hash_fn(mut inode: uint32_t, mut chindx: uint32_t) -> uint32_t {
-    unsafe {
-        return inode
-            .wrapping_mul(0x72b5f387 as uint32_t)
-            .wrapping_add(chindx)
-            .wrapping_mul(0x56bf7623 as uint32_t)
-            & (CHUNKS_DATA_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
-    }
+    return inode
+        .wrapping_mul(0x72b5f387 as uint32_t)
+        .wrapping_add(chindx)
+        .wrapping_mul(0x56bf7623 as uint32_t)
+        & (CHUNKS_DATA_HASH_SIZE - 1 as ::core::ffi::c_int) as uint32_t;
 }
 #[inline]
 unsafe extern "C" fn chunks_try_remove_inode(mut ih: *mut chunks_inode_entry) {

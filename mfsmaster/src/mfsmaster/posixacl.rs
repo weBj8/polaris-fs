@@ -220,11 +220,9 @@ unsafe extern "C" fn posix_acl_xxx_cmp(
 }
 #[inline]
 unsafe extern "C" fn posix_acl_xxx_hash(mut inode: uint32_t, mut acltype: uint8_t) -> uint32_t {
-    unsafe {
-        return inode
-            .wrapping_mul(0x56bf7623 as uint32_t)
-            .wrapping_add(acltype as uint32_t);
-    }
+    return inode
+        .wrapping_mul(0x56bf7623 as uint32_t)
+        .wrapping_add(acltype as uint32_t);
 }
 #[inline]
 unsafe extern "C" fn posix_acl_xxx_ehash(mut e: *mut acl_node) -> uint32_t {
@@ -250,20 +248,18 @@ static mut paclhashsize: uint32_t = 0;
 static mut paclhashelem: uint32_t = 0;
 #[inline]
 unsafe extern "C" fn posix_acl_xxx_calc_hash_size(mut elements: uint32_t) -> uint32_t {
-    unsafe {
-        let mut res: uint32_t = 1 as uint32_t;
-        while elements != 0 {
-            elements >>= 1 as ::core::ffi::c_int;
-            res <<= 1 as ::core::ffi::c_int;
-        }
-        if res == 0 as uint32_t {
-            res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
-        }
-        if res < HASHTAB_LOSIZE as uint32_t {
-            return HASHTAB_LOSIZE as uint32_t;
-        }
-        return res;
+    let mut res: uint32_t = 1 as uint32_t;
+    while elements != 0 {
+        elements >>= 1 as ::core::ffi::c_int;
+        res <<= 1 as ::core::ffi::c_int;
     }
+    if res == 0 as uint32_t {
+        res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
+    }
+    if res < HASHTAB_LOSIZE as uint32_t {
+        return HASHTAB_LOSIZE as uint32_t;
+    }
+    return res;
 }
 #[inline]
 unsafe extern "C" fn posix_acl_xxx_hash_init() {

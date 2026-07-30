@@ -32,18 +32,34 @@ pub const LOGBUFFSIZE: usize = 2048;
 pub const MSGBUFFSIZE: usize = 4096;
 pub const BT_BUF_SIZE: ::core::ffi::c_int = 100;
 
+// charts.rs declares fprintf with its own _IO_FILE; both are correct opaque
+// FILE* ABIs — the mismatch is the c2rust standalone-module artifact, benign.
+#[allow(clashing_extern_declarations)]
 unsafe extern "C" {
     fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
     // libc crate doesn't expose these (variadic / statics)
     static mut stderr: *mut FILE;
-    fn vfprintf(s: *mut FILE, format: *const ::core::ffi::c_char, arg: ::core::ffi::VaList) -> ::core::ffi::c_int;
-    fn vsnprintf(s: *mut ::core::ffi::c_char, n: size_t, format: *const ::core::ffi::c_char, arg: ::core::ffi::VaList) -> ::core::ffi::c_int;
+    fn vfprintf(
+        s: *mut FILE,
+        format: *const ::core::ffi::c_char,
+        arg: ::core::ffi::VaList,
+    ) -> ::core::ffi::c_int;
+    fn vsnprintf(
+        s: *mut ::core::ffi::c_char,
+        n: size_t,
+        format: *const ::core::ffi::c_char,
+        arg: ::core::ffi::VaList,
+    ) -> ::core::ffi::c_int;
     fn fprintf(s: *mut FILE, format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn snprintf(s: *mut ::core::ffi::c_char, n: size_t, format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
+    fn snprintf(
+        s: *mut ::core::ffi::c_char,
+        n: size_t,
+        format: *const ::core::ffi::c_char,
+        ...
+    ) -> ::core::ffi::c_int;
 }
 
-static MFS_LOG_SINK: AtomicPtr<::core::ffi::c_void> =
-    AtomicPtr::new(std::ptr::null_mut());
+static MFS_LOG_SINK: AtomicPtr<::core::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static FORCE_STDERR: AtomicI32 = AtomicI32::new(0);
 static USE_COLORS: AtomicI32 = AtomicI32::new(1);
 static STDERR_ACTIVE: AtomicI32 = AtomicI32::new(1);
@@ -168,7 +184,12 @@ pub unsafe extern "C" fn mfs_file_log(
     let mut lfd = LFD.load(Ordering::Relaxed);
     if lfd.is_null() {
         // SAFETY: extern; literals are valid C strings.
-        lfd = unsafe { libc::fopen(b"mfsdebug.txt\0".as_ptr() as *const _, b"a\0".as_ptr() as *const _) };
+        lfd = unsafe {
+            libc::fopen(
+                b"mfsdebug.txt\0".as_ptr() as *const _,
+                b"a\0".as_ptr() as *const _,
+            )
+        };
         if lfd.is_null() {
             return;
         }
@@ -192,7 +213,12 @@ pub unsafe extern "C" fn mfs_file_log(
             for i in 1..n {
                 // SAFETY: extern; btstr valid for n strings; lfd open.
                 unsafe {
-                    libc::fprintf(lfd, b"\t%u: %s\n\0".as_ptr() as *const _, i, *btstr.offset(i as isize))
+                    libc::fprintf(
+                        lfd,
+                        b"\t%u: %s\n\0".as_ptr() as *const _,
+                        i,
+                        *btstr.offset(i as isize),
+                    )
                 };
             }
             // SAFETY: extern; btstr from backtrace_symbols.
@@ -201,7 +227,12 @@ pub unsafe extern "C" fn mfs_file_log(
             for i in 1..n {
                 // SAFETY: extern; lfd open; btbuf entries printable as %p.
                 unsafe {
-                    libc::fprintf(lfd, b"\t%u: [%p]\n\0".as_ptr() as *const _, i, btbuf[i as usize])
+                    libc::fprintf(
+                        lfd,
+                        b"\t%u: [%p]\n\0".as_ptr() as *const _,
+                        i,
+                        btbuf[i as usize],
+                    )
                 };
             }
         }
@@ -252,7 +283,12 @@ pub unsafe extern "C" fn mfs_log(
                 errstr,
             );
         } else {
-            snprintf(msg.as_mut_ptr(), MSGBUFFSIZE, b"%s\0".as_ptr() as *const _, p.as_ptr());
+            snprintf(
+                msg.as_mut_ptr(),
+                MSGBUFFSIZE,
+                b"%s\0".as_ptr() as *const _,
+                p.as_ptr(),
+            );
         }
     }
     msg[MSGBUFFSIZE - 1] = 0;
@@ -340,15 +376,7 @@ pub extern "C" fn mfs_log_detach_syslog() {
 pub unsafe extern "C" fn mfs_log_term() {
     mfs_log_detach_syslog();
     // SAFETY: fmt null → close path, no variadic args.
-    unsafe {
-        mfs_file_log(
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-        )
-    };
+    unsafe { mfs_file_log(std::ptr::null(), 0, std::ptr::null(), 0, std::ptr::null()) };
 }
 
 /// # Safety
@@ -365,7 +393,11 @@ pub unsafe extern "C" fn mfs_log_init(
             libc::openlog(
                 ident,
                 LOG_PID | LOG_NDELAY,
-                if daemonflag != 0 { LOG_DAEMON } else { LOG_USER },
+                if daemonflag != 0 {
+                    LOG_DAEMON
+                } else {
+                    LOG_USER
+                },
             )
         };
         SYSLOG_OPEN.store(1, Ordering::Relaxed);

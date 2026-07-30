@@ -1,4 +1,3 @@
-#![feature(core_intrinsics)]
 #![allow(
     clippy::missing_safety_doc,
     dead_code,
@@ -11,7 +10,7 @@
 pub enum _IO_wide_data {}
 pub enum _IO_codecvt {}
 pub enum _IO_marker {}
-#[macro_use]
+// (macro_use removed)
 extern crate c2rust_bitfields;
 #[allow(unused_imports)]
 use ::mfsbdev;
@@ -929,7 +928,7 @@ pub unsafe extern "C" fn skipall(mut sock: ::core::ffi::c_int, mut leng: uint32_
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_worker_fn(
     mut data: *mut ::core::ffi::c_void,
-    mut workerscnt: uint32_t,
+    _workerscnt: uint32_t,
 ) {
     unsafe {
         let mut r: *mut nbdrequest = data as *mut nbdrequest;
@@ -1502,7 +1501,7 @@ pub unsafe extern "C" fn nbd_controller_thread(
 }
 static mut term: uint8_t = 0;
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn termhandle(mut signo: ::core::ffi::c_int) {
+pub unsafe extern "C" fn termhandle(_signo: ::core::ffi::c_int) {
     unsafe {
         term = 1 as uint8_t;
     }
@@ -1673,21 +1672,19 @@ pub unsafe extern "C" fn make_daemon() {
 }
 #[inline]
 unsafe extern "C" fn charconv(mut c: ::core::ffi::c_char) -> ::core::ffi::c_char {
-    unsafe {
-        if c as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
-            && c as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
-            || c as ::core::ffi::c_int >= 'A' as ::core::ffi::c_int
-                && c as ::core::ffi::c_int <= 'Z' as ::core::ffi::c_int
-            || c as ::core::ffi::c_int >= 'a' as ::core::ffi::c_int
-                && c as ::core::ffi::c_int <= 'z' as ::core::ffi::c_int
-            || c as ::core::ffi::c_int == '.' as ::core::ffi::c_int
-            || c as ::core::ffi::c_int == '-' as ::core::ffi::c_int
-        {
-            return c;
-        } else {
-            return '_' as ::core::ffi::c_char;
-        };
-    }
+    if c as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
+        && c as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
+        || c as ::core::ffi::c_int >= 'A' as ::core::ffi::c_int
+            && c as ::core::ffi::c_int <= 'Z' as ::core::ffi::c_int
+        || c as ::core::ffi::c_int >= 'a' as ::core::ffi::c_int
+            && c as ::core::ffi::c_int <= 'z' as ::core::ffi::c_int
+        || c as ::core::ffi::c_int == '.' as ::core::ffi::c_int
+        || c as ::core::ffi::c_int == '-' as ::core::ffi::c_int
+    {
+        return c;
+    } else {
+        return '_' as ::core::ffi::c_char;
+    };
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn linkname_generate(
@@ -2722,8 +2719,8 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_handle_nop(
     mut sock: ::core::ffi::c_int,
-    mut buff: *const uint8_t,
-    mut leng: uint32_t,
+    _buff: *const uint8_t,
+    _leng: uint32_t,
 ) {
     unsafe {
         let mut ans: [uint8_t; 8] = [0; 8];
@@ -2743,7 +2740,7 @@ pub unsafe extern "C" fn nbd_handle_nop(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_handle_stop_daemon(
     mut sock: ::core::ffi::c_int,
-    mut buff: *const uint8_t,
+    _buff: *const uint8_t,
     mut leng: uint32_t,
 ) {
     unsafe {
@@ -3191,7 +3188,7 @@ pub unsafe extern "C" fn nbd_handle_remove_device(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_handle_list_devices(
     mut sock: ::core::ffi::c_int,
-    mut buff: *const uint8_t,
+    _buff: *const uint8_t,
     mut leng: uint32_t,
 ) {
     unsafe {

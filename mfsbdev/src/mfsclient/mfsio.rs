@@ -719,96 +719,94 @@ pub const XATTR_CREATE: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const XATTR_REPLACE: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const ENOATTR: ::core::ffi::c_int = ENODATA;
 unsafe extern "C" fn mfs_errorconv(mut status: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut ret: ::core::ffi::c_int = 0;
-        match status {
-            MFS_STATUS_OK => {
-                ret = 0 as ::core::ffi::c_int;
-            }
-            MFS_ERROR_EPERM => {
-                ret = EPERM;
-            }
-            MFS_ERROR_ENOTDIR => {
-                ret = ENOTDIR;
-            }
-            MFS_ERROR_ENOENT => {
-                ret = ENOENT;
-            }
-            MFS_ERROR_EACCES => {
-                ret = EACCES;
-            }
-            MFS_ERROR_EEXIST => {
-                ret = EEXIST;
-            }
-            MFS_ERROR_EINVAL => {
-                ret = EINVAL;
-            }
-            MFS_ERROR_ENOTEMPTY => {
-                ret = ENOTEMPTY;
-            }
-            MFS_ERROR_IO => {
-                ret = EIO;
-            }
-            MFS_ERROR_EROFS => {
-                ret = EROFS;
-            }
-            MFS_ERROR_EINTR => {
-                ret = EINTR;
-            }
-            MFS_ERROR_EAGAIN => {
-                ret = EAGAIN;
-            }
-            MFS_ERROR_ECANCELED => {
-                ret = ECANCELED;
-            }
-            MFS_ERROR_QUOTA => {
-                ret = EDQUOT;
-            }
-            MFS_ERROR_ENOATTR => {
-                ret = ENOATTR;
-            }
-            MFS_ERROR_ENOTSUP => {
-                ret = ENOTSUP;
-            }
-            MFS_ERROR_ERANGE => {
-                ret = ERANGE;
-            }
-            MFS_ERROR_NOSPACE => {
-                ret = ENOSPC;
-            }
-            MFS_ERROR_CHUNKLOST => {
-                ret = ENXIO;
-            }
-            MFS_ERROR_NOCHUNKSERVERS => {
-                ret = ENOSPC;
-            }
-            MFS_ERROR_CSNOTPRESENT => {
-                ret = ENXIO;
-            }
-            MFS_ERROR_NOTOPENED => {
-                ret = EBADF;
-            }
-            MFS_ERROR_ENAMETOOLONG => {
-                ret = ENAMETOOLONG;
-            }
-            MFS_ERROR_EMLINK => {
-                ret = EMLINK;
-            }
-            MFS_ERROR_EBADF => {
-                ret = EBADF;
-            }
-            MFS_ERROR_EFBIG => {
-                ret = EFBIG;
-            }
-            MFS_ERROR_EISDIR => {
-                ret = EISDIR;
-            }
-            _ => {
-                ret = EINVAL;
-            }
+    let mut ret: ::core::ffi::c_int = 0;
+    match status {
+        MFS_STATUS_OK => {
+            ret = 0 as ::core::ffi::c_int;
         }
-        return ret;
+        MFS_ERROR_EPERM => {
+            ret = EPERM;
+        }
+        MFS_ERROR_ENOTDIR => {
+            ret = ENOTDIR;
+        }
+        MFS_ERROR_ENOENT => {
+            ret = ENOENT;
+        }
+        MFS_ERROR_EACCES => {
+            ret = EACCES;
+        }
+        MFS_ERROR_EEXIST => {
+            ret = EEXIST;
+        }
+        MFS_ERROR_EINVAL => {
+            ret = EINVAL;
+        }
+        MFS_ERROR_ENOTEMPTY => {
+            ret = ENOTEMPTY;
+        }
+        MFS_ERROR_IO => {
+            ret = EIO;
+        }
+        MFS_ERROR_EROFS => {
+            ret = EROFS;
+        }
+        MFS_ERROR_EINTR => {
+            ret = EINTR;
+        }
+        MFS_ERROR_EAGAIN => {
+            ret = EAGAIN;
+        }
+        MFS_ERROR_ECANCELED => {
+            ret = ECANCELED;
+        }
+        MFS_ERROR_QUOTA => {
+            ret = EDQUOT;
+        }
+        MFS_ERROR_ENOATTR => {
+            ret = ENOATTR;
+        }
+        MFS_ERROR_ENOTSUP => {
+            ret = ENOTSUP;
+        }
+        MFS_ERROR_ERANGE => {
+            ret = ERANGE;
+        }
+        MFS_ERROR_NOSPACE => {
+            ret = ENOSPC;
+        }
+        MFS_ERROR_CHUNKLOST => {
+            ret = ENXIO;
+        }
+        MFS_ERROR_NOCHUNKSERVERS => {
+            ret = ENOSPC;
+        }
+        MFS_ERROR_CSNOTPRESENT => {
+            ret = ENXIO;
+        }
+        MFS_ERROR_NOTOPENED => {
+            ret = EBADF;
+        }
+        MFS_ERROR_ENAMETOOLONG => {
+            ret = ENAMETOOLONG;
+        }
+        MFS_ERROR_EMLINK => {
+            ret = EMLINK;
+        }
+        MFS_ERROR_EBADF => {
+            ret = EBADF;
+        }
+        MFS_ERROR_EFBIG => {
+            ret = EFBIG;
+        }
+        MFS_ERROR_EISDIR => {
+            ret = EISDIR;
+        }
+        _ => {
+            ret = EINVAL;
+        }
     }
+    return ret;
 }
 pub const PKGVERSION: ::core::ffi::c_int = VERSMAJ * 1000000 as ::core::ffi::c_int
     + VERSMID * 10000 as ::core::ffi::c_int
@@ -1426,7 +1424,7 @@ pub unsafe extern "C" fn mfs_lseek(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_statvfs(
-    mut path: *const ::core::ffi::c_char,
+    _path: *const ::core::ffi::c_char,
     mut buf: *mut statvfs,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -1460,7 +1458,7 @@ pub unsafe extern "C" fn mfs_statvfs(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_fstatvfs(
-    mut fildes: ::core::ffi::c_int,
+    _fildes: ::core::ffi::c_int,
     mut buf: *mut statvfs,
 ) -> ::core::ffi::c_int {
     unsafe {

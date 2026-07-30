@@ -8818,21 +8818,19 @@ unsafe extern "C" fn mfs_fix_amtime(
 }
 #[inline]
 unsafe extern "C" fn fsnodes_type_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-            DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-            DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-            DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-            DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-            DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-            DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-            DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-            DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return 0 as uint8_t;
+    match r#type as ::core::ffi::c_int {
+        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
+        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
+        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
+        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
+        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
+        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
+        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
+        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
+        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return 0 as uint8_t;
 }
 unsafe extern "C" fn mfs_type_to_stat(
     mut inode: uint32_t,
@@ -24520,7 +24518,7 @@ pub unsafe extern "C" fn mfs_setlk(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_getfacl(
-    mut req: fuse_req_t,
+    _req: fuse_req_t,
     mut ino: fuse_ino_t,
     mut aclxattr: uint8_t,
     mut buff: *mut *const uint8_t,
@@ -24625,7 +24623,7 @@ pub unsafe extern "C" fn mfs_getfacl(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_setfacl(
-    mut req: fuse_req_t,
+    _req: fuse_req_t,
     mut ino: fuse_ino_t,
     mut uid: uint32_t,
     mut aclxattr: uint8_t,
@@ -24792,7 +24790,7 @@ pub unsafe extern "C" fn mfs_setxattr(
     mut flags: ::core::ffi::c_int,
 ) {
     unsafe {
-        let mut position: uint32_t = 0 as uint32_t;
+        let _position: uint32_t = 0 as uint32_t;
         let mut nleng: uint32_t = 0;
         let mut status: ::core::ffi::c_int = 0;
         let mut mode: uint8_t = 0;
@@ -25022,7 +25020,7 @@ pub unsafe extern "C" fn mfs_getxattr(
     mut size: size_t,
 ) {
     unsafe {
-        let mut position: uint32_t = 0 as uint32_t;
+        let _position: uint32_t = 0 as uint32_t;
         let mut nleng: uint32_t = 0;
         let mut attr: [uint8_t; 36] = [0; 36];
         let mut status: ::core::ffi::c_int = 0;

@@ -191,9 +191,7 @@ static mut clthread: pthread_t = 0;
 static mut term: uint8_t = 0;
 #[inline]
 unsafe extern "C" fn sparents_hashfn(mut inode: uint32_t) -> uint32_t {
-    unsafe {
-        return inode.wrapping_rem(HASH_SIZE as uint32_t);
-    }
+    return inode.wrapping_rem(HASH_SIZE as uint32_t);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sparents_add(
@@ -984,7 +982,7 @@ unsafe extern "C" fn sparents_cleanup(mut hash: uint32_t, mut current_time: uint
     }
 }
 unsafe extern "C" fn sparents_cleanupthread(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut cuhashpos: uint32_t = 0;

@@ -2283,57 +2283,52 @@ pub unsafe extern "C" fn matocsserv_replication_disconnected(mut srv: *mut ::cor
     }
 }
 unsafe extern "C" fn matocsserv_ecid_to_str(mut ecid: uint8_t) -> *const ::core::ffi::c_char {
-    unsafe {
-        let mut ecid8names: [*const ::core::ffi::c_char; 17] = [
-            b" (DE0)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE1)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE2)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE3)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE4)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE5)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE6)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DE7)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE0)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE1)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE2)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE3)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE4)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE5)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE6)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE7)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CE8)\0".as_ptr() as *const ::core::ffi::c_char,
-        ];
-        let mut ecid4names: [*const ::core::ffi::c_char; 13] = [
-            b" (DF0)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DF1)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DF2)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (DF3)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF0)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF1)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF2)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF3)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF4)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF5)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF6)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF7)\0".as_ptr() as *const ::core::ffi::c_char,
-            b" (CF8)\0".as_ptr() as *const ::core::ffi::c_char,
-        ];
-        if ecid as ::core::ffi::c_int & 0x20 as ::core::ffi::c_int != 0 {
-            if (ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) < 17 as ::core::ffi::c_int
-            {
-                return ecid8names
-                    [(ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) as usize];
-            }
-        } else if ecid as ::core::ffi::c_int & 0x10 as ::core::ffi::c_int != 0 {
-            if (ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) < 13 as ::core::ffi::c_int {
-                return ecid4names
-                    [(ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) as usize];
-            }
-        } else if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            return b" (COPY)\0".as_ptr() as *const ::core::ffi::c_char;
+    let mut ecid8names: [*const ::core::ffi::c_char; 17] = [
+        b" (DE0)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE1)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE2)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE3)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE4)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE5)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE6)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DE7)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE0)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE1)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE2)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE3)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE4)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE5)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE6)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE7)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CE8)\0".as_ptr() as *const ::core::ffi::c_char,
+    ];
+    let mut ecid4names: [*const ::core::ffi::c_char; 13] = [
+        b" (DF0)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DF1)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DF2)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (DF3)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF0)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF1)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF2)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF3)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF4)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF5)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF6)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF7)\0".as_ptr() as *const ::core::ffi::c_char,
+        b" (CF8)\0".as_ptr() as *const ::core::ffi::c_char,
+    ];
+    if ecid as ::core::ffi::c_int & 0x20 as ::core::ffi::c_int != 0 {
+        if (ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) < 17 as ::core::ffi::c_int {
+            return ecid8names[(ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) as usize];
         }
-        return b" (???)\0".as_ptr() as *const ::core::ffi::c_char;
+    } else if ecid as ::core::ffi::c_int & 0x10 as ::core::ffi::c_int != 0 {
+        if (ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) < 13 as ::core::ffi::c_int {
+            return ecid4names[(ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) as usize];
+        }
+    } else if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        return b" (COPY)\0".as_ptr() as *const ::core::ffi::c_char;
     }
+    return b" (???)\0".as_ptr() as *const ::core::ffi::c_char;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matocsserv_check_password(
@@ -3966,7 +3961,7 @@ pub unsafe extern "C" fn matocsserv_getservdata(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matocsserv_can_split_chunks(
     mut e: *mut ::core::ffi::c_void,
-    mut ecmode: uint8_t,
+    _ecmode: uint8_t,
 ) -> ::core::ffi::c_int {
     unsafe {
         let mut eptr: *mut matocsserventry = e as *mut matocsserventry;
@@ -7250,7 +7245,7 @@ pub unsafe extern "C" fn matocsserv_chunks_new(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matocsserv_error_occurred(
     mut eptr: *mut matocsserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {

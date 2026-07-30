@@ -882,20 +882,14 @@ unsafe extern "C" fn mfscgiserv_loaddata(mut r: *mut requests) -> ::core::ffi::c
 }
 #[inline]
 unsafe extern "C" fn mfscgiserv_isspace(mut c: ::core::ffi::c_char) -> ::core::ffi::c_int {
-    unsafe {
-        return (c as ::core::ffi::c_int == ' ' as ::core::ffi::c_int
-            || c as ::core::ffi::c_int == '\t' as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-    }
+    return (c as ::core::ffi::c_int == ' ' as ::core::ffi::c_int
+        || c as ::core::ffi::c_int == '\t' as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
 #[inline]
 unsafe extern "C" fn mfscgiserv_isnotspace(mut c: ::core::ffi::c_char) -> ::core::ffi::c_int {
-    unsafe {
-        return (c as ::core::ffi::c_int != 0
-            && c as ::core::ffi::c_int != ' ' as ::core::ffi::c_int
-            && c as ::core::ffi::c_int != '\t' as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-    }
+    return (c as ::core::ffi::c_int != 0
+        && c as ::core::ffi::c_int != ' ' as ::core::ffi::c_int
+        && c as ::core::ffi::c_int != '\t' as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfscgiserv_parse_cfgline(
@@ -2725,7 +2719,7 @@ pub unsafe extern "C" fn mfscgiserv_handle_httpconn(mut newsock: ::core::ffi::c_
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfscgiserv_chldend(mut pid: pid_t, mut status: ::core::ffi::c_int) {
+pub unsafe extern "C" fn mfscgiserv_chldend(mut pid: pid_t, _status: ::core::ffi::c_int) {
     unsafe {
         children_remove(pid);
     }

@@ -19,7 +19,7 @@ type CombineTables = [[[uint32_t; 256]; 4]; 32];
 
 #[deny(unsafe_code)]
 mod imp {
-    use super::{CombineTables, MainTables, CRC_POLY};
+    use super::{CRC_POLY, CombineTables, MainTables};
 
     pub fn generate_main_tables() -> MainTables {
         let mut t = [[0u32; 256]; 16];
@@ -133,8 +133,7 @@ mod imp {
 }
 
 static CRC_TABLE: LazyLock<MainTables> = LazyLock::new(imp::generate_main_tables);
-static CRC_COMBINE_TABLE: LazyLock<CombineTables> =
-    LazyLock::new(imp::generate_combine_tables);
+static CRC_COMBINE_TABLE: LazyLock<CombineTables> = LazyLock::new(imp::generate_combine_tables);
 
 /// # Safety
 /// `data` must be readable for `leng` bytes (C caller contract).
@@ -192,9 +191,8 @@ mod tests {
         assert_eq!(imp::crc_compute(0, b"", &CRC_TABLE), 0);
         assert_eq!(
             imp::crc_compute(0xdeadbeef, b"hello world", &CRC_TABLE),
-            imp::crc_compute(0xdeadbeef, b"hello ", &CRC_TABLE).pipe(|c| {
-                imp::crc_compute(c, b"world", &CRC_TABLE)
-            })
+            imp::crc_compute(0xdeadbeef, b"hello ", &CRC_TABLE)
+                .pipe(|c| { imp::crc_compute(c, b"world", &CRC_TABLE) })
         );
     }
 

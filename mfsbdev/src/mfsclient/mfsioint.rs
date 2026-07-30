@@ -896,39 +896,35 @@ pub const PATH_TO_INODES_SKIP_LAST: ::core::ffi::c_int = 2 as ::core::ffi::c_int
 pub const PATH_TO_INODES_CHECK_LAST: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn mfs_type_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-            DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-            DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-            DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-            DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-            DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-            DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-            DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-            DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return 0 as uint8_t;
+    match r#type as ::core::ffi::c_int {
+        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
+        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
+        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
+        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
+        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
+        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
+        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
+        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
+        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return 0 as uint8_t;
 }
 #[inline]
 unsafe extern "C" fn fsnodes_type_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-            DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-            DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-            DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-            DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-            DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-            DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-            DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-            DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return 0 as uint8_t;
+    match r#type as ::core::ffi::c_int {
+        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
+        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
+        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
+        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
+        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
+        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
+        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
+        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
+        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return 0 as uint8_t;
 }
 #[inline]
 unsafe extern "C" fn mfs_attr_get_type(mut attr: *const uint8_t) -> uint8_t {
@@ -7618,7 +7614,7 @@ pub unsafe extern "C" fn mfs_int_getfacl(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_int_fgetfacl(
-    mut cr: *mut mfs_int_cred,
+    _cr: *mut mfs_int_cred,
     mut fildes: ::core::ffi::c_int,
     mut acltype: uint8_t,
     mut userperm: *mut uint16_t,
@@ -8786,20 +8782,18 @@ pub unsafe extern "C" fn mfs_int_open(
     }
 }
 unsafe extern "C" fn mfs_int_error_conv(mut err: ::core::ffi::c_int) -> uint8_t {
-    unsafe {
-        match err {
-            0 => return MFS_STATUS_OK as uint8_t,
-            EBADF => return MFS_ERROR_EBADF as uint8_t,
-            EINVAL => return MFS_ERROR_EINVAL as uint8_t,
-            EDQUOT => return MFS_ERROR_QUOTA as uint8_t,
-            ENOSPC => return MFS_ERROR_NOSPACE as uint8_t,
-            EFBIG => return MFS_ERROR_EFBIG as uint8_t,
-            ENXIO => return MFS_ERROR_CHUNKLOST as uint8_t,
-            EIO => return MFS_ERROR_IO as uint8_t,
-            _ => {}
-        }
-        return MFS_ERROR_IO as uint8_t;
+    match err {
+        0 => return MFS_STATUS_OK as uint8_t,
+        EBADF => return MFS_ERROR_EBADF as uint8_t,
+        EINVAL => return MFS_ERROR_EINVAL as uint8_t,
+        EDQUOT => return MFS_ERROR_QUOTA as uint8_t,
+        ENOSPC => return MFS_ERROR_NOSPACE as uint8_t,
+        EFBIG => return MFS_ERROR_EFBIG as uint8_t,
+        ENXIO => return MFS_ERROR_CHUNKLOST as uint8_t,
+        EIO => return MFS_ERROR_IO as uint8_t,
+        _ => {}
     }
+    return MFS_ERROR_IO as uint8_t;
 }
 unsafe extern "C" fn mfs_int_pread_common(
     mut fileinfo: *mut file_info,

@@ -70,7 +70,12 @@ struct Parser {
 
 impl Parser {
     fn newnode(&mut self, op: uint8_t, val: uint8_t, arg1: i32, arg2: i32) -> i32 {
-        self.arena.push(Node { op, val, arg1, arg2 });
+        self.arena.push(Node {
+            op,
+            val,
+            arg1,
+            arg2,
+        });
         (self.arena.len() - 1) as i32
     }
 }
@@ -345,7 +350,9 @@ impl<'a> Expr<'a> {
                 self.ec_data_chksum_parts = c - b'0';
                 self.bump(1);
             } else {
-                print!("parse error, in ec mode expected number of checksums or data parts after '@'\n");
+                print!(
+                    "parse error, in ec mode expected number of checksums or data parts after '@'\n"
+                );
                 self.erroroccured = true;
                 return;
             }
@@ -362,7 +369,9 @@ impl<'a> Expr<'a> {
                     self.bump(1);
                     self.eat_white();
                 } else {
-                    print!("parse error, in ec mode expected number of checksums after '+' and data parts be set to '4' or '8'\n");
+                    print!(
+                        "parse error, in ec mode expected number of checksums after '+' and data parts be set to '4' or '8'\n"
+                    );
                     self.erroroccured = true;
                     return;
                 }
@@ -459,7 +468,11 @@ impl Rpn {
         }
     }
     fn top(&self) -> uint8_t {
-        if self.pos > 0 { self.data[self.pos - 1] } else { 0 }
+        if self.pos > 0 {
+            self.data[self.pos - 1]
+        } else {
+            0
+        }
     }
     fn exchg_top(&mut self, d: uint8_t) {
         if self.pos > 0 {
@@ -678,8 +691,7 @@ fn rpn_to_infix(code: &[uint8_t]) -> Vec<u8> {
                 let paren_level = if is_and { 1 } else { 2 };
                 let sep = if is_and { b'&' } else { b'|' };
                 let mut str_: Vec<u8> = Vec::new();
-                let parts: Vec<(u8, Vec<u8>)> =
-                    stack.drain(stack.len() - n..).collect();
+                let parts: Vec<(u8, Vec<u8>)> = stack.drain(stack.len() - n..).collect();
                 for (i, (level, s)) in parts.into_iter().enumerate() {
                     if i > 0 {
                         str_.push(sep);
@@ -742,8 +754,7 @@ fn make_label_imp(pd: &parser_data) -> Vec<u8> {
             out.push(b',');
         }
         let mut c = 1usize;
-        while i + c < pd.labelscnt as usize
-            && labelexpr_eq(&pd.labelexpr[i], &pd.labelexpr[i + c])
+        while i + c < pd.labelscnt as usize && labelexpr_eq(&pd.labelexpr[i], &pd.labelexpr[i + c])
         {
             c += 1;
         }
@@ -806,7 +817,11 @@ pub unsafe extern "C" fn make_label_expr(
     let out = unsafe { make_label_imp(&*pd) };
     // SAFETY: per fn contract; writes out.len()+1 bytes.
     unsafe {
-        std::ptr::copy_nonoverlapping(out.as_ptr() as *const ::core::ffi::c_char, strbuff, out.len());
+        std::ptr::copy_nonoverlapping(
+            out.as_ptr() as *const ::core::ffi::c_char,
+            strbuff,
+            out.len(),
+        );
         *strbuff.add(out.len()) = 0;
     }
     strbuff

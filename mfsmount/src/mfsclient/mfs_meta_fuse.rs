@@ -499,40 +499,36 @@ pub unsafe extern "C" fn mfs_meta_name_to_inode(mut name: *const ::core::ffi::c_
     }
 }
 unsafe extern "C" fn mfs_errorconv(mut status: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        match status {
-            MFS_STATUS_OK => return 0 as ::core::ffi::c_int,
-            MFS_ERROR_EPERM => return EPERM,
-            MFS_ERROR_ENOTDIR => return ENOTDIR,
-            MFS_ERROR_ENOENT => return ENOENT,
-            MFS_ERROR_EACCES => return EACCES,
-            MFS_ERROR_EEXIST => return EEXIST,
-            MFS_ERROR_EINVAL => return EINVAL,
-            MFS_ERROR_ENOTEMPTY => return ENOTEMPTY,
-            MFS_ERROR_IO => return EIO,
-            MFS_ERROR_EROFS => return EROFS,
-            MFS_ERROR_QUOTA => return EDQUOT,
-            _ => return EINVAL,
-        };
-    }
+    match status {
+        MFS_STATUS_OK => return 0 as ::core::ffi::c_int,
+        MFS_ERROR_EPERM => return EPERM,
+        MFS_ERROR_ENOTDIR => return ENOTDIR,
+        MFS_ERROR_ENOENT => return ENOENT,
+        MFS_ERROR_EACCES => return EACCES,
+        MFS_ERROR_EEXIST => return EEXIST,
+        MFS_ERROR_EINVAL => return EINVAL,
+        MFS_ERROR_ENOTEMPTY => return ENOTEMPTY,
+        MFS_ERROR_IO => return EIO,
+        MFS_ERROR_EROFS => return EROFS,
+        MFS_ERROR_QUOTA => return EDQUOT,
+        _ => return EINVAL,
+    };
 }
 #[inline]
 unsafe extern "C" fn fsnodes_type_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-            DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-            DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-            DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-            DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-            DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-            DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-            DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-            DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return 0 as uint8_t;
+    match r#type as ::core::ffi::c_int {
+        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
+        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
+        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
+        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
+        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
+        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
+        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
+        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
+        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return 0 as uint8_t;
 }
 unsafe extern "C" fn mfs_meta_type_to_stat(
     mut inode: uint32_t,
@@ -675,7 +671,7 @@ unsafe extern "C" fn mfs_attr_to_stat(
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_meta_statfs(mut req: fuse_req_t, mut ino: fuse_ino_t) {
+pub unsafe extern "C" fn mfs_meta_statfs(mut req: fuse_req_t, _ino: fuse_ino_t) {
     unsafe {
         let mut totalspace: uint64_t = 0;
         let mut availspace: uint64_t = 0;
@@ -959,7 +955,7 @@ pub unsafe extern "C" fn mfs_meta_lookup(
 pub unsafe extern "C" fn mfs_meta_getattr(
     mut req: fuse_req_t,
     mut ino: fuse_ino_t,
-    mut fi: *mut fuse_file_info,
+    _fi: *mut fuse_file_info,
 ) {
     unsafe {
         let mut o_stbuf: stat = stat {
@@ -1036,8 +1032,8 @@ pub unsafe extern "C" fn mfs_meta_getattr(
 pub unsafe extern "C" fn mfs_meta_setattr(
     mut req: fuse_req_t,
     mut ino: fuse_ino_t,
-    mut stbuf: *mut stat,
-    mut to_set: ::core::ffi::c_int,
+    _stbuf: *mut stat,
+    _to_set: ::core::ffi::c_int,
     mut fi: *mut fuse_file_info,
 ) {
     unsafe {
@@ -1076,8 +1072,8 @@ pub unsafe extern "C" fn mfs_meta_rename(
     mut parent: fuse_ino_t,
     mut name: *const ::core::ffi::c_char,
     mut newparent: fuse_ino_t,
-    mut newname: *const ::core::ffi::c_char,
-    mut flags: ::core::ffi::c_uint,
+    _newname: *const ::core::ffi::c_char,
+    _flags: ::core::ffi::c_uint,
 ) {
     unsafe {
         let mut status: ::core::ffi::c_int = 0;
@@ -1666,7 +1662,7 @@ pub unsafe extern "C" fn mfs_meta_readdir(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_meta_releasedir(
     mut req: fuse_req_t,
-    mut ino: fuse_ino_t,
+    _ino: fuse_ino_t,
     mut fi: *mut fuse_file_info,
 ) {
     unsafe {

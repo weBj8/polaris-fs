@@ -895,15 +895,13 @@ pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const MFSLOG_SYSLOG_STDERR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn hash32(mut key: uint32_t) -> uint32_t {
-    unsafe {
-        key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
-        key = key ^ key >> 12 as ::core::ffi::c_int;
-        key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
-        key = key ^ key >> 4 as ::core::ffi::c_int;
-        key = key.wrapping_mul(2057 as uint32_t);
-        key = key ^ key >> 16 as ::core::ffi::c_int;
-        return key;
-    }
+    key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
+    key = key ^ key >> 12 as ::core::ffi::c_int;
+    key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
+    key = key ^ key >> 4 as ::core::ffi::c_int;
+    key = key.wrapping_mul(2057 as uint32_t);
+    key = key ^ key >> 16 as ::core::ffi::c_int;
+    return key;
 }
 static mut bitcount_tab: [uint8_t; 256] = [
     0 as uint8_t,
@@ -3556,71 +3554,64 @@ pub unsafe extern "C" fn chunk_delete(mut c: *mut chunk) {
     }
 }
 unsafe extern "C" fn chunk_ecid_to_str(mut ecid: uint8_t) -> *const ::core::ffi::c_char {
-    unsafe {
-        let mut ecid8names: [*const ::core::ffi::c_char; 17] = [
-            b"DE0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE1\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE2\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE3\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE4\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE5\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE6\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DE7\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE1\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE2\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE3\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE4\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE5\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE6\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE7\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CE8\0".as_ptr() as *const ::core::ffi::c_char,
-        ];
-        let mut ecid4names: [*const ::core::ffi::c_char; 13] = [
-            b"DF0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DF1\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DF2\0".as_ptr() as *const ::core::ffi::c_char,
-            b"DF3\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF0\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF1\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF2\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF3\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF4\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF5\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF6\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF7\0".as_ptr() as *const ::core::ffi::c_char,
-            b"CF8\0".as_ptr() as *const ::core::ffi::c_char,
-        ];
-        if ecid as ::core::ffi::c_int & 0x20 as ::core::ffi::c_int != 0 {
-            if (ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) < 17 as ::core::ffi::c_int
-            {
-                return ecid8names
-                    [(ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) as usize];
-            }
-        } else if ecid as ::core::ffi::c_int & 0x10 as ::core::ffi::c_int != 0 {
-            if (ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) < 13 as ::core::ffi::c_int {
-                return ecid4names
-                    [(ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) as usize];
-            }
-        } else if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            return b"COPY\0".as_ptr() as *const ::core::ffi::c_char;
+    let mut ecid8names: [*const ::core::ffi::c_char; 17] = [
+        b"DE0\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE1\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE2\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE3\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE4\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE5\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE6\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DE7\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE0\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE1\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE2\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE3\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE4\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE5\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE6\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE7\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CE8\0".as_ptr() as *const ::core::ffi::c_char,
+    ];
+    let mut ecid4names: [*const ::core::ffi::c_char; 13] = [
+        b"DF0\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DF1\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DF2\0".as_ptr() as *const ::core::ffi::c_char,
+        b"DF3\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF0\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF1\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF2\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF3\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF4\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF5\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF6\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF7\0".as_ptr() as *const ::core::ffi::c_char,
+        b"CF8\0".as_ptr() as *const ::core::ffi::c_char,
+    ];
+    if ecid as ::core::ffi::c_int & 0x20 as ::core::ffi::c_int != 0 {
+        if (ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) < 17 as ::core::ffi::c_int {
+            return ecid8names[(ecid as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int) as usize];
         }
-        return b"???\0".as_ptr() as *const ::core::ffi::c_char;
+    } else if ecid as ::core::ffi::c_int & 0x10 as ::core::ffi::c_int != 0 {
+        if (ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) < 13 as ::core::ffi::c_int {
+            return ecid4names[(ecid as ::core::ffi::c_int & 0xf as ::core::ffi::c_int) as usize];
+        }
+    } else if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        return b"COPY\0".as_ptr() as *const ::core::ffi::c_char;
     }
+    return b"???\0".as_ptr() as *const ::core::ffi::c_char;
 }
 #[inline]
 unsafe extern "C" fn chunk_check_ecid(mut ecid: uint8_t) -> ::core::ffi::c_int {
-    unsafe {
-        if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-            || ecid as ::core::ffi::c_int >= 0x20 as ::core::ffi::c_int
-                && ecid as ::core::ffi::c_int <= 0x30 as ::core::ffi::c_int
-            || ecid as ::core::ffi::c_int >= 0x10 as ::core::ffi::c_int
-                && ecid as ::core::ffi::c_int <= 0x1c as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        return -1 as ::core::ffi::c_int;
+    if ecid as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+        || ecid as ::core::ffi::c_int >= 0x20 as ::core::ffi::c_int
+            && ecid as ::core::ffi::c_int <= 0x30 as ::core::ffi::c_int
+        || ecid as ::core::ffi::c_int >= 0x10 as ::core::ffi::c_int
+            && ecid as ::core::ffi::c_int <= 0x1c as ::core::ffi::c_int
+    {
+        return 0 as ::core::ffi::c_int;
     }
+    return -1 as ::core::ffi::c_int;
 }
 #[inline]
 unsafe extern "C" fn chunk_state_change(
@@ -9967,7 +9958,7 @@ pub unsafe extern "C" fn chunk_got_status_data(
     mut ecid: *mut uint8_t,
     mut version: *mut uint32_t,
     mut damaged: *mut uint8_t,
-    mut blocks: *mut uint16_t,
+    _blocks: *mut uint16_t,
     mut fixmode: uint8_t,
 ) {
     unsafe {
@@ -10387,7 +10378,7 @@ unsafe extern "C" fn chunk_replicate(
     mut ecid: uint8_t,
     mut src: uint16_t,
     mut dst: uint16_t,
-    mut user: *mut ::core::ffi::c_void,
+    _user: *mut ::core::ffi::c_void,
     mut survivorscsid: *mut uint16_t,
     mut survivorsecid: *mut uint8_t,
     mut reason: uint8_t,
@@ -10591,15 +10582,15 @@ unsafe extern "C" fn chunk_undergoal_replicate(
             (if chunk_priority as ::core::ffi::c_int == CHUNK_PRIORITY_IOREADY {
                 REPL_COPY_IO as ::core::ffi::c_int
             } else {
-                (if chunk_priority as ::core::ffi::c_int <= CHUNK_PRIORITY_ONEREGCOPY_PLUSMFR {
+                if chunk_priority as ::core::ffi::c_int <= CHUNK_PRIORITY_ONEREGCOPY_PLUSMFR {
                     REPL_COPY_ENDANGERED as ::core::ffi::c_int
                 } else {
-                    (if chunk_priority as ::core::ffi::c_int <= CHUNK_PRIORITY_UNDERGOAL {
+                    if chunk_priority as ::core::ffi::c_int <= CHUNK_PRIORITY_UNDERGOAL {
                         REPL_COPY_UNDERGOAL as ::core::ffi::c_int
                     } else {
                         REPL_COPY_WRONGLABEL as ::core::ffi::c_int
-                    })
-                })
+                    }
+                }
             }) as uint8_t,
         ) as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
@@ -13105,11 +13096,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                         (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                             RECOVER_IO as ::core::ffi::c_int
                         } else {
-                            (if regularecgoalequiv == 1 as uint32_t {
+                            if regularecgoalequiv == 1 as uint32_t {
                                 REPL_EC_ENDANGERED as ::core::ffi::c_int
                             } else {
                                 REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                            })
+                            }
                         }) as uint8_t,
                     ) as ::core::ffi::c_int
                         != 0 as ::core::ffi::c_int
@@ -13524,11 +13515,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -13590,11 +13581,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -13701,11 +13692,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -13738,11 +13729,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -13831,11 +13822,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -13868,11 +13859,11 @@ pub unsafe extern "C" fn chunk_do_jobs(
                             (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                 RECOVER_IO as ::core::ffi::c_int
                             } else {
-                                (if regularecgoalequiv == 1 as uint32_t {
+                                if regularecgoalequiv == 1 as uint32_t {
                                     REPL_EC_ENDANGERED as ::core::ffi::c_int
                                 } else {
                                     REPL_EC_UNDERGOAL as ::core::ffi::c_int
-                                })
+                                }
                             }) as uint8_t,
                         ) as ::core::ffi::c_int
                             != 0 as ::core::ffi::c_int
@@ -14437,18 +14428,18 @@ pub unsafe extern "C" fn chunk_do_jobs(
                                     (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                         JOIN_EC_IO as ::core::ffi::c_int
                                     } else {
-                                        (if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
+                                        if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
                                         {
                                             JOIN_EC_CHANGE as ::core::ffi::c_int
                                         } else {
-                                            (if usekeep as ::core::ffi::c_int
+                                            if usekeep as ::core::ffi::c_int
                                                 == 2 as ::core::ffi::c_int
                                             {
                                                 JOIN_EC_NOSERVERS as ::core::ffi::c_int
                                             } else {
                                                 JOIN_EC_GENERIC as ::core::ffi::c_int
-                                            })
-                                        })
+                                            }
+                                        }
                                     }) as uint8_t,
                                 ) as ::core::ffi::c_int
                                     != 0 as ::core::ffi::c_int
@@ -14479,18 +14470,18 @@ pub unsafe extern "C" fn chunk_do_jobs(
                                     (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                         JOIN_EC_IO as ::core::ffi::c_int
                                     } else {
-                                        (if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
+                                        if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
                                         {
                                             JOIN_EC_CHANGE as ::core::ffi::c_int
                                         } else {
-                                            (if usekeep as ::core::ffi::c_int
+                                            if usekeep as ::core::ffi::c_int
                                                 == 2 as ::core::ffi::c_int
                                             {
                                                 JOIN_EC_NOSERVERS as ::core::ffi::c_int
                                             } else {
                                                 JOIN_EC_GENERIC as ::core::ffi::c_int
-                                            })
-                                        })
+                                            }
+                                        }
                                     }) as uint8_t,
                                 ) as ::core::ffi::c_int
                                     != 0 as ::core::ffi::c_int
@@ -14546,18 +14537,18 @@ pub unsafe extern "C" fn chunk_do_jobs(
                                     (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                         JOIN_EC_IO as ::core::ffi::c_int
                                     } else {
-                                        (if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
+                                        if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
                                         {
                                             JOIN_EC_CHANGE as ::core::ffi::c_int
                                         } else {
-                                            (if usekeep as ::core::ffi::c_int
+                                            if usekeep as ::core::ffi::c_int
                                                 == 2 as ::core::ffi::c_int
                                             {
                                                 JOIN_EC_NOSERVERS as ::core::ffi::c_int
                                             } else {
                                                 JOIN_EC_GENERIC as ::core::ffi::c_int
-                                            })
-                                        })
+                                            }
+                                        }
                                     }) as uint8_t,
                                 ) as ::core::ffi::c_int
                                     != 0 as ::core::ffi::c_int
@@ -14586,18 +14577,18 @@ pub unsafe extern "C" fn chunk_do_jobs(
                                     (if extrajob as ::core::ffi::c_int == 2 as ::core::ffi::c_int {
                                         JOIN_EC_IO as ::core::ffi::c_int
                                     } else {
-                                        (if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
+                                        if usekeep as ::core::ffi::c_int == 1 as ::core::ffi::c_int
                                         {
                                             JOIN_EC_CHANGE as ::core::ffi::c_int
                                         } else {
-                                            (if usekeep as ::core::ffi::c_int
+                                            if usekeep as ::core::ffi::c_int
                                                 == 2 as ::core::ffi::c_int
                                             {
                                                 JOIN_EC_NOSERVERS as ::core::ffi::c_int
                                             } else {
                                                 JOIN_EC_GENERIC as ::core::ffi::c_int
-                                            })
-                                        })
+                                            }
+                                        }
                                     }) as uint8_t,
                                 ) as ::core::ffi::c_int
                                     != 0 as ::core::ffi::c_int
@@ -16850,13 +16841,11 @@ pub const CHUNKFSIZE: ::core::ffi::c_int = 18 as ::core::ffi::c_int;
 pub const CHUNKMAXPAIRS: ::core::ffi::c_int = 255 as ::core::ffi::c_int + 128 as ::core::ffi::c_int;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunk_is_afterload_needed(mut mver: uint8_t) -> uint8_t {
-    unsafe {
-        return (if mver as ::core::ffi::c_int >= 0x12 as ::core::ffi::c_int {
-            0 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        }) as uint8_t;
-    }
+    return (if mver as ::core::ffi::c_int >= 0x12 as ::core::ffi::c_int {
+        0 as ::core::ffi::c_int
+    } else {
+        1 as ::core::ffi::c_int
+    }) as uint8_t;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn chunk_load(

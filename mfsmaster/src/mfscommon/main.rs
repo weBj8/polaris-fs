@@ -1,4 +1,3 @@
-#![feature(core_intrinsics)]
 #![allow(
     clippy::missing_safety_doc,
     dead_code,
@@ -11,7 +10,7 @@
 pub enum _IO_wide_data {}
 pub enum _IO_codecvt {}
 pub enum _IO_marker {}
-#[macro_use]
+// (macro_use removed)
 extern crate c2rust_bitfields;
 #[allow(unused_imports)]
 use ::mfsmaster;

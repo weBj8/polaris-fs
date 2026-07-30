@@ -184,20 +184,18 @@ static mut dicthashsize: uint32_t = 0;
 static mut dicthashelem: uint32_t = 0;
 #[inline]
 unsafe extern "C" fn dict_calc_hash_size(mut elements: uint32_t) -> uint32_t {
-    unsafe {
-        let mut res: uint32_t = 1 as uint32_t;
-        while elements != 0 {
-            elements >>= 1 as ::core::ffi::c_int;
-            res <<= 1 as ::core::ffi::c_int;
-        }
-        if res == 0 as uint32_t {
-            res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
-        }
-        if res < HASHTAB_LOSIZE as uint32_t {
-            return HASHTAB_LOSIZE as uint32_t;
-        }
-        return res;
+    let mut res: uint32_t = 1 as uint32_t;
+    while elements != 0 {
+        elements >>= 1 as ::core::ffi::c_int;
+        res <<= 1 as ::core::ffi::c_int;
     }
+    if res == 0 as uint32_t {
+        res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
+    }
+    if res < HASHTAB_LOSIZE as uint32_t {
+        return HASHTAB_LOSIZE as uint32_t;
+    }
+    return res;
 }
 #[inline]
 unsafe extern "C" fn dict_hash_init() {

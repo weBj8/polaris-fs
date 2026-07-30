@@ -1296,7 +1296,7 @@ pub unsafe extern "C" fn matomlserv_register(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matomlserv_store_metadata(
     mut eptr: *mut matomlserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -1493,7 +1493,7 @@ pub unsafe extern "C" fn matomlserv_download_request(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matomlserv_download_end(
     mut eptr: *mut matomlserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {

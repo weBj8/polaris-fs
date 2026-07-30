@@ -986,7 +986,7 @@ pub unsafe extern "C" fn sstats_set(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sstats_thread(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut hash: uint32_t = 0 as uint32_t;

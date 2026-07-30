@@ -619,7 +619,7 @@ unsafe extern "C" fn mfsstrerr(mut status: uint8_t) -> *const ::core::ffi::c_cha
 pub unsafe extern "C" fn do_idle(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -1018,7 +1018,7 @@ pub unsafe extern "C" fn do_append(
 pub unsafe extern "C" fn do_acquire(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -1291,7 +1291,7 @@ pub unsafe extern "C" fn do_amtime(
 pub unsafe extern "C" fn do_autoarch(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -1907,7 +1907,7 @@ pub unsafe extern "C" fn do_create(
 pub unsafe extern "C" fn do_csdbop(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -2016,7 +2016,7 @@ pub unsafe extern "C" fn do_csdbop(
 pub unsafe extern "C" fn do_csadd(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -2071,7 +2071,7 @@ pub unsafe extern "C" fn do_csadd(
 pub unsafe extern "C" fn do_csdel(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -2497,7 +2497,7 @@ pub unsafe extern "C" fn do_emptysustained(
 pub unsafe extern "C" fn do_flock(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -2690,7 +2690,7 @@ pub unsafe extern "C" fn do_freeinodes(
 pub unsafe extern "C" fn do_incversion(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -2729,7 +2729,7 @@ pub unsafe extern "C" fn do_incversion(
 pub unsafe extern "C" fn do_setversion(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -3468,7 +3468,7 @@ pub unsafe extern "C" fn do_move(
 pub unsafe extern "C" fn do_nextchunkid(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -3507,7 +3507,7 @@ pub unsafe extern "C" fn do_nextchunkid(
 pub unsafe extern "C" fn do_patadd(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -3845,7 +3845,7 @@ pub unsafe extern "C" fn do_patadd(
 pub unsafe extern "C" fn do_patdel(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -4010,7 +4010,7 @@ pub unsafe extern "C" fn do_patdel(
 pub unsafe extern "C" fn do_posixlock(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -4435,7 +4435,7 @@ pub unsafe extern "C" fn do_quota(
 pub unsafe extern "C" fn do_release(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -4561,7 +4561,7 @@ pub unsafe extern "C" fn do_repair(
 pub unsafe extern "C" fn do_renumedges(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -4612,7 +4612,7 @@ pub unsafe extern "C" fn do_renumedges(
 pub unsafe extern "C" fn do_session(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -4663,7 +4663,7 @@ pub unsafe extern "C" fn do_session(
 pub unsafe extern "C" fn do_sesadd(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -5182,7 +5182,7 @@ pub unsafe extern "C" fn do_sesadd(
 pub unsafe extern "C" fn do_seschanged(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -5702,7 +5702,7 @@ pub unsafe extern "C" fn do_seschanged(
 pub unsafe extern "C" fn do_sesdel(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -5741,7 +5741,7 @@ pub unsafe extern "C" fn do_sesdel(
 pub unsafe extern "C" fn do_sesconnected(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -6041,7 +6041,7 @@ pub unsafe extern "C" fn do_seteattr(
 pub unsafe extern "C" fn do_setfilechunk(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -6409,7 +6409,7 @@ pub unsafe extern "C" fn do_setsclass(
 pub unsafe extern "C" fn do_setmetaid(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -6448,7 +6448,7 @@ pub unsafe extern "C" fn do_setmetaid(
 pub unsafe extern "C" fn do_setpath(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -8799,7 +8799,7 @@ pub unsafe extern "C" fn do_symlink(
 pub unsafe extern "C" fn do_scecon(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -8834,7 +8834,7 @@ pub unsafe extern "C" fn do_scecon(
 pub unsafe extern "C" fn do_scecversion(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -8884,7 +8884,7 @@ pub unsafe extern "C" fn do_scecversion(
 pub unsafe extern "C" fn do_scdel(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -9043,7 +9043,7 @@ pub unsafe extern "C" fn do_scdel(
 pub unsafe extern "C" fn do_scdup(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -9337,7 +9337,7 @@ pub unsafe extern "C" fn do_scdup(
 pub unsafe extern "C" fn do_scren(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {
@@ -9603,7 +9603,7 @@ pub unsafe extern "C" fn do_scren(
 pub unsafe extern "C" fn do_scset(
     mut filename: *const ::core::ffi::c_char,
     mut lv: uint64_t,
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut ptr: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     unsafe {

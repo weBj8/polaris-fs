@@ -95,13 +95,13 @@ pub unsafe extern "C" fn do_truncate(
                     break;
                 }
                 portable_usleep((1000 as uint32_t).wrapping_add(
-                    (if trycnt < 30 as uint32_t {
+                    if trycnt < 30 as uint32_t {
                         trycnt
                             .wrapping_sub(1 as uint32_t)
                             .wrapping_mul(300000 as uint32_t)
                     } else {
                         10000000 as uint32_t
-                    }),
+                    },
                 ) as uint64_t);
             } else {
                 portable_usleep(10000 as uint64_t);

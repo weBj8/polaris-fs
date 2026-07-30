@@ -32,7 +32,10 @@ unsafe extern "C" {
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    fn pthread_join(th: pthread_t, thread_return: *mut *mut ::core::ffi::c_void) -> ::core::ffi::c_int;
+    fn pthread_join(
+        th: pthread_t,
+        thread_return: *mut *mut ::core::ffi::c_void,
+    ) -> ::core::ffi::c_int;
 }
 
 #[inline]
@@ -81,7 +84,7 @@ impl ConnEntry {
 struct Cache {
     entries: Vec<ConnEntry>,
     buckets: Vec<Vec<u32>>, // CONN_CACHE_HASHSIZE buckets
-    lru: VecDeque<u32>,      // front = oldest
+    lru: VecDeque<u32>,     // front = oldest
     free: Vec<u32>,
     keep_alive: bool,
 }
@@ -131,13 +134,10 @@ pub extern "C" fn conncache_get(ip: uint32_t, port: uint16_t) -> ::core::ffi::c_
     let mut guard = CACHE.lock().unwrap();
     let c = guard.as_mut().expect("conncache_get before init");
     let b = bucket_of(ip, port);
-    let idx = c.buckets[b]
-        .iter()
-        .copied()
-        .find(|&i| {
-            let e = &c.entries[i as usize];
-            e.live() && e.ip == ip && e.port == port
-        });
+    let idx = c.buckets[b].iter().copied().find(|&i| {
+        let e = &c.entries[i as usize];
+        e.live() && e.ip == ip && e.port == port
+    });
     match idx {
         Some(i) => {
             let fd = c.entries[i as usize].fd;
@@ -235,7 +235,14 @@ pub extern "C" fn conncache_term() {
 #[unsafe(no_mangle)]
 pub extern "C" fn conncache_init(mut cap: uint32_t) -> ::core::ffi::c_int {
     let mut c = Cache::default();
-    c.entries = vec![ConnEntry { ip: 0, port: 0, fd: -1 }; cap as usize];
+    c.entries = vec![
+        ConnEntry {
+            ip: 0,
+            port: 0,
+            fd: -1
+        };
+        cap as usize
+    ];
     c.buckets = vec![Vec::new(); CONN_CACHE_HASHSIZE];
     c.free = (0..cap).rev().collect();
     c.keep_alive = true;
@@ -266,7 +273,14 @@ mod tests {
 
     fn fresh(cap: u32) {
         let mut c = Cache::default();
-        c.entries = vec![ConnEntry { ip: 0, port: 0, fd: -1 }; cap as usize];
+        c.entries = vec![
+            ConnEntry {
+                ip: 0,
+                port: 0,
+                fd: -1
+            };
+            cap as usize
+        ];
         c.buckets = vec![Vec::new(); CONN_CACHE_HASHSIZE];
         c.free = (0..cap).rev().collect();
         c.keep_alive = true;
@@ -293,12 +307,27 @@ mod tests {
         // provide — so test eviction logic on Cache directly instead.
         *CACHE.lock().unwrap() = None;
         let mut c = Cache::default();
-        c.entries = vec![ConnEntry { ip: 0, port: 0, fd: -1 }; 2];
+        c.entries = vec![
+            ConnEntry {
+                ip: 0,
+                port: 0,
+                fd: -1
+            };
+            2
+        ];
         c.buckets = vec![Vec::new(); CONN_CACHE_HASHSIZE];
         c.free = vec![];
         c.lru = VecDeque::from(vec![0, 1]);
-        c.entries[0] = ConnEntry { ip: 1, port: 1, fd: 10 };
-        c.entries[1] = ConnEntry { ip: 2, port: 2, fd: 20 };
+        c.entries[0] = ConnEntry {
+            ip: 1,
+            port: 1,
+            fd: 10,
+        };
+        c.entries[1] = ConnEntry {
+            ip: 2,
+            port: 2,
+            fd: 20,
+        };
         c.buckets[bucket_of(1, 1)].push(0);
         c.buckets[bucket_of(2, 2)].push(1);
         assert_eq!(*c.lru.front().unwrap(), 0); // oldest first

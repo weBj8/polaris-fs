@@ -3736,7 +3736,7 @@ pub unsafe extern "C" fn matoclserv_chart_data(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_monotonic_data(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -4619,7 +4619,7 @@ pub unsafe extern "C" fn matoclserv_set_all_node_attributes(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_info(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -4736,7 +4736,7 @@ pub unsafe extern "C" fn matoclserv_info(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_memory_info(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -4789,7 +4789,7 @@ pub unsafe extern "C" fn matoclserv_memory_info(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_fstest_info(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -4867,7 +4867,7 @@ pub unsafe extern "C" fn matoclserv_fstest_info(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_chunkstest_info(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -5015,7 +5015,7 @@ pub unsafe extern "C" fn matoclserv_exports_info(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_mlog_list(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -12302,11 +12302,11 @@ pub unsafe extern "C" fn matoclserv_fuse_getxattr(
                     5 as uint32_t
                 } else {
                     (8 as uint32_t).wrapping_add(
-                        (if mode as ::core::ffi::c_int == MFS_XATTR_GETA_DATA {
+                        if mode as ::core::ffi::c_int == MFS_XATTR_GETA_DATA {
                             xasize
                         } else {
                             0 as uint32_t
-                        }),
+                        },
                     )
                 },
             );
@@ -12342,11 +12342,11 @@ pub unsafe extern "C" fn matoclserv_fuse_getxattr(
                     5 as uint32_t
                 } else {
                     (8 as uint32_t).wrapping_add(
-                        (if mode as ::core::ffi::c_int == MFS_XATTR_GETA_DATA {
+                        if mode as ::core::ffi::c_int == MFS_XATTR_GETA_DATA {
                             avleng
                         } else {
                             0 as uint32_t
-                        }),
+                        },
                     )
                 },
             );
@@ -14970,7 +14970,7 @@ pub unsafe extern "C" fn matoclserv_pattern_list(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn matoclserv_pattern_info(
     mut eptr: *mut matoclserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {

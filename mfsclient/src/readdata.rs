@@ -743,45 +743,37 @@ pub const READAHEAD_MAX: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
 pub const MAXREQINQUEUE: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn read_data_modename(mut mode: uint8_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        match mode as ::core::ffi::c_int {
-            0 => {
-                return b"NEW\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-            }
-            1 => {
-                return b"INQUEUE\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            2 => {
-                return b"BUSY\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            3 => {
-                return b"REFRESH\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            4 => {
-                return b"BREAK\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            5 => {
-                return b"FILLED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            6 => {
-                return b"READY\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            7 => {
-                return b"NOTNEEDED\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-            _ => {
-                return b"<unknown>\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-            }
-        };
-    }
+    match mode as ::core::ffi::c_int {
+        0 => {
+            return b"NEW\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        1 => {
+            return b"INQUEUE\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        2 => {
+            return b"BUSY\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        3 => {
+            return b"REFRESH\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        4 => {
+            return b"BREAK\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        5 => {
+            return b"FILLED\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        6 => {
+            return b"READY\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        }
+        7 => {
+            return b"NOTNEEDED\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+        _ => {
+            return b"<unknown>\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+        }
+    };
 }
 static mut rangesstorage: pthread_key_t = 0;
 static mut readahead_leng: uint32_t = 0;
@@ -4531,13 +4523,13 @@ pub unsafe extern "C" fn read_worker(
                                 read_delayed_enqueue(
                                     rreq,
                                     (1000 as uint32_t).wrapping_add(
-                                        (if trycnt < 30 as uint32_t {
+                                        if trycnt < 30 as uint32_t {
                                             trycnt
                                                 .wrapping_sub(1 as uint32_t)
                                                 .wrapping_mul(300000 as uint32_t)
                                         } else {
                                             10000000 as uint32_t
-                                        }),
+                                        },
                                     ),
                                 );
                             }
@@ -7384,7 +7376,7 @@ pub unsafe extern "C" fn read_worker(
                                     if poll(
                                         &raw mut pfd as *mut pollfd,
                                         desc as nfds_t,
-                                        (if cnt as ::core::ffi::c_int % 2 as ::core::ffi::c_int != 0
+                                        if cnt as ::core::ffi::c_int % 2 as ::core::ffi::c_int != 0
                                         {
                                             300 as ::core::ffi::c_int
                                                 * ((1 as ::core::ffi::c_int)
@@ -7395,7 +7387,7 @@ pub unsafe extern "C" fn read_worker(
                                                 * ((1 as ::core::ffi::c_int)
                                                     << (cnt as ::core::ffi::c_int
                                                         >> 1 as ::core::ffi::c_int))
-                                        }),
+                                        },
                                     ) < 0 as ::core::ffi::c_int
                                     {
                                         mfs_log(
@@ -7951,13 +7943,13 @@ pub unsafe extern "C" fn read_worker(
                                     read_delayed_enqueue(
                                         rreq,
                                         (1000 as uint32_t).wrapping_add(
-                                            (if trycnt < 30 as uint32_t {
+                                            if trycnt < 30 as uint32_t {
                                                 trycnt
                                                     .wrapping_sub(1 as uint32_t)
                                                     .wrapping_mul(300000 as uint32_t)
                                             } else {
                                                 10000000 as uint32_t
-                                            }),
+                                            },
                                         ),
                                     );
                                 }
@@ -11556,13 +11548,13 @@ pub unsafe extern "C" fn read_worker(
                                                     0 as uint32_t
                                                 } else {
                                                     (1000 as uint32_t).wrapping_add(
-                                                        (if trycnt < 30 as uint32_t {
+                                                        if trycnt < 30 as uint32_t {
                                                             trycnt
                                                                 .wrapping_sub(3 as uint32_t)
                                                                 .wrapping_mul(300000 as uint32_t)
                                                         } else {
                                                             10000000 as uint32_t
-                                                        }),
+                                                        },
                                                     )
                                                 },
                                             );

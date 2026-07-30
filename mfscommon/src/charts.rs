@@ -1638,26 +1638,24 @@ pub const SPACE: ::core::ffi::c_int = 23 as ::core::ffi::c_int;
 pub const SQUARE: ::core::ffi::c_int = 24 as ::core::ffi::c_int;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn getmonleng(mut year: uint32_t, mut month: uint32_t) -> uint32_t {
-    unsafe {
-        match month {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => return 31 as uint32_t,
-            4 | 6 | 9 | 11 => return 30 as uint32_t,
-            2 => {
-                if year.wrapping_rem(4 as uint32_t) != 0 {
-                    return 28 as uint32_t;
-                }
-                if year.wrapping_rem(100 as uint32_t) != 0 {
-                    return 29 as uint32_t;
-                }
-                if year.wrapping_rem(400 as uint32_t) != 0 {
-                    return 28 as uint32_t;
-                }
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => return 31 as uint32_t,
+        4 | 6 | 9 | 11 => return 30 as uint32_t,
+        2 => {
+            if year.wrapping_rem(4 as uint32_t) != 0 {
+                return 28 as uint32_t;
+            }
+            if year.wrapping_rem(100 as uint32_t) != 0 {
                 return 29 as uint32_t;
             }
-            _ => {}
+            if year.wrapping_rem(400 as uint32_t) != 0 {
+                return 28 as uint32_t;
+            }
+            return 29 as uint32_t;
         }
-        return 0 as uint32_t;
+        _ => {}
     }
+    return 0 as uint32_t;
 }
 pub const CHARTS_FILE_VERSION: ::core::ffi::c_int = 0x10000 as ::core::ffi::c_int;
 #[unsafe(no_mangle)]
@@ -4658,9 +4656,7 @@ pub unsafe extern "C" fn charts_data_multiplier(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn charts_getmaxleng() -> uint32_t {
-    unsafe {
-        return MAXLENG as uint32_t;
-    }
+    return MAXLENG as uint32_t;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn charts_getdata(

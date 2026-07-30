@@ -476,7 +476,7 @@ pub unsafe extern "C" fn dinval_remove(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dinval_invalthread(
-    mut arg: *mut ::core::ffi::c_void,
+    _arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut timeout: ::core::ffi::c_double = 0.;

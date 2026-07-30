@@ -223,9 +223,7 @@ unsafe extern "C" fn xattr_cmp(mut e: *mut xattrentry, mut inode: uint32_t) -> :
 }
 #[inline]
 unsafe extern "C" fn xattr_hash(mut inode: uint32_t) -> uint32_t {
-    unsafe {
-        return inode;
-    }
+    return inode;
 }
 #[inline]
 unsafe extern "C" fn xattr_ehash(mut e: *mut xattrentry) -> uint32_t {
@@ -246,20 +244,18 @@ static mut xattrhashsize: uint32_t = 0;
 static mut xattrhashelem: uint32_t = 0;
 #[inline]
 unsafe extern "C" fn xattr_calc_hash_size(mut elements: uint32_t) -> uint32_t {
-    unsafe {
-        let mut res: uint32_t = 1 as uint32_t;
-        while elements != 0 {
-            elements >>= 1 as ::core::ffi::c_int;
-            res <<= 1 as ::core::ffi::c_int;
-        }
-        if res == 0 as uint32_t {
-            res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
-        }
-        if res < HASHTAB_LOSIZE as uint32_t {
-            return HASHTAB_LOSIZE as uint32_t;
-        }
-        return res;
+    let mut res: uint32_t = 1 as uint32_t;
+    while elements != 0 {
+        elements >>= 1 as ::core::ffi::c_int;
+        res <<= 1 as ::core::ffi::c_int;
     }
+    if res == 0 as uint32_t {
+        res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
+    }
+    if res < HASHTAB_LOSIZE as uint32_t {
+        return HASHTAB_LOSIZE as uint32_t;
+    }
+    return res;
 }
 #[inline]
 unsafe extern "C" fn xattr_hash_init() {
@@ -1473,7 +1469,7 @@ pub unsafe extern "C" fn xattr_store(mut fd: *mut bio) -> uint8_t {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_load(
     mut fd: *mut bio,
-    mut mver: uint8_t,
+    _mver: uint8_t,
     mut ignoreflag: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     unsafe {

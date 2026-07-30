@@ -246,15 +246,13 @@ pub const MFSLOG_SYSLOG_STDERR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const MFSLOG_ERRNO_SYSLOG_STDERR: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn hash32(mut key: uint32_t) -> uint32_t {
-    unsafe {
-        key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
-        key = key ^ key >> 12 as ::core::ffi::c_int;
-        key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
-        key = key ^ key >> 4 as ::core::ffi::c_int;
-        key = key.wrapping_mul(2057 as uint32_t);
-        key = key ^ key >> 16 as ::core::ffi::c_int;
-        return key;
-    }
+    key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
+    key = key ^ key >> 12 as ::core::ffi::c_int;
+    key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
+    key = key ^ key >> 4 as ::core::ffi::c_int;
+    key = key.wrapping_mul(2057 as uint32_t);
+    key = key ^ key >> 16 as ::core::ffi::c_int;
+    return key;
 }
 pub const CSDB_OP_ADD: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const CSDB_OP_DEL: ::core::ffi::c_int = 1 as ::core::ffi::c_int;

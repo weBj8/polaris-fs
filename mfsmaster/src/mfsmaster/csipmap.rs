@@ -119,12 +119,10 @@ static mut ipmap_hashtab: [*mut ipmap; 1024] = [::core::ptr::null_mut::<ipmap>()
 static mut load_hashtab: [*mut ipmap; 1024] = [::core::ptr::null_mut::<ipmap>(); 1024];
 #[inline]
 unsafe extern "C" fn csipmap_hash(mut ip: uint32_t, mut section: uint8_t) -> uint32_t {
-    unsafe {
-        return (ip
-            ^ (ip >> HASHBITS).wrapping_mul(17 as uint32_t)
-            ^ (section as uint32_t).wrapping_mul(33 as uint32_t))
-            & HASHMASK as uint32_t;
-    }
+    return (ip
+        ^ (ip >> HASHBITS).wrapping_mul(17 as uint32_t)
+        ^ (section as uint32_t).wrapping_mul(33 as uint32_t))
+        & HASHMASK as uint32_t;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn csipmap_map(mut servip: uint32_t, mut clientip: uint32_t) -> uint32_t {

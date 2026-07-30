@@ -1,6 +1,5 @@
 // Shared c2rust-transpiled MooseFS mfscommon modules (deduplicated P0).
 // These files were byte-identical across all daemon crates (dedup-map.md).
-#![feature(c_variadic)]
 #![allow(clippy::missing_safety_doc)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
@@ -9,7 +8,7 @@
 #![allow(unused_assignments)]
 #![allow(unused_mut)]
 
-#[macro_use]
+// (macro_use removed: modules import ::c2rust_bitfields directly)
 extern crate c2rust_bitfields;
 extern crate libc;
 

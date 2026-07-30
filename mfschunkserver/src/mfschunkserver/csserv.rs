@@ -1191,7 +1191,7 @@ pub unsafe extern "C" fn csserv_get_chunk_info(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn csserv_hdd_list(
     mut eptr: *mut csserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -1296,7 +1296,7 @@ pub unsafe extern "C" fn csserv_chart_data(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn csserv_monotonic_data(
     mut eptr: *mut csserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -1327,7 +1327,7 @@ pub unsafe extern "C" fn csserv_monotonic_data(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn csserv_module_info(
     mut eptr: *mut csserventry,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {

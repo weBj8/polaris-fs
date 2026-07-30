@@ -1335,7 +1335,7 @@ pub unsafe extern "C" fn bgsaver_changelog_ack(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bgsaver_changelog_nack(
     mut eptr: *mut bgsaverconn,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {
@@ -1354,7 +1354,7 @@ pub unsafe extern "C" fn bgsaver_changelog_nack(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bgsaver_alive(
     mut eptr: *mut bgsaverconn,
-    mut data: *const uint8_t,
+    _data: *const uint8_t,
     mut length: uint32_t,
 ) {
     unsafe {

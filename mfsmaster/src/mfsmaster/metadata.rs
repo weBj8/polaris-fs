@@ -1960,9 +1960,7 @@ pub static mut meta_emergency_locations: [*const ::core::ffi::c_char; 9] = [
 ];
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn meta_create_homedir_emergency_filename() -> *mut ::core::ffi::c_char {
-    unsafe {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
+    return ::core::ptr::null_mut::<::core::ffi::c_char>();
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn meta_emergency_saves() -> ::core::ffi::c_int {

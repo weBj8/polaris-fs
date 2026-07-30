@@ -20,9 +20,7 @@ pub const HASHSIZE: ::core::ffi::c_int = 1024 as ::core::ffi::c_int;
 static mut bchashmap: [*mut busy_chunk; 1024] = [::core::ptr::null_mut::<busy_chunk>(); 1024];
 #[inline]
 unsafe extern "C" fn busychunk_hashfn(mut chunkid: uint64_t) -> uint32_t {
-    unsafe {
-        return chunkid.wrapping_rem(HASHSIZE as uint64_t) as uint32_t;
-    }
+    return chunkid.wrapping_rem(HASHSIZE as uint64_t) as uint32_t;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn busychunk_start(

@@ -1542,7 +1542,7 @@ unsafe extern "C" fn rep_concurrent_connect(mut r: *mut replication) -> ::core::
                 if poll(
                     &raw mut pfd as *mut pollfd,
                     desc as nfds_t,
-                    (if cnt as ::core::ffi::c_int % 2 as ::core::ffi::c_int != 0 {
+                    if cnt as ::core::ffi::c_int % 2 as ::core::ffi::c_int != 0 {
                         300 as ::core::ffi::c_int
                             * ((1 as ::core::ffi::c_int)
                                 << (cnt as ::core::ffi::c_int >> 1 as ::core::ffi::c_int))
@@ -1550,7 +1550,7 @@ unsafe extern "C" fn rep_concurrent_connect(mut r: *mut replication) -> ::core::
                         200 as ::core::ffi::c_int
                             * ((1 as ::core::ffi::c_int)
                                 << (cnt as ::core::ffi::c_int >> 1 as ::core::ffi::c_int))
-                    }),
+                    },
                 ) < 0 as ::core::ffi::c_int
                 {
                     mfs_log(

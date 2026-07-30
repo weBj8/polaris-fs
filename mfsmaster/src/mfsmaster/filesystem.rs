@@ -894,15 +894,13 @@ pub const MFSLOG_SYSLOG_STDERR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const MFSLOG_ERRNO_SYSLOG_STDERR: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
 #[inline]
 unsafe extern "C" fn hash32(mut key: uint32_t) -> uint32_t {
-    unsafe {
-        key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
-        key = key ^ key >> 12 as ::core::ffi::c_int;
-        key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
-        key = key ^ key >> 4 as ::core::ffi::c_int;
-        key = key.wrapping_mul(2057 as uint32_t);
-        key = key ^ key >> 16 as ::core::ffi::c_int;
-        return key;
-    }
+    key = (!key).wrapping_add(key << 15 as ::core::ffi::c_int);
+    key = key ^ key >> 12 as ::core::ffi::c_int;
+    key = key.wrapping_add(key << 2 as ::core::ffi::c_int);
+    key = key ^ key >> 4 as ::core::ffi::c_int;
+    key = key.wrapping_mul(2057 as uint32_t);
+    key = key ^ key >> 16 as ::core::ffi::c_int;
+    return key;
 }
 pub const HASHTAB_LOBITS: ::core::ffi::c_int = 24 as ::core::ffi::c_int;
 pub const HASHTAB_HISIZE: ::core::ffi::c_uint = 0x80000000 as ::core::ffi::c_uint >> HASHTAB_LOBITS;
@@ -1925,42 +1923,42 @@ unsafe extern "C" fn chunktab_init() {
             chunktabsize[i as usize] = (if i < 0x10 as uint32_t {
                 i.wrapping_add(1 as uint32_t) as usize
             } else {
-                (if i < 0x1f as uint32_t {
+                if i < 0x1f as uint32_t {
                     i.wrapping_sub(0xe as uint32_t)
                         .wrapping_mul(0x10 as uint32_t) as usize
                 } else {
-                    (if i < 0x2e as uint32_t {
+                    if i < 0x2e as uint32_t {
                         i.wrapping_sub(0x1d as uint32_t)
                             .wrapping_mul(0x100 as uint32_t) as usize
                     } else {
-                        (if i < 0x3d as uint32_t {
+                        if i < 0x3d as uint32_t {
                             i.wrapping_sub(0x2c as uint32_t)
                                 .wrapping_mul(0x1000 as uint32_t)
                                 as usize
                         } else {
-                            (if i < 0x4c as uint32_t {
+                            if i < 0x4c as uint32_t {
                                 i.wrapping_sub(0x3b as uint32_t)
                                     .wrapping_mul(0x10000 as uint32_t)
                                     as usize
                             } else {
-                                (if i < 0x5b as uint32_t {
+                                if i < 0x5b as uint32_t {
                                     i.wrapping_sub(0x4a as uint32_t)
                                         .wrapping_mul(0x100000 as uint32_t)
                                         as usize
                                 } else {
-                                    (if i < 0x6a as uint32_t {
+                                    if i < 0x6a as uint32_t {
                                         i.wrapping_sub(0x59 as uint32_t)
                                             .wrapping_mul(0x1000000 as uint32_t)
                                             as usize
                                     } else {
                                         (i.wrapping_sub(0x68 as uint32_t) as usize)
                                             .wrapping_mul(0x10000000 as usize)
-                                    })
-                                })
-                            })
-                        })
-                    })
-                })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             })
             .wrapping_mul(::core::mem::size_of::<uint64_t>())
                 as uint64_t;
@@ -2802,20 +2800,18 @@ unsafe extern "C" fn fsnodes_hash(
 }
 #[inline]
 unsafe extern "C" fn fsnodes_calc_hash_size(mut elements: uint32_t) -> uint32_t {
-    unsafe {
-        let mut res: uint32_t = 1 as uint32_t;
-        while elements != 0 {
-            elements >>= 1 as ::core::ffi::c_int;
-            res <<= 1 as ::core::ffi::c_int;
-        }
-        if res == 0 as uint32_t {
-            res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
-        }
-        if res < HASHTAB_LOSIZE as uint32_t {
-            return HASHTAB_LOSIZE as uint32_t;
-        }
-        return res;
+    let mut res: uint32_t = 1 as uint32_t;
+    while elements != 0 {
+        elements >>= 1 as ::core::ffi::c_int;
+        res <<= 1 as ::core::ffi::c_int;
     }
+    if res == 0 as uint32_t {
+        res = 0x80000000 as ::core::ffi::c_uint as uint32_t;
+    }
+    if res < HASHTAB_LOSIZE as uint32_t {
+        return HASHTAB_LOSIZE as uint32_t;
+    }
+    return res;
 }
 #[inline]
 unsafe extern "C" fn fsnodes_edge_hash_init() {
@@ -3866,21 +3862,19 @@ unsafe extern "C" fn fsnodes_keep_alive_check() {
 }
 #[inline]
 unsafe extern "C" fn fsnodes_type_convert(mut r#type: uint8_t) -> uint8_t {
-    unsafe {
-        match r#type as ::core::ffi::c_int {
-            DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
-            DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
-            DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
-            DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
-            DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
-            DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
-            DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
-            DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
-            DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
-            _ => {}
-        }
-        return 0 as uint8_t;
+    match r#type as ::core::ffi::c_int {
+        DISP_TYPE_FILE => return TYPE_FILE as uint8_t,
+        DISP_TYPE_DIRECTORY => return TYPE_DIRECTORY as uint8_t,
+        DISP_TYPE_SYMLINK => return TYPE_SYMLINK as uint8_t,
+        DISP_TYPE_FIFO => return TYPE_FIFO as uint8_t,
+        DISP_TYPE_BLOCKDEV => return TYPE_BLOCKDEV as uint8_t,
+        DISP_TYPE_CHARDEV => return TYPE_CHARDEV as uint8_t,
+        DISP_TYPE_SOCKET => return TYPE_SOCKET as uint8_t,
+        DISP_TYPE_TRASH => return TYPE_TRASH as uint8_t,
+        DISP_TYPE_SUSTAINED => return TYPE_SUSTAINED as uint8_t,
+        _ => {}
     }
+    return 0 as uint8_t;
 }
 #[inline]
 unsafe extern "C" fn fsnodes_new_quotanode(mut p: *mut fsnode) -> *mut quotanode {
@@ -9462,7 +9456,7 @@ pub unsafe extern "C" fn fs_mr_access(mut ts: uint32_t, mut inode: uint32_t) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_readsustained_size(
     mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _sesflags: uint8_t,
     mut dbuffsize: *mut uint32_t,
 ) -> uint8_t {
     unsafe {
@@ -9484,8 +9478,8 @@ pub unsafe extern "C" fn fs_readsustained_size(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_readsustained_data(
-    mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _rootinode: uint32_t,
+    _sesflags: uint8_t,
     mut dbuff: *mut uint8_t,
 ) {
     unsafe {
@@ -9505,7 +9499,7 @@ pub unsafe extern "C" fn fs_readsustained_data(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_readtrash_size(
     mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _sesflags: uint8_t,
     mut bid: uint32_t,
     mut dbuffsize: *mut uint32_t,
 ) -> uint8_t {
@@ -9532,8 +9526,8 @@ pub unsafe extern "C" fn fs_readtrash_size(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_readtrash_data(
-    mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _rootinode: uint32_t,
+    _sesflags: uint8_t,
     mut bid: uint32_t,
     mut dbuff: *mut uint8_t,
 ) {
@@ -10177,7 +10171,7 @@ pub unsafe extern "C" fn fs_getdetachedattr(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_gettrashpath(
     mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _sesflags: uint8_t,
     mut inode: uint32_t,
     mut pleng: *mut uint32_t,
     mut path: *mut *const uint8_t,
@@ -10872,7 +10866,7 @@ pub unsafe extern "C" fn fs_path_lookup(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_statfs(
     mut rootinode: uint32_t,
-    mut sesflags: uint8_t,
+    _sesflags: uint8_t,
     mut totalspace: *mut uint64_t,
     mut availspace: *mut uint64_t,
     mut freespace: *mut uint64_t,
@@ -17220,7 +17214,7 @@ pub unsafe extern "C" fn fs_quotacontrol(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_mr_quota(
-    mut ts: uint32_t,
+    _ts: uint32_t,
     mut inode: uint32_t,
     mut exceeded: uint8_t,
     mut flags: uint8_t,
@@ -21268,7 +21262,7 @@ pub unsafe extern "C" fn fs_storefree(mut fd: *mut bio) -> uint8_t {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_loadfree(
     mut fd: *mut bio,
-    mut mver: uint8_t,
+    _mver: uint8_t,
     mut ignoreflag: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     unsafe {

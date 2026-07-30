@@ -1,4 +1,3 @@
-#![feature(core_intrinsics)]
 #![allow(
     clippy::missing_safety_doc,
     dead_code,
@@ -15,7 +14,7 @@ pub enum fuse_session {}
 pub enum fuse_pollhandle {}
 pub enum fuse_req {}
 pub enum __dirstream {}
-#[macro_use]
+// (macro_use removed)
 extern crate c2rust_bitfields;
 #[allow(unused_imports)]
 use ::mfsmount;
@@ -2115,7 +2114,7 @@ unsafe extern "C" fn mfs_opt_proc_stage1(
     mut data: *mut ::core::ffi::c_void,
     mut arg: *const ::core::ffi::c_char,
     mut key: ::core::ffi::c_int,
-    mut outargs: *mut fuse_args,
+    _outargs: *mut fuse_args,
 ) -> ::core::ffi::c_int {
     unsafe {
         let mut defargs: *mut fuse_args = data as *mut fuse_args;
@@ -2147,7 +2146,7 @@ unsafe extern "C" fn mfs_opt_proc_stage1(
     }
 }
 unsafe extern "C" fn mfs_opt_proc_stage2(
-    mut data: *mut ::core::ffi::c_void,
+    _data: *mut ::core::ffi::c_void,
     mut arg: *const ::core::ffi::c_char,
     mut key: ::core::ffi::c_int,
     mut outargs: *mut fuse_args,

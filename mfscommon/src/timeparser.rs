@@ -29,11 +29,7 @@ mod imp {
         would
     }
 
-    pub fn snprint_time(
-        period: u32,
-        timetab: &[u32],
-        timesym: &[u8],
-    ) -> (Vec<u8>, u32) {
+    pub fn snprint_time(period: u32, timetab: &[u32], timesym: &[u8]) -> (Vec<u8>, u32) {
         let mut out: Vec<u8> = Vec::new();
         let mut mleng = usize::MAX; // unbounded: we format then the shim clips
         let mut resultlen: u32 = 0;
@@ -84,9 +80,7 @@ mod imp {
                 if mask & 0xc0 == 0xc0 {
                     return Err((TPARSE_UNEXPECTED_CHAR_I, str_[0] as u32));
                 }
-                while str_.first().is_some_and(|c| c.is_ascii_digit())
-                    && cur < u32::MAX as u64
-                {
+                while str_.first().is_some_and(|c| c.is_ascii_digit()) && cur < u32::MAX as u64 {
                     // original used a double multiply — kept bit-exact
                     cur = (cur as f64 * 10.0f64) as u64;
                     cur = cur.wrapping_add((str_[0] - b'0') as u64);
@@ -232,7 +226,11 @@ unsafe fn clip_out(
             return resultlen as ::core::ffi::c_int;
         }
         let text_end = body.len().min(mleng - 1);
-        std::ptr::copy_nonoverlapping(body.as_ptr() as *const ::core::ffi::c_char, where_, text_end);
+        std::ptr::copy_nonoverlapping(
+            body.as_ptr() as *const ::core::ffi::c_char,
+            where_,
+            text_end,
+        );
         *where_.add(text_end) = 0;
     }
     resultlen as ::core::ffi::c_int
@@ -354,7 +352,10 @@ mod tests {
 
     fn fmt(period: u32) -> String {
         let (body, _) = imp::snprint_time(period, &[604800, 86400, 3600, 60, 1], b"wdhms");
-        String::from_utf8(body).unwrap().trim_end_matches('\0').to_string()
+        String::from_utf8(body)
+            .unwrap()
+            .trim_end_matches('\0')
+            .to_string()
     }
 
     #[test]

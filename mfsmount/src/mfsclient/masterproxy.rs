@@ -586,7 +586,7 @@ unsafe extern "C" fn masterproxy_server(
     }
 }
 unsafe extern "C" fn masterproxy_acceptor(
-    mut args: *mut ::core::ffi::c_void,
+    _args: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut clientthread: pthread_t = 0;

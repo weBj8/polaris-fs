@@ -3805,32 +3805,28 @@ pub unsafe extern "C" fn masterconn_reconnect() {
 pub unsafe extern "C" fn masterconn_regstate(
     mut registerstate: uint8_t,
 ) -> *const ::core::ffi::c_char {
-    unsafe {
-        match registerstate as ::core::ffi::c_int {
-            0 => return b"UNREGISTERED\0".as_ptr() as *const ::core::ffi::c_char,
-            1 => return b"WAITING\0".as_ptr() as *const ::core::ffi::c_char,
-            2 => return b"INPROGRESS\0".as_ptr() as *const ::core::ffi::c_char,
-            3 => return b"REGISTERED\0".as_ptr() as *const ::core::ffi::c_char,
-            _ => {}
-        }
-        return b"???\0".as_ptr() as *const ::core::ffi::c_char;
+    match registerstate as ::core::ffi::c_int {
+        0 => return b"UNREGISTERED\0".as_ptr() as *const ::core::ffi::c_char,
+        1 => return b"WAITING\0".as_ptr() as *const ::core::ffi::c_char,
+        2 => return b"INPROGRESS\0".as_ptr() as *const ::core::ffi::c_char,
+        3 => return b"REGISTERED\0".as_ptr() as *const ::core::ffi::c_char,
+        _ => {}
     }
+    return b"???\0".as_ptr() as *const ::core::ffi::c_char;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn masterconn_socketmode(mut mode: uint8_t) -> *const ::core::ffi::c_char {
-    unsafe {
-        match mode as ::core::ffi::c_int {
-            0 => return b"NOT CONNECTED\0".as_ptr() as *const ::core::ffi::c_char,
-            1 => {
-                return b"CONNECTING IN PROGRESS\0".as_ptr() as *const ::core::ffi::c_char;
-            }
-            2 => return b"CONNECTED\0".as_ptr() as *const ::core::ffi::c_char,
-            3 => return b"DISCONNECTING\0".as_ptr() as *const ::core::ffi::c_char,
-            4 => return b"FLUSHING DATA\0".as_ptr() as *const ::core::ffi::c_char,
-            _ => {}
+    match mode as ::core::ffi::c_int {
+        0 => return b"NOT CONNECTED\0".as_ptr() as *const ::core::ffi::c_char,
+        1 => {
+            return b"CONNECTING IN PROGRESS\0".as_ptr() as *const ::core::ffi::c_char;
         }
-        return b"???\0".as_ptr() as *const ::core::ffi::c_char;
+        2 => return b"CONNECTED\0".as_ptr() as *const ::core::ffi::c_char,
+        3 => return b"DISCONNECTING\0".as_ptr() as *const ::core::ffi::c_char,
+        4 => return b"FLUSHING DATA\0".as_ptr() as *const ::core::ffi::c_char,
+        _ => {}
     }
+    return b"???\0".as_ptr() as *const ::core::ffi::c_char;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn masterconn_info(mut fd: *mut FILE) {

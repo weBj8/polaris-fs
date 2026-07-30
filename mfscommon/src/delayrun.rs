@@ -29,7 +29,10 @@ unsafe extern "C" {
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    fn pthread_join(th: pthread_t, thread_return: *mut *mut ::core::ffi::c_void) -> ::core::ffi::c_int;
+    fn pthread_join(
+        th: pthread_t,
+        thread_return: *mut *mut ::core::ffi::c_void,
+    ) -> ::core::ffi::c_int;
 }
 
 pub type DelayFn = unsafe extern "C" fn(*mut ::core::ffi::c_void);
@@ -118,7 +121,11 @@ pub extern "C" fn delay_run(
     // SAFETY: extern, no args.
     let firetime = unsafe { monotonic_useconds() }.wrapping_add(useconds);
     let mut guard = STATE.lock().unwrap();
-    guard.heap.push(Elem { firetime, f, udata: Udata(udata) });
+    guard.heap.push(Elem {
+        firetime,
+        f,
+        udata: Udata(udata),
+    });
     // wake the scheduler only if the new task is now the soonest
     if matches!(guard.heap.peek(), Some(t) if t.firetime == firetime) {
         COND.notify_one();
@@ -150,7 +157,8 @@ pub extern "C" fn delay_init() {
     let mut th: pthread_t = 0;
     // SAFETY: th written by the call; scheduler is joinable (detached=0),
     // joined in delay_term.
-    let rc = unsafe { lwt_minthread_create(&mut th, 0, Some(delay_scheduler), std::ptr::null_mut()) };
+    let rc =
+        unsafe { lwt_minthread_create(&mut th, 0, Some(delay_scheduler), std::ptr::null_mut()) };
     if rc < 0 {
         // original abort()ed on thread-create failure paths
         // SAFETY: abort has no preconditions.

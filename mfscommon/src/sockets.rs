@@ -289,20 +289,16 @@ pub struct addrinfo {
 }
 #[inline]
 unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    unsafe {
-        return (__bsx as ::core::ffi::c_int >> 8 as ::core::ffi::c_int & 0xff as ::core::ffi::c_int
-            | (__bsx as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) << 8 as ::core::ffi::c_int)
-            as __uint16_t;
-    }
+    return (__bsx as ::core::ffi::c_int >> 8 as ::core::ffi::c_int & 0xff as ::core::ffi::c_int
+        | (__bsx as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) << 8 as ::core::ffi::c_int)
+        as __uint16_t;
 }
 #[inline]
 unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    unsafe {
-        return (__bsx & 0xff000000 as __uint32_t) >> 24 as ::core::ffi::c_int
-            | (__bsx & 0xff0000 as __uint32_t) >> 8 as ::core::ffi::c_int
-            | (__bsx & 0xff00 as __uint32_t) << 8 as ::core::ffi::c_int
-            | (__bsx & 0xff as __uint32_t) << 24 as ::core::ffi::c_int;
-    }
+    return (__bsx & 0xff000000 as __uint32_t) >> 24 as ::core::ffi::c_int
+        | (__bsx & 0xff0000 as __uint32_t) >> 8 as ::core::ffi::c_int
+        | (__bsx & 0xff00 as __uint32_t) << 8 as ::core::ffi::c_int
+        | (__bsx & 0xff as __uint32_t) << 24 as ::core::ffi::c_int;
 }
 pub const PF_LOCAL: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const PF_UNIX: ::core::ffi::c_int = PF_LOCAL;
@@ -466,7 +462,13 @@ unsafe extern "C" fn sockresolve(
     }
 }
 fn fmt_ip(ip: uint32_t) -> [u8; 16] {
-    let s = format!("{}.{}.{}.{}", ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+    let s = format!(
+        "{}.{}.{}.{}",
+        ip >> 24,
+        (ip >> 16) & 0xff,
+        (ip >> 8) & 0xff,
+        ip & 0xff
+    );
     let mut b = [0u8; 16];
     b[..s.len()].copy_from_slice(s.as_bytes());
     b
@@ -479,12 +481,23 @@ pub unsafe extern "C" fn univmakestrip(mut strip: *mut ::core::ffi::c_char, mut 
     let b = fmt_ip(ip);
     // SAFETY: per fn contract; writes STRIPSIZE bytes incl. NUL.
     unsafe {
-        std::ptr::copy_nonoverlapping(b.as_ptr() as *const ::core::ffi::c_char, strip, STRIPSIZE as usize);
+        std::ptr::copy_nonoverlapping(
+            b.as_ptr() as *const ::core::ffi::c_char,
+            strip,
+            STRIPSIZE as usize,
+        );
         *strip.add((STRIPSIZE - 1) as usize) = 0;
     }
 }
 fn fmt_ip_port(ip: uint32_t, port: uint16_t) -> [u8; 32] {
-    let s = format!("{}.{}.{}.{}:{}", ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff, port);
+    let s = format!(
+        "{}.{}.{}.{}:{}",
+        ip >> 24,
+        (ip >> 16) & 0xff,
+        (ip >> 8) & 0xff,
+        ip & 0xff,
+        port
+    );
     let mut b = [0u8; 32];
     b[..s.len()].copy_from_slice(s.as_bytes());
     b
@@ -501,7 +514,11 @@ pub unsafe extern "C" fn univmakestripport(
     let b = fmt_ip_port(ip, port);
     // SAFETY: per fn contract; writes STRIPPORTSIZE bytes incl. NUL.
     unsafe {
-        std::ptr::copy_nonoverlapping(b.as_ptr() as *const ::core::ffi::c_char, stripport, STRIPPORTSIZE as usize);
+        std::ptr::copy_nonoverlapping(
+            b.as_ptr() as *const ::core::ffi::c_char,
+            stripport,
+            STRIPPORTSIZE as usize,
+        );
         *stripport.add((STRIPPORTSIZE - 1) as usize) = 0;
     }
 }
@@ -1200,7 +1217,7 @@ pub unsafe extern "C" fn tcpnodelay(mut sock: ::core::ffi::c_int) -> ::core::ffi
 /// # Safety
 /// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpaccfhttp(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn tcpaccfhttp(_sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         *__errno_location() = EINVAL;
         return -1 as ::core::ffi::c_int;
@@ -1209,7 +1226,7 @@ pub unsafe extern "C" fn tcpaccfhttp(mut sock: ::core::ffi::c_int) -> ::core::ff
 /// # Safety
 /// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpaccfdata(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn tcpaccfdata(_sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
         *__errno_location() = EINVAL;
         return -1 as ::core::ffi::c_int;

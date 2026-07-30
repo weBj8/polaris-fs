@@ -39,9 +39,7 @@ unsafe extern "C" fn get32bit(mut ptr: *mut *const uint8_t) -> uint32_t {
 pub const REHASH_STEP: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
 pub const CLUSTER_SIZE: ::core::ffi::c_int = 9 as ::core::ffi::c_int;
 unsafe extern "C" fn hash_function(mut node: uint32_t) -> uint32_t {
-    unsafe {
-        return node.wrapping_mul(33 as uint32_t);
-    }
+    return node.wrapping_mul(33 as uint32_t);
 }
 unsafe extern "C" fn hash_insert(
     mut hashtab: *mut *mut uint8_t,

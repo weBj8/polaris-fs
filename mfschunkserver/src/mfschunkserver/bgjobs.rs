@@ -2498,16 +2498,14 @@ pub unsafe extern "C" fn job_lp_worker(
 }
 #[inline]
 unsafe extern "C" fn job_op_to_tasktype(mut op: uint32_t) -> uint32_t {
-    unsafe {
-        match op {
-            2 => return TASK_CHUNKOP as uint32_t,
-            3 => return TASK_READ as uint32_t,
-            4 => return TASK_WRITE as uint32_t,
-            5 | 6 | 7 | 8 => return TASK_REPLICATE as uint32_t,
-            10 => return TASK_MOVE as uint32_t,
-            _ => return TASK_INFO as uint32_t,
-        };
-    }
+    match op {
+        2 => return TASK_CHUNKOP as uint32_t,
+        3 => return TASK_READ as uint32_t,
+        4 => return TASK_WRITE as uint32_t,
+        5 | 6 | 7 | 8 => return TASK_REPLICATE as uint32_t,
+        10 => return TASK_MOVE as uint32_t,
+        _ => return TASK_INFO as uint32_t,
+    };
 }
 pub const JOB_MODE_ALWAYS_DO: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const JOB_MODE_LIMITED_RETURN: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
