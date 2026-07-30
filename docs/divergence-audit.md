@@ -41,7 +41,7 @@ punch-list).
 
 | # | Category | Site | Divergence | Risk |
 | --- | --- | --- | --- | --- |
-| D1 | aliasing-mutability | 1,898 `static mut` sites tree-wide | `&mut`/`&` formed to `static mut` globals across the event loop; any two overlapping `&mut` = UB | HIGH (class) |
+| D1 | aliasing-mutability | 1,786 `static mut` sites tree-wide | `&mut`/`&` formed to `static mut` globals across the event loop; any two overlapping `&mut` = UB | HIGH (class) |
 | D2 | dropped-definitions | 6 `_Atomic` statics, `mfsmount`+`mfsbdev` `mastercomm.rs`/`readdata.rs`/`writedata.rs` | definitions dropped by c2rust, re-added by hand; regression risk on every regeneration | MEDIUM |
 | D3 | aliasing-mutability | `mfsclient` cache modules (`getgroups.rs` fixed at `35f00f4`; sibling caches un-audited) | re-entrant callback invalidating cached pointers — one latent UAF already shipped | MEDIUM (class) |
 | D4 | UB-preserving-semantics | 11,498 `wrapping_*` sites | machine-inserted C overflow semantics; any "cleanup" to plain `+`/`-` silently changes overflow behavior | MEDIUM (anti-fix class) |
@@ -62,7 +62,7 @@ single-threaded — and worker threads (chunkserver disk I/O, master
 **Transpiled Rust:** `static mut X: T` with `&mut X` / `&X` formed at use
 sites, plus raw pointers stashed in callback contexts. Rust's rules: forming
 two live `&mut X` (or `&mut` + `&`) to the same `static mut` is
-**instant UB**, regardless of threads. With 1,898 sites *(verified-claims
+**instant UB**, regardless of threads. With 1,786 sites *(verified-claims
 VC-02)*, exhaustive per-site proof is not feasible by inspection — this is a
 class, and gets a class fix.
 
@@ -73,7 +73,7 @@ change away from miscompiling, and Miri flags it immediately.
 **Test coverage:** ❌ none — no Miri run, no ASM audit has been performed on
 this tree. P0 adds the Miri gate.
 
-**Recommended fix (systemic, per methodology #4):** classify all 1,898 in
+**Recommended fix (systemic, per methodology #4):** classify all 1,786 in
 `docs/facts/OWNERSHIP.tsv` (P0), then convert by class: scalars →
 `AtomicXxx` (relaxed for stats counters, see VC-07); structs → `Mutex`/
 `RwLock` or thread-confined `thread_local!` where the worker-thread split

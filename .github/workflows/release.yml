@@ -12,6 +12,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  gates:
+    name: Migration gates (unsafe/IOU/SAFETY/wrapping counters)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check counters against tools/gates/baseline.tsv
+        run: bash tools/gates/check.sh
+
   build:
     name: Build all daemons
     runs-on: ubuntu-24.04
@@ -96,6 +108,11 @@ jobs:
           file dist/mfsmaster dist/mfsmount
           readelf --version-info dist/mfsmaster \
             | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -3
+
+      - name: Cluster smoke test (master+chunkserver+metalogger+FUSE mount)
+        # sudo: real root lets daemons setgroups() and gives unshare/fuse the
+        # caps they need; LD_LIBRARY_PATH finds the freshly installed fuse 3.18.
+        run: sudo LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu bash tools/smoke_test.sh
 
       - name: Upload release executables
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

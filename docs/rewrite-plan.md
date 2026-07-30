@@ -22,7 +22,7 @@ Measured baseline of what we're carrying (see
 | --- | ---: | --- |
 | Total `.rs` LOC across 7 crates | 498,286 | machine-translated |
 | `unsafe fn` / `unsafe {}` / `unsafe impl` sites | 8,727 | grep baseline, frozen in P0 |
-| `static mut` declarations | 1,898 | aliasing-mutability class |
+| `static mut` declarations | 1,786 | aliasing-mutability class |
 | `extern "C"` occurrences | 5,151 | intra-crate C ABI seams |
 | `wrapping_*` arithmetic ops | 11,498 | C overflow semantics, machine-inserted |
 | Raw-pointer casts in `mfsmaster/src` alone | 12,664 | `as *mut` / `as *const` |

@@ -72,7 +72,7 @@ consumers — do not override it locally.
 
 | Transpiled form | Safe form | Notes |
 | --- | --- | --- |
-| `static mut X: T` | consult TSV: `AtomicXxx` for scalars, `Mutex<T>`/`RwLock<T>` for structs, `thread_local!` for per-thread, `OnceLock` for init-once | 1,898 sites; this is the single biggest class. See aliasing-hunt for the aliasing risk of `&mut X` formed from `static mut` |
+| `static mut X: T` | consult TSV: `AtomicXxx` for scalars, `Mutex<T>`/`RwLock<T>` for structs, `thread_local!` for per-thread, `OnceLock` for init-once | 1,786 sites; this is the single biggest class. See aliasing-hunt for the aliasing risk of `&mut X` formed from `static mut` |
 | `*mut T` / `*const T` struct field | TSV `safe_type` column | never put a lifetime on the struct until the TSV says `BORROW` |
 | `*mut T` fn param (intra-crate) | `&mut T` / `Option<&mut T>` if null is a live value | null checks at the boundary become `Option` |
 | `*mut c_void` callback context | concrete `*mut Ctx` at the FFI seam, `&mut Ctx` inside the callback | the event loop's `void* arg` pattern; type the context |

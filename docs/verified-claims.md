@@ -41,16 +41,24 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 ### VC-02 — mutable-global and FFI-surface scale
 
-- FACT: the tree contains 1,898 `static mut` declarations, 5,151 `extern "C"`
+- FACT: the tree contains 1,786 `static mut` declarations, 5,151 `extern "C"`
   occurrences, 11,498 `wrapping_*` arithmetic ops, and 12,664 raw-pointer
   casts (`as *mut`/`as *const`) in `mfsmaster/src` alone.
+  **Correction (v2):** an earlier revision of this claim said 1,898. That
+  count came from a shell glob (`mfs*/src mfsgui/src mfsnetdump/src`) that
+  passed `mfsgui/src` and `mfsnetdump/src` twice, double-counting 112 hits.
+  The unique-declaration count is 1,786 (668 scalar → STATIC, 621 buffer/struct
+  → BUF, 497 pointer → UNKNOWN; per-crate: mfsmaster 727, mfsmount 345,
+  mfschunkserver 291, mfsbdev 213, mfsgui 103, mfsmetalogger 98, mfsnetdump 9
+  — `tools/gen_ownership.py`).
 - RUST: `static mut` is the largest single ownership class; every one must be
   classified in `docs/facts/OWNERSHIP.tsv` (P0). `wrapping_*` sites are
   C-semantics-preserving and must NOT be "simplified" to panicking arithmetic
   ([porting.md](porting.md) type map).
 - GATE: P0 exit = zero unclassified `static mut`. CI grep counts reproduced.
 - SRC: `grep -rn 'static mut' --include='*.rs' . --exclude-dir=vendor | wc -l`
-  = 1,898; `grep -rn 'extern "C"' …` = 5,151; `grep -rn 'wrapping_' …` =
+  = 1,786 (unique; `grep -rn 'static mut' --include='*.rs' . --exclude-dir=vendor
+  --exclude-dir=target | wc -l`); `grep -rn 'extern "C"' …` = 5,151; `grep -rn 'wrapping_' …` =
   11,498; `grep -rc 'as \*mut\|as \*const' mfsmaster/src | awk '{s+=$1} END
   {print s}'` = 12,664 (run 2026-07-30).
 

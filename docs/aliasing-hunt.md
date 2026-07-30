@@ -19,7 +19,7 @@ an invalidation point.
 
 | Stage | Count |
 | --- | --- |
-| Candidates enumerated (pattern match) | 1,898 `static mut` sites + `mfsclient` cache modules + callback-context `void*` sites (ungrepped) |
+| Candidates enumerated (pattern match) | 1,786 `static mut` sites + `mfsclient` cache modules + callback-context `void*` sites (ungrepped) |
 | Survived adversarial triage | — P0 |
 | Miri/ASM-verified `PROVEN` | — P0+ |
 | `NOT_CACHED` (UB, not currently exploited) | — P0+ |
@@ -41,7 +41,7 @@ Grep classes, each producing a candidate list with `file:line`:
 
 | Class | Pattern | Seed count |
 | --- | --- | --- |
-| A: `static mut` access | `static mut` declarations + every `&`/`&mut`/`addr_of!` use | 1,898 decls (VC-02) |
+| A: `static mut` access | `static mut` declarations + every `&`/`&mut`/`addr_of!` use | 1,786 decls (VC-02) |
 | B: cache-pointer-across-callback | `mfsclient/*cache*.rs`, `fdcache.rs`, `sustained_*.rs`, `csdb.rs` — pointer/index held across `mastercomm` round-trips | ~14 modules (VC-06, M2) |
 | C: `void*` callback contexts | event-loop registrations casting `*mut c_void` to concrete ctx | ungrepped (P0) |
 | D: worker-thread shared state | `lwthread.rs`, `workers.rs`, `pcqueue.rs`, `squeue.rs` + their clients | 4 modules + clients |

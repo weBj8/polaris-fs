@@ -44,7 +44,7 @@ pre-merge)*. This was the only *specification-as-data* artifact in the whole
 methodology.
 
 **polaris-fs rule:** Phase P0 produces `docs/facts/OWNERSHIP.tsv` — every
-`static mut` (1,898 sites *(polaris — grep, see verified-claims VC-02)*) and
+`static mut` (1,786 sites *(polaris — grep, see verified-claims VC-02)*) and
 every struct field holding a raw pointer, classified into
 `OWNED → Box`, `SHARED → Rc/Arc`, `BORROW → &'a`, `STATIC → &'static`,
 `FFI → raw ptr stays`, `UNKNOWN → Option<NonNull<T>> + IOU`. The porting

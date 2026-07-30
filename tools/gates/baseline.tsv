@@ -1,0 +1,31 @@
+# Frozen CI gate baselines — polaris-fs migration
+# Format: metric<TAB>crate<TAB>direction<TAB>value
+#   le = current count must be <= value (may only shrink)
+#   ge = current count must be >= value (may only grow)
+# A PR that needs to move a number updates THIS FILE in the same PR —
+# the change is visible in review and must be justified in the PR description
+# (e.g. a migrated module legitimately removes wrapping_* sites → lower the
+# wrapping_ops floor for that crate with the claim ID in the commit message).
+# Frozen 2026-07-30 at commit 2e49c26 (unmigrated baseline). Evidence: VC-01/VC-02.
+unsafe_sites	mfsmaster	le	3284
+unsafe_sites	mfschunkserver	le	1288
+unsafe_sites	mfsmetalogger	le	469
+unsafe_sites	mfsmount	le	1764
+unsafe_sites	mfsbdev	le	1403
+unsafe_sites	mfsgui	le	475
+unsafe_sites	mfsnetdump	le	44
+unsafe_no_safety	mfsmaster	le	3284
+unsafe_no_safety	mfschunkserver	le	1288
+unsafe_no_safety	mfsmetalogger	le	469
+unsafe_no_safety	mfsmount	le	1764
+unsafe_no_safety	mfsbdev	le	1403
+unsafe_no_safety	mfsgui	le	475
+unsafe_no_safety	mfsnetdump	le	44
+migration_iou	workspace	le	0
+wrapping_ops	mfsmaster	ge	4973
+wrapping_ops	mfschunkserver	ge	2198
+wrapping_ops	mfsmetalogger	ge	490
+wrapping_ops	mfsmount	ge	1850
+wrapping_ops	mfsbdev	ge	1431
+wrapping_ops	mfsgui	ge	488
+wrapping_ops	mfsnetdump	ge	68
