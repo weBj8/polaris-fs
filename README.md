@@ -1,7 +1,6 @@
 <p align="center">
-  <img src="docs/assets/polaris-fs.svg" width="128" alt="polaris-fs logo">
+  <img src="docs/assets/polaris-fs-logo.svg" width="420" alt="PolarisFS">
 </p>
-<h1 align="center">polaris-fs</h1>
 <p align="center">
   Memory-safe Rust migration of MooseFS 4.59.2
 </p>
@@ -12,7 +11,7 @@
   <a href="docs/rewrite-plan.md"><img alt="Migration P4 partial" src="https://img.shields.io/badge/migration-P4%20partial-2B6CB0?style=flat-square"></a>
 </p>
 
-polaris-fs incrementally replaces a complete c2rust translation of MooseFS
+PolarisFS incrementally replaces a complete c2rust translation of MooseFS
 4.59.2 with idiomatic safe Rust. C ABI boundaries, wire protocol, disk format,
 and observable behavior stay frozen at each merge point.
 
