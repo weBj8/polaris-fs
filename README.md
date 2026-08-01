@@ -50,10 +50,10 @@ LD_LIBRARY_PATH=$FUSE_LIB bash tools/smoke_test.sh
 bash tools/gates/check.sh
 ```
 
-CI caches Cargo dependencies and release build artifacts, then runs workspace
-tests, workspace build, migration gates, executable checks, and full cluster +
-FUSE smoke test on every push to `mfs-rust`. Successful runs publish `latest`
-and commit tags to `ghcr.io/webj8/polaris-fs`:
+CI runs migration gates, workspace tests, and release build in parallel. After
+the release artifact is ready, container build and full cluster + FUSE smoke
+run in parallel; GHCR publish waits for every gate. Successful runs publish
+`latest` and commit tags to `ghcr.io/webj8/polaris-fs`:
 
 ```bash
 docker pull ghcr.io/webj8/polaris-fs:latest
