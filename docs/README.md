@@ -24,6 +24,7 @@ names the Bun artifact it adapts.
 | [methodology.md](methodology.md) | `LESSONS_LEARNED.md`, `BROADLY_APPLICABLE_LESSONS.md` | What worked / what didn't in the Bun port, and the binding rules this migration adopts. Read first. |
 | [rewrite-plan.md](rewrite-plan.md) | `rust-rewrite-plan.md` | Architecture and phase plan: why, what, constraints, crate map, phases P0–P6 with caps and exit criteria. The plan we execute against. |
 | [porting.md](porting.md) | `PORTING.md` | The coding standard for converting one transpiled module to safe Rust. Read before writing any code in a phase. |
+| [deployment.md](deployment.md) | — (ours) | Container quickstart, multi-host Docker/Podman deployment, safe upgrades, and rollback. |
 | [verified-claims.md](verified-claims.md) | `rust-rewrite-verified-claims.md` | The fact corpus. Every claim is cited to `file:line` and survives adversarial review. The plan is a derived artifact of these facts. |
 | [divergence-audit.md](divergence-audit.md) | `ZIG_RUST_DIVERGENCE_AUDIT.md` | Known C→transpiled-Rust semantic divergence classes, risk-rated, worked as a punch-list. |
 | [aliasing-hunt.md](aliasing-hunt.md) | `NOALIAS_HUNT_REPORT.md`, `NOALIAS_SUSPECTS.md` | Protocol and punch-list for the UB hunt: `static mut` aliasing, `&mut`-from-raw-pointer, re-entrant callbacks. |

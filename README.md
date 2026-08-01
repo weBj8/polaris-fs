@@ -21,6 +21,26 @@ Reference tests, migration counters, and an end-to-end FUSE smoke test guard
 each migrated module. See [migration docs](docs/README.md) for methodology and
 evidence.
 
+## Quickstart
+
+Single-host Docker Compose deployment: master, metalogger, chunkserver, FUSE
+mount, and GUI. Set `PLFS_MASTER_HOST` to this host's LAN IP, not loopback:
+
+```bash
+export PLFS_MASTER_HOST=192.168.1.10
+export PLFS_IMAGE=ghcr.io/webj8/polaris-fs:latest
+sudo install -d /var/lib/polarisfs/{master,metalogger,chunkserver,chunks,gui} /mnt/plfs
+mountpoint -q /mnt/plfs || sudo mount --bind /mnt/plfs /mnt/plfs
+sudo mount --make-rshared /mnt/plfs
+sudo -E docker compose -f docker/docker-compose.single.yml up -d
+findmnt /mnt/plfs
+```
+
+Files appear at `/mnt/plfs`; GUI listens on `http://$PLFS_MASTER_HOST:9425`.
+Default exports allow read-write access, so use this only on a trusted network
+until exports are restricted. Multi-host Docker/Podman setup, immutable tags,
+backup, upgrade, and rollback: [deployment guide](docs/deployment.md).
+
 ## Migration status
 
 | Phase | Scope | State |

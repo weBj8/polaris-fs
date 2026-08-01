@@ -1,6 +1,6 @@
 # Podman quadlet example for a FUSE client mount
-# Install: copy to /etc/containers/systemd/plfsmount.container
-#          then `systemctl daemon-reload && systemctl start plfsmount`
+# Install under /etc/containers/systemd/plfs/, then run:
+# `systemctl daemon-reload && systemctl start plfsmount`
 [Unit]
 Description=PolarisFS FUSE mount
 After=network-online.target plfschunkserver.service

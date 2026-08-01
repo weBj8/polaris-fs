@@ -1,5 +1,3 @@
-# Local metadata-tier example. Override PLFS_IMAGE, PLFS_DATA_DIR,
-# PLFS_MASTER_HOST, and PLFS_MOUNT_DIR for your deployment.
 services:
   plfsmaster:
     image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
@@ -9,7 +7,7 @@ services:
     environment:
       ROLE: plfsmaster
     volumes:
-      - ${PLFS_DATA_DIR:-./data}/master:/var/lib/plfs
+      - ${PLFS_DATA_DIR:-/var/lib/polarisfs}/master:/var/lib/plfs
 
   plfsmetalogger:
     image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
@@ -18,9 +16,24 @@ services:
     network_mode: host
     environment:
       ROLE: plfsmetalogger
-      MASTER_HOST: ${PLFS_MASTER_HOST:-192.168.1.1}
+      MASTER_HOST: ${PLFS_MASTER_HOST:?set PLFS_MASTER_HOST to this host's LAN IP}
     volumes:
-      - ${PLFS_DATA_DIR:-./data}/metalogger:/var/lib/plfs
+      - ${PLFS_DATA_DIR:-/var/lib/polarisfs}/metalogger:/var/lib/plfs
+    depends_on:
+      - plfsmaster
+
+  plfschunkserver:
+    image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
+    container_name: plfschunkserver
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ROLE: plfschunkserver
+      MASTER_HOST: ${PLFS_MASTER_HOST:?set PLFS_MASTER_HOST to this host's LAN IP}
+      HDD_PATHS: /mnt/hdd/plfs
+    volumes:
+      - ${PLFS_DATA_DIR:-/var/lib/polarisfs}/chunkserver:/var/lib/plfs
+      - ${PLFS_CHUNK_DIR:-/var/lib/polarisfs/chunks}:/mnt/hdd/plfs
     depends_on:
       - plfsmaster
 
@@ -34,10 +47,10 @@ services:
       - /dev/fuse
     environment:
       ROLE: plfsmount
-      MASTER_HOST: ${PLFS_MASTER_HOST:-192.168.1.1}
+      MASTER_HOST: ${PLFS_MASTER_HOST:?set PLFS_MASTER_HOST to this host's LAN IP}
       MOUNT_POINT: /mnt/plfs
     volumes:
-      - ${PLFS_MOUNT_DIR:-./mnt}:/mnt/plfs:shared
+      - ${PLFS_MOUNT_DIR:-/mnt/plfs}:/mnt/plfs:shared
     depends_on:
       - plfsmaster
 
@@ -49,8 +62,8 @@ services:
     environment:
       ROLE: plfsgui
     extra_hosts:
-      - "plfsmaster:${PLFS_MASTER_HOST:-192.168.1.1}"
+      - "plfsmaster:${PLFS_MASTER_HOST:?set PLFS_MASTER_HOST to this host's LAN IP}"
     volumes:
-      - ${PLFS_DATA_DIR:-./data}/gui:/var/lib/plfs
+      - ${PLFS_DATA_DIR:-/var/lib/polarisfs}/gui:/var/lib/plfs
     depends_on:
       - plfsmaster
