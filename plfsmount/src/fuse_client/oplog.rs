@@ -256,7 +256,7 @@ mod imp {
     }
 
     pub struct Oplog {
-        pub opbuff: Box<[u8; OPBUFFSIZE]>,
+        pub opbuff: Box<[u8]>,
         pub writepos: u64,
         pub waiting: bool,
         pub nextfh: u64,
@@ -266,7 +266,7 @@ mod imp {
     impl Oplog {
         pub fn new() -> Self {
             Oplog {
-                opbuff: Box::new([0; OPBUFFSIZE]),
+                opbuff: vec![0; OPBUFFSIZE].into_boxed_slice(),
                 writepos: 0,
                 waiting: false,
                 nextfh: 1,
