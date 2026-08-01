@@ -6,6 +6,7 @@
 </p>
 <p align="center">
   <a href="https://github.com/weBj8/polaris-fs/actions/workflows/release.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/weBj8/polaris-fs/release.yml?branch=mfs-rust&style=flat-square&label=build"></a>
+  <a href="https://github.com/weBj8/polaris-fs/pkgs/container/polaris-fs"><img alt="Container image" src="https://img.shields.io/github/actions/workflow/status/weBj8/polaris-fs/release.yml?branch=mfs-rust&style=flat-square&label=container&logo=docker"></a>
   <a href="rust-toolchain.toml"><img alt="Rust nightly" src="https://img.shields.io/badge/rust-nightly-E05D44?style=flat-square&logo=rust&logoColor=white"></a>
   <a href="LICENSE"><img alt="GPL-2.0 license" src="https://img.shields.io/badge/license-GPL--2.0-2F855A?style=flat-square"></a>
   <a href="docs/rewrite-plan.md"><img alt="Migration P4 partial" src="https://img.shields.io/badge/migration-P4%20partial-2B6CB0?style=flat-square"></a>
@@ -51,7 +52,12 @@ bash tools/gates/check.sh
 
 CI caches Cargo dependencies and release build artifacts, then runs workspace
 tests, workspace build, migration gates, executable checks, and full cluster +
-FUSE smoke test on every push to `mfs-rust`.
+FUSE smoke test on every push to `mfs-rust`. Successful runs publish `latest`
+and commit tags to `ghcr.io/webj8/polaris-fs`:
+
+```bash
+docker pull ghcr.io/webj8/polaris-fs:latest
+```
 
 ## Workspace
 

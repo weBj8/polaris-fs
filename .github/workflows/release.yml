@@ -25,8 +25,11 @@ jobs:
         run: bash tools/gates/check.sh
 
   build:
-    name: Test and build all daemons
+    name: Test, build, and publish
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     env:
       RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
     steps:
@@ -125,6 +128,24 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" target/smoke-artifacts
           sudo rm -rf target/smoke core*   # drop root-owned artifacts so later cache hashFiles works
           exit $rc
+
+      - name: Build and publish container image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image=ghcr.io/webj8/polaris-fs
+          revision=${GITHUB_SHA::12}
+          echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker pull "$image:latest" || true
+          docker build --cache-from "$image:latest" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image:latest" --tag "$image:$revision" \
+            --file docker/Dockerfile .
+          docker push "$image:latest"
+          docker push "$image:$revision"
 
       - name: Upload crash artifacts on smoke failure
         if: failure()

@@ -2,11 +2,11 @@
 # Install: copy to /etc/containers/systemd/plfsmount.container
 #          then `systemctl daemon-reload && systemctl start plfsmount`
 [Unit]
-Description=MooseFS FUSE mount (c2rust port)
+Description=PolarisFS FUSE mount
 After=network-online.target plfschunkserver.service
 Wants=network-online.target
 [Container]
-Image=docker.io/library/plfs-rust:4.59.2
+Image=ghcr.io/webj8/polaris-fs:latest
 ContainerName=plfsmount
 Network=host
 Environment=ROLE=plfsmount

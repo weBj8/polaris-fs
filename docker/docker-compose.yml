@@ -2,7 +2,7 @@
 # PLFS_MASTER_HOST, and PLFS_MOUNT_DIR for your deployment.
 services:
   plfsmaster:
-    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
     container_name: plfsmaster
     restart: unless-stopped
     network_mode: host
@@ -12,7 +12,7 @@ services:
       - ${PLFS_DATA_DIR:-./data}/master:/var/lib/plfs
 
   plfsmetalogger:
-    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
     container_name: plfsmetalogger
     restart: unless-stopped
     network_mode: host
@@ -25,7 +25,7 @@ services:
       - plfsmaster
 
   plfsmount:
-    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
     container_name: plfsmount
     restart: unless-stopped
     network_mode: host
@@ -42,7 +42,7 @@ services:
       - plfsmaster
 
   plfsgui:
-    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    image: ${PLFS_IMAGE:-ghcr.io/webj8/polaris-fs:latest}
     container_name: plfsgui
     restart: unless-stopped
     network_mode: host

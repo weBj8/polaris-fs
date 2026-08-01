@@ -2,12 +2,12 @@
 # Install: copy to /etc/containers/systemd/plfschunkserver.container
 #          then `systemctl daemon-reload && systemctl start plfschunkserver`
 [Unit]
-Description=MooseFS chunkserver (c2rust port)
+Description=PolarisFS chunkserver
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=docker.io/library/plfs-rust:4.59.2
+Image=ghcr.io/webj8/polaris-fs:latest
 ContainerName=plfschunkserver
 Network=host
 Environment=ROLE=plfschunkserver
