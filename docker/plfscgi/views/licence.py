@@ -82,13 +82,13 @@ def render(dp, fields, vld):
 			if len(lic.addinfo)>0:
 				out.append("""	<tr><td colspan="%u">%s</td></tr>""" % (columns,htmlentities(lic.addinfo)))
 			if sizeissues.contains('lic_exhausted'):
-				out.append("""	<tr><td colspan="%u"><span class="ERROR">You have reached the raw space limit of your licence. This eventually results in your system becoming read-only. In order to expand your licence, please contact our team at <a href="mailto:contact@moosefs.com">contact@moosefs.com</a></span></td></tr>""" % columns)
+				out.append("""	<tr><td colspan="%u"><span class="ERROR">You have reached the raw space limit of your licence. This eventually results in your system becoming read-only. To request help, open an issue in the <a href="https://github.com/weBj8/polaris-fs/issues">PolarisFS repository</a>.</span></td></tr>""" % columns)
 			elif sizeissues.contains('lic_exhausting') or sizeissues.contains('lic_almost_exhausted'):
-				out.append("""	<tr><td colspan="%u"><span class="WARNING">You are reaching the raw space limit of your licence. In order to expand it, please contact our team at <a href="mailto:contact@moosefs.com">contact@moosefs.com</a></span></td></tr>""" % columns)
+				out.append("""	<tr><td colspan="%u"><span class="WARNING">You are reaching the raw space limit of your licence. To request help, open an issue in the <a href="https://github.com/weBj8/polaris-fs/issues">PolarisFS repository</a>.</span></td></tr>""" % columns)
 			if timeissues.contains('lic_expiring'):
-				out.append("""	<tr><td colspan="%u"><span class="WARNING">Your licence is about to expire. In order to extend it, please contact our team at <a href="mailto:contact@moosefs.com">contact@moosefs.com</a></span></td></tr>""" % columns)
+				out.append("""	<tr><td colspan="%u"><span class="WARNING">Your licence is about to expire. To request help, open an issue in the <a href="https://github.com/weBj8/polaris-fs/issues">PolarisFS repository</a>.</span></td></tr>""" % columns)
 			elif timeissues.contains('lic_expired'):
-				out.append("""	<tr><td colspan="%u"><span class="ERROR">Your licence has expired. In order to extend it, please contact our team at <a href="mailto:contact@moosefs.com">contact@moosefs.com</a></span></td></tr>""" % columns)
+				out.append("""	<tr><td colspan="%u"><span class="ERROR">Your licence has expired. To request help, open an issue in the <a href="https://github.com/weBj8/polaris-fs/issues">PolarisFS repository</a>.</span></td></tr>""" % columns)
 		out.append("""</table>""")
 	else:
 		out.append("""<div class="tab_title ERROR">Oops!</div>""")

@@ -105,11 +105,11 @@ class Cluster:
 				pass
 
 		if len(self.addresses)==0:
-			self._errormsg = """Can't resolve the MooseFS Master hostname (%s)""" % (masterhost)
+			self._errormsg = """Can't resolve the PolarisFS Master hostname (%s)""" % (masterhost)
 		elif len(self.addresses)==1:
-			self._errormsg = """Can't connect to the MooseFS Master server (%s)""" % (masterhost)
+			self._errormsg = """Can't connect to the PolarisFS Master server (%s)""" % (masterhost)
 		else:
-			self._errormsg = """Can't connect to MooseFS Master servers (%s)""" % (masterhost)
+			self._errormsg = """Can't connect to PolarisFS Master servers (%s)""" % (masterhost)
 
 		# self.find_all_masters()
 		
@@ -331,9 +331,9 @@ class Cluster:
 								self._leader_usectime = usectime
 					else:
 						if len(self.addresses)==1:
-							self._errormsg = """Got wrong answer from the MooseFS Master server (%s) - likely the master version is too new""" % (self.masterhost)
+							self._errormsg = """Got wrong answer from the PolarisFS Master server (%s) - likely the master version is too new""" % (self.masterhost)
 						else:
-							self._errormsg = """Got wrong answer from MooseFS Master servers (%s) - likely the masters version is too new""" % (self.masterhost)
+							self._errormsg = """Got wrong answer from PolarisFS Master servers (%s) - likely the masters version is too new""" % (self.masterhost)
 						statestr = STATE_STR_WRONGANSWER
 						statecolor = 1
 				except Exception:

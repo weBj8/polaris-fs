@@ -468,7 +468,7 @@ function getTooltipContent(element) {
           severity: "Info",
           title: "Missing tooltip details",
           description: "Missing details for this tooltip: <b>"+tooltipId+"</b>.",
-          solution: "Please report it to MooseFS support."
+          solution: "Please report it in the PolarisFS GitHub repository."
         };
       }
       tooltipsList.push(tooltip);

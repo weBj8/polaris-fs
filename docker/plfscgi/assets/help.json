@@ -7,25 +7,25 @@
 		"severity": "Error",
 		"title": "Refresh failed",
 		"description": "Data you see on the screen may not be up to date. The GUI probably is not able to connect to the server.",
-		"solution": "Try to reload entire page. Check the network connection and the server status. If the problem persists, contact MooseFS support."
+		"solution": "Try to reload entire page. Check the network connection and the server status. If the problem persists, contact PolarisFS GitHub Issues."
 	},
 	"unknown_severity": {
 		"severity": "Warning",
 		"title": "Unknown severity level.",
 		"description": "The severity level of this message is unknown.",
-		"solution": "It may be a bug in the monitoring system. Please report it to MooseFS support."
+		"solution": "It may be a bug in the monitoring system. Please report it to PolarisFS GitHub Issues."
 	},
 	"ui_pro_ce": {
 		"severity": "Info",
 		"title": "In the cluster managed by GUI/CLI tools in the PRO version, there are servers running the community edition.",
 		"description": "Using PRO tools (GUI/CLI) to manage a community version cluster is possible; however, we advise using identical versions of all components in the cluster.",
-		"solution": "GUI and CLI tools should be used in a version identical to the servers used in the cluster. If possible, do not mix PRO and community components. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. "
+		"solution": "GUI and CLI tools should be used in a version identical to the servers used in the cluster. If possible, do not mix PRO and community components. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. "
 	},
 	"ui_ce_pro": {
 		"severity": "Error",
 		"title": "In the cluster managed by GUI/CLI tools in the community edition, there are servers running the PRO version.",
 		"description": "Using community tools (GUI/CLI) to manage a Pro version cluster should be avoided because these tools do not support all the functionalities offered by the PRO cluster. As a result, data in the cluster may become inconsistent or may be lost.",
-		"solution": "GUI and CLI tools should be used in a version identical to the servers used in the cluster. Use the PRO GUI/CLI components to manage PRO cluster components. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "GUI and CLI tools should be used in a version identical to the servers used in the cluster. Use the PRO GUI/CLI components to manage PRO cluster components. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ui_newer": {
 		"severity": "Info",
@@ -37,13 +37,13 @@
 		"severity": "Error",
 		"title": "GUI/CLI version older than some servers in a cluster",
 		"description": "GUI servers should not be older than any server in the cluster because they may not support some of the packages exchanged by the servers, potentially leading to incorrect data being displayed.",
-		"solution": "If the GUI/CLI tools are too old, update them to a newer version, for example by installing the appropriate package. We recommend that all cluster components be in the same version. If possible, upgrade all cluster components to the same version using the latest available version. Contact MooseFS support if you need assistance."
+		"solution": "If the GUI/CLI tools are too old, update them to a newer version, for example by installing the appropriate package. We recommend that all cluster components be in the same version. If possible, upgrade all cluster components to the same version using the latest available version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"follower_older": {
 		"severity": "Error",
 		"title": "The Follower server version is older than the Leader Master server's.",
 		"description": "The Follower should not be in an older version than the Leader, as this may result in protocol incompatibility leading to incorrect metadata being written. As a result, data in the cluster may become inconsistent or may be lost.",
-		"solution": "This situation must be immediately addressed by upgrading the Follower to at least the version of the Leader (or a newer one). Alternatively, it is possible to replace this Follower it with another (newer) one. The number of Followers depends on the desired level of cluster redundancy. It is recommended that all cluster components be at the same version. Contact MooseFS support if you need assistance."
+		"solution": "This situation must be immediately addressed by upgrading the Follower to at least the version of the Leader (or a newer one). Alternatively, it is possible to replace this Follower it with another (newer) one. The number of Followers depends on the desired level of cluster redundancy. It is recommended that all cluster components be at the same version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"follower_newer": {
 		"severity": "Info",
@@ -55,19 +55,19 @@
 		"severity": "Error",
 		"title": "This Master is in the community edition (CE) version, while the Leader is in the PRO version.",
 		"description": "The community edition (CE) version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the PRO version.",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"follower_pro_ce": {
 		"severity": "Error",
 		"title": "This Follower is in the PRO version, while the other Master is in the community edition (CE) version.",
 		"description": "The PRO version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the community edition (CE).",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ml_older": {
 		"severity": "Error",
 		"title": "The Metalogger version is older than the Leader (or Follower) Master server's.",
 		"description": "The Metalogger is older than the Leader (or one of the Followers). This situation should not occur, as this may result in protocol incompatibility leading to incorrect metadata being logged. As a result, data in the cluster may become inconsistent or may be lost.",
-		"solution": "This situation must be immediately addressed by upgrading the Metalogger to at least the version of the newest Master server (Followers or Leader). Alternatively, it is possible to replace this Metalogger it with another (newer) one. The number of Metaloggers depends on the desired level of cluster redundancy. It is recommended that all cluster components be at the same version. Contact MooseFS support if you need assistance."
+		"solution": "This situation must be immediately addressed by upgrading the Metalogger to at least the version of the newest Master server (Followers or Leader). Alternatively, it is possible to replace this Metalogger it with another (newer) one. The number of Metaloggers depends on the desired level of cluster redundancy. It is recommended that all cluster components be at the same version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ml_newer": {
 		"severity": "Info",
@@ -79,13 +79,13 @@
 		"severity": "Error",
 		"title": "This Metalogger is in the community edition (CE) version, while the Leader is in the PRO version.",
 		"description": "The community edition (CE) version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the PRO version.",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ml_pro_ce": {
 		"severity": "Error",
 		"title": "This Metalogger is in the PRO version, while the Master is in the community edition (CE) version.",
 		"description": "The PRO version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the community edition (CE).",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"cs_older": {
 		"severity": "Warning",
@@ -97,19 +97,19 @@
 		"severity": "Error",
 		"title": "The Chunkserver version is newer than the Leader Master server's or one of other cluster components.",
 		"description": "The Chunkserver should not be in an newer version than the Leader (or any of cluster components), as this may result in protocol incompatibility leading to incorrect data being written. As a result, data in the cluster may become inconsistent or may be lost.",
-		"solution": "This situation must be immediately addressed by upgrading the Leader Master server or other cluster components. Chunkserver can not be downgraded. It is recommended that all cluster components be at the same version. Contact MooseFS support if you need assistance."
+		"solution": "This situation must be immediately addressed by upgrading the Leader Master server or other cluster components. Chunkserver can not be downgraded. It is recommended that all cluster components be at the same version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"cs_ce_pro": {
 		"severity": "Error",
 		"title": "This Chunkserver is in the community edition (CE) version, while the Leader is in the PRO version.",
 		"description": "The community edition (CE) version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the PRO version.",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"cs_pro_ce": {
 		"severity": "Error",
 		"title": "This Chunkserver is in the PRO version, while the Leader is in the community edition (CE) version.",
 		"description": "The PRO version of this server is installed, while the Leader (and perhaps other parts of the cluster) is installed in the community edition (CE).",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"mnt_older": {
 		"severity": "Info",
@@ -121,55 +121,55 @@
 		"severity": "Error",
 		"title": "The Mount (client) version is newer than the Leader Master server's.",
 		"description": "The Mount software (client side) should not be in an newer version than the Leader (or any of cluster components), as this may result in protocol incompatibility leading to incorrect data being read or written. As a result, data in the cluster may become inconsistent or may be lost.",
-		"solution": "This situation must be immediately addressed either by downgrading client-side mount software or by upgrading older cluster components. It is recommended that all cluster components and client-side software be at the same version. Contact MooseFS support if troubled."
+		"solution": "This situation must be immediately addressed either by downgrading client-side mount software or by upgrading older cluster components. It is recommended that all cluster components and client-side software be at the same version. Contact PolarisFS GitHub Issues if troubled."
 	},
 	"mnt_ce_pro": {
 		"severity": "Error",
 		"title": "This client uses the community edition (CE) version MFS mount package, while the Leader is in the PRO version.",
-		"description": "The community edition (CE) version of client's side MooseFS software is used, while the Leader (and perhaps other parts of the cluster) is installed in the PRO version. It may lead to unpredicted behavior (including data loss) as the client software doesn't implement a part of the MFS network protocol.",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster and client-side components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"description": "The community edition (CE) version of client's side PolarisFS software is used, while the Leader (and perhaps other parts of the cluster) is installed in the PRO version. It may lead to unpredicted behavior (including data loss) as the client software doesn't implement a part of the MFS network protocol.",
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster and client-side components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"mnt_pro_ce": {
 		"severity": "Warning",
 		"title": "This client uses the PRO version MFS mount package, while the Master is in the community edition (CE) version.",
-		"description": "The PRO version of client's side MooseFS software is installed, while the Leader (and perhaps other parts of the cluster) is installed in the community edition (CE). It should not lead to any unexpected behavior, however we insist on the cluster consistency.",
-		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a MooseFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"description": "The PRO version of client's side PolarisFS software is installed, while the Leader (and perhaps other parts of the cluster) is installed in the community edition (CE). It should not lead to any unexpected behavior, however we insist on the cluster consistency.",
+		"solution": "Keep the cluster version consistent: all components (servers and client-side drivers) of a PolarisFS cluster should be either PRO or community edition. Use appropriate install packages. Upgrade all cluster components to the same version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ms_single_master_pro": {
 		"severity": "Error",
 		"title": "The PRO cluster has only one Master server, so no backup metadata server is available.",
 		"description": "The cluster has only one Master server. Additional Followers should be used to maintain additional metadata records. A single Master server is a single point of failure in the cluster. If it fails, the entire cluster becomes unavailable.",
-		"solution": "Install additional Followers. Follower can automatically become the new Leader Master server if the previous one fails. Always avoid having just a single Master server. Contact MooseFS support if you need assistance."
+		"solution": "Install additional Followers. Follower can automatically become the new Leader Master server if the previous one fails. Always avoid having just a single Master server. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ms_single": {
 		"severity": "Error",
 		"title": "The cluster has only one metadata server, so no backup metadata records are available.",
 		"description": "The cluster has only one metadata server. Additional Metaloggers or Followers (for the PRO version) should be used to maintain additional metadata records. A single metadata server is a single point of failure in the cluster. If it fails, the entire cluster becomes unavailable.",
-		"solution": "Install additional Metaloggers or install additional Followers if you use a PRO version. Follower's advantage is that it can automatically become the new Leader Master server if the previous one fails. Metalogger keeps track of metadata changes but needs to be upgraded to the leading Master server manually. Always avoid having just a single metadata Master server. Contact MooseFS support if you need assistance."
+		"solution": "Install additional Metaloggers or install additional Followers if you use a PRO version. Follower's advantage is that it can automatically become the new Leader Master server if the previous one fails. Metalogger keeps track of metadata changes but needs to be upgraded to the leading Master server manually. Always avoid having just a single metadata Master server. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"ms_elect": {
 		"severity": "Info",
 		"title": "No Leader Master server in the cluster, election in process.",
 		"description": "There is currently no Leader Master server in the cluster. The process of electing a new leader is underway. One of the Follower Master servers is being elected and should become the Leader soon.",
-		"solution": "The process of electing a new leader is underway. It is started if the Leader is unavailable, e.g., after starting the cluster or after the failure of the previous Leader. There is no need for immediate action. The election process should soon end automatically, and the new Leader should be elected. However, if the election does not end within one minute, the reasons for this situation should be sought. If the election process started during regular cluster operations, why the old Leader became unavailable should be examined. It may turn out that it has permanently failed and should be repaired and connected back to the cluster to maintain the assumed level of resilience of the entire cluster. Electing a new leader is possible only when a quorum of Chunkservers is available. That is, half plus one Chunkservers are connected in the cluster. Contact MooseFS support if necessary."
+		"solution": "The process of electing a new leader is underway. It is started if the Leader is unavailable, e.g., after starting the cluster or after the failure of the previous Leader. There is no need for immediate action. The election process should soon end automatically, and the new Leader should be elected. However, if the election does not end within one minute, the reasons for this situation should be sought. If the election process started during regular cluster operations, why the old Leader became unavailable should be examined. It may turn out that it has permanently failed and should be repaired and connected back to the cluster to maintain the assumed level of resilience of the entire cluster. Electing a new leader is possible only when a quorum of Chunkservers is available. That is, half plus one Chunkservers are connected in the cluster. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_usurper": {
 		"severity": "Info",
 		"title": "No Leader Master server in the cluster, leader switching (via usurper) in process.",
 		"description": "There is currently no Leader Master server in the cluster. The process of switching to a new leader is underway. One of the Follower Master servers is designated by user for leadership (usurper) and should become the Leader soon.",
-		"solution": "The process of switching to a new leader is underway. It is started because the user has demanded the switch with <code>mfssupervisor</code> tool. There is no need for immediate action. The process should soon end automatically, and the new Leader should be functional. However, if the switching process does not end within one minute, the reasons for this situation should be sought. Electing a new leader is possible only when a quorum of Chunkservers is available. That is, half plus one Chunkservers are connected in the cluster. Contact MooseFS support if necessary."
+		"solution": "The process of switching to a new leader is underway. It is started because the user has demanded the switch with <code>mfssupervisor</code> tool. There is no need for immediate action. The process should soon end automatically, and the new Leader should be functional. However, if the switching process does not end within one minute, the reasons for this situation should be sought. Electing a new leader is possible only when a quorum of Chunkservers is available. That is, half plus one Chunkservers are connected in the cluster. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_toomany": {
 		"severity": "Error",
 		"title": "There are too many leading Master servers",
 		"description": "There is more than one Leader (and/or Elect and/or Usurper) Master server in the cluster. This is a critical situation. The Leader Master server is the most important server in the cluster. It is responsible for managing metadata and ensuring the cluster's proper operation. Having more than one Leader Master server in the cluster may lead to data corruption, loss, or inconsistency. It is a serious error that should be immediately corrected.",
-		"solution": "If the Leader Master server is not available, it is necessary to pick a new Leader. If the Leader Master server is available, it is necessary to investigate why the second Leader (or Elect or Usurper) Master server appeared in the cluster. This is severe internal inconsistency that may lead to data loss. In case of manually picking a new Leader use the appropriate (usually the most recent) metadata records. Contact MooseFS support if necessary."
+		"solution": "If the Leader Master server is not available, it is necessary to pick a new Leader. If the Leader Master server is available, it is necessary to investigate why the second Leader (or Elect or Usurper) Master server appeared in the cluster. This is severe internal inconsistency that may lead to data loss. In case of manually picking a new Leader use the appropriate (usually the most recent) metadata records. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_server_cpu_high": {
 		"severity": "Warning",
 		"title": "The server's CPU usage is high, which may lead to longer cluster response times.",
 		"description": "The server's CPU usage is high, which may lead to longer cluster response times and increased latency. High Leader Master server CPU usage doesn't necessarily mean user I/O requests freeze. It should eventually serve all requests - but slower. High CPU usage should not affect data throughput as the Master server doesn't take part in data exchange.",
-		"solution": "Make sure that the server is not loaded with other tasks. Check that the server has been selected appropriately for the expected cluster load. Details on choosing hardware for individual cluster components are described in the documentation - see Hardware guide. Check that the appropriate operating system hardware drivers are installed. In particular, it is often necessary to use the proper network card driver to offload network tasks from the CPU to the NIC. Using a faster CPU with fewer cores and optimizing the CPU configuration for working with single-threaded programs can also be helpful (e.g., CPU Affinity, no hyper-threading, power management, performance boost, etc.). Contact MooseFS support for more info."
+		"solution": "Make sure that the server is not loaded with other tasks. Check that the server has been selected appropriately for the expected cluster load. Details on choosing hardware for individual cluster components are described in the documentation - see Hardware guide. Check that the appropriate operating system hardware drivers are installed. In particular, it is often necessary to use the proper network card driver to offload network tasks from the CPU to the NIC. Using a faster CPU with fewer cores and optimizing the CPU configuration for working with single-threaded programs can also be helpful (e.g., CPU Affinity, no hyper-threading, power management, performance boost, etc.). Contact PolarisFS GitHub Issues for more info."
 	},
 	"ms_hdd_nearly_full": {
 		"severity": "Warning",
@@ -197,7 +197,7 @@
 		"severity": "Warning",
 		"title": "The last Master server metadata save took more than 45 minutes.",
 		"description": "The last Master server metadata save took more than 45 minutes. Each Master server (leader or follower) 's metadata saving process helps keep a backup copy of cluster metadata. Basically, it is a metadata memory dump to a server's persistent storage. In case of server failure or restart, such a copy is read back to the server's memory and used for normal server operations. If the saving takes too long (an hour or longer), it may downgrade the cluster resiliency. Moreover, by default, the saving process on Followers is scheduled every hour, so it may be impossible to dump metadata fast enough between consequent requested dumps. Note that this period may be adjusted in the server configuration (see <code>METADATA_SAVE_FREQ</code>).",
-		"solution": "Saving time depends both on the metadata size (number of objects in the cluster and its additional attributes) and on the speed of internal server's hdd I/O. To shorten this time, use faster persistent storage to dump metadata, e.g., consider using NVMe or SSD. You may also consider limiting the size of the metadata by limiting global trash size, number of objects, number of additional attributes, or number of stored snapshots. Check if this time is not longer than <code>METADATA_SAVE_FREQ</code> config parameter. Contact MooseFS support if necessary."
+		"solution": "Saving time depends both on the metadata size (number of objects in the cluster and its additional attributes) and on the speed of internal server's hdd I/O. To shorten this time, use faster persistent storage to dump metadata, e.g., consider using NVMe or SSD. You may also consider limiting the size of the metadata by limiting global trash size, number of objects, number of additional attributes, or number of stored snapshots. Check if this time is not longer than <code>METADATA_SAVE_FREQ</code> config parameter. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_last_store_background": {
 		"severity": "Info",
@@ -212,7 +212,7 @@
 		"severity": "Warning",
 		"title": "This server dumped a consistent metadata file in the foreground.",
 		"description": "This server dumped a consistent metadata file. However, it did it in the foreground instead of the background. This is not the ideal way for the Master server to work. The server probably did not have enough resources to make a persistent copy of the metadata to its hard drive in the background.",
-		"solution": "You should check the server configuration, load from other processes, RAM availability, and swap configuration. If you use Linux make sure that overcommit memory is turned on in your system (see if <code>/etc/sysctl.conf</code> contains this entry: <code>vm.overcommit_memory=1</code>). You can check the server logs and MooseFS logs on this server. If the situation does not repeat itself, there is probably no reason to worry, but you should check the status of this server more carefully for some time. Contact MooseFS support if necessary."
+		"solution": "You should check the server configuration, load from other processes, RAM availability, and swap configuration. If you use Linux make sure that overcommit memory is turned on in your system (see if <code>/etc/sysctl.conf</code> contains this entry: <code>vm.overcommit_memory=1</code>). You can check the server logs and PolarisFS logs on this server. If the situation does not repeat itself, there is probably no reason to worry, but you should check the status of this server more carefully for some time. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_last_store_crc_background": {
 		"severity": "Info",
@@ -222,7 +222,7 @@
 		"severity": "Warning",
 		"title": "Unknown status of the last metadata save operation.",
 		"description": "Unable to recognize the status code received from the server.",
-		"solution": "Check if the version of this GUI management console is up to date and compatible with this Master server version. Contact MooseFS support if necessary."
+		"solution": "Check if the version of this GUI management console is up to date and compatible with this Master server version. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"ms_metadata_save_older": {
 		"severity": "Info",
@@ -234,67 +234,67 @@
 		"severity": "Error",
 		"title": "The last saved metadata checksum doesn't match other Master servers' metadata checksums.",
 		"description": "The checksum of the metadata written by this server is different from the checksum written by other metadata servers. This is critical and should not happen. This indicates a serious error in the synchronization of metadata between the individual servers. The cause of this behavior should be found and eliminated. Desynchronization of the servers will likely result in corruption or loss of metadata and/or data.",
-		"solution": "Review the server's log files, for both OS and MooseFS related messages. Contact support immediately."
+		"solution": "Review the server's log files, for both OS and PolarisFS related messages. Contact support immediately."
 	},
 	"follower_id_mismatch": {
 		"severity": "Error",
 		"title": "The Follower's metadata id doesn't match the Leader Master server metadata id.",
 		"description": "The id of the metadata on this server doesn't match the Leader's metadata id. This is critical and should not happen. This indicates a serious error in the synchronization of metadata between the individual servers. It looks as if the Follower's metadata comes from another cluster, but the actual cause of this behavior should be immediately found and eliminated. Desynchronization of the servers will likely result in corruption or loss of metadata and/or data. Switching a Leader in such a situation will likely cause unexpected cluster behavior.",
-		"solution": "Check which id is the correct one. It is probably the one used by the Leader Master server. You may force downloading a completely new set of metadata by a Follower by stopping its <code>plfsmaster</code> process, removing metadata files stored on its hdd, and reloading fresh metadata from the Leader (see <code>plfsmaster -e</code>). Investigate why the ID is mismatched to avoid it in the future. However, this is a critical situation, and you should contact MooseFS support immediately. "
+		"solution": "Check which id is the correct one. It is probably the one used by the Leader Master server. You may force downloading a completely new set of metadata by a Follower by stopping its <code>plfsmaster</code> process, removing metadata files stored on its hdd, and reloading fresh metadata from the Leader (see <code>plfsmaster -e</code>). Investigate why the ID is mismatched to avoid it in the future. However, this is a critical situation, and you should contact PolarisFS GitHub Issues immediately. "
 	},
 	"follower_desync": {
 		"severity": "Warning",
 		"title": "The Follower's metadata is not synchronized with the Leader Master server's metadata.",
-		"description": "The Follower's metadata may not be synchronized with the Leader Master server's metadata for a while, especially right after the cluster restart or electing a new Leader. It should re-sync within a minute or so. Syncing Followers is a part of the MooseFS auto-rehealing routines. However, you should find a reason if it is not in sync for longer.",
-		"solution": "Check network configuration: ensure the Follower and the Leader are able to reach each other, and check firewalls. Check log files of both. Contact MooseFS support if the problem persists."
+		"description": "The Follower's metadata may not be synchronized with the Leader Master server's metadata for a while, especially right after the cluster restart or electing a new Leader. It should re-sync within a minute or so. Syncing Followers is part of the PolarisFS auto-recovery routines. However, you should find a reason if it is not in sync for longer.",
+		"solution": "Check network configuration: ensure the Follower and the Leader are able to reach each other, and check firewalls. Check log files of both. Contact PolarisFS GitHub Issues if the problem persists."
 	},
 	"follower_unreachable": {
 		"severity": "Error",
 		"title": "The Follower Master server is unreachable.",
 		"description": "The Follower Master server is unreachable, so the desired level of metadata protection is not fulfilled. All followers should be up and running in the cluster. It should be brought back online as soon as possible.",
-		"solution": "Check network configuration: ensure the Follower, the Leader, and management tools (GUI/CLI) are able to reach each other, and check firewalls. Check if the <code>plfsmaster</code> process is running on this server. Check log files on those servers. Contact MooseFS support if the problem persists."
+		"solution": "Check network configuration: ensure the Follower, the Leader, and management tools (GUI/CLI) are able to reach each other, and check firewalls. Check if the <code>plfsmaster</code> process is running on this server. Check log files on those servers. Contact PolarisFS GitHub Issues if the problem persists."
 	},
 	"follower_version_mismatch": {
 		"severity": "Warning",
 		"title": "The Follower's metadata version differs by over 100.000 from the Leader Master server's version.",
 		"description": "The metadata version is an integer that grows monotonically with time. Roughly speaking, it is incremented by every metadata operation. Generally, it should be the same number across all metadata servers (the Leader and Followers). However, thanks to unavoidable network latency, some packets reaching management tools may be delayed and report different version numbers. Now, they differ by more than 100.000. It is quite a big difference, so it may indicate some problems with metadata synchronization rather than mere network latency. Metadata across different Master servers should be in sync to maintain cluster resiliency. Note that this version number (a single integer) should not be confused with the software component version number (three integers separated with dots, e.g., 4.60.5). They are different animals.",
-		"solution": "Check network configuration: latency, packet loss, etc. Check log files on both Leader and Follower servers: OS and MooseFS. This is just a warning, but this problem should not persist. Contact MooseFS support if necessary."
+		"solution": "Check network configuration: latency, packet loss, etc. Check log files on both Leader and Follower servers: OS and PolarisFS. This is just a warning, but this problem should not persist. Contact PolarisFS GitHub Issues if necessary."
 	},
 	"follower_meta_delay_small": {
 		"severity": "Warning",
 		"title": "The Follower's metadata timestamp is slightly delayed from the Leader.",
 		"description": "The metadata timestamp differs from the Leader's by more than 1 second. This is a sign that metadata servers' synchronization is not entirely correct. Ideally, there should be no delay. Incorrect server clock settings may cause such delays. Or a general (Follower) server slowdown causing problems with handling requests in real-time by the metadata management process (<code>plfsmaster</code>). Out-of-sync metadata degrades cluster resilience and may lead to data loss or corruption, especially in case of other concurrent failures.",
-		"solution": "Check all server clock settings. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Also, check the servers' performance and load, including RAM, swap, and I/O performance. If necessary, refer to the MooseFS Hardware Guide for hints on hardware requirements. Contact MooseFS support if the delay doesn't decrease.\t"
+		"solution": "Check all server clock settings. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Also, check the servers' performance and load, including RAM, swap, and I/O performance. If necessary, refer to the PolarisFS deployment guide for hints on hardware requirements. Contact PolarisFS GitHub Issues if the delay doesn't decrease.\t"
 	},
 	"follower_meta_delay": {
 		"severity": "Error",
 		"title": "The Follower's metadata timestamp is delayed from the Leader.",
 		"description": "The metadata timestamp differs from the Leader's by more than 6 seconds. This is a severe difference and should not be tolerated. It means that metadata is getting out-of-sync. Ideally, there should be no delay. Incorrect server clock settings may cause such delays. Or a general (Follower) server slowdown causing problems with handling requests in real-time by the metadata management process (<code>plfsmaster</code>). Out-of-sync metadata degrades cluster resilience and may lead to data loss or corruption, especially in case of other concurrent failures.",
-		"solution": "Check all server clock settings. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Also, check the servers' performance and load, including RAM, swap, and I/O performance. If necessary, refer to the MooseFS Hardware Guide for hints on hardware requirements. Contact MooseFS support if the delay doesn't decrease immediately.\t"
+		"solution": "Check all server clock settings. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Also, check the servers' performance and load, including RAM, swap, and I/O performance. If necessary, refer to the PolarisFS deployment guide for hints on hardware requirements. Contact PolarisFS GitHub Issues if the delay doesn't decrease immediately.\t"
 	},
 	"follower_time_diff_small": {
 		"severity": "Warning",
 		"title": "The follower's clock differs from the Leader Master server clock.",
 		"description": "The Follower's clock differs by more than 1 second from the Leader Master server clock. Ideally, there should be no difference. Incorrect server clock settings may cause severe metadata synchronization issues, degrading cluster resilience. All clocks in the cluster should be accurate and thus synchronized.",
-		"solution": "Check and adjust all clocks in the cluster. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Contact MooseFS support if you need assistance."
+		"solution": "Check and adjust all clocks in the cluster. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"follower_time_diff": {
 		"severity": "Error",
 		"title": "The follower's clock differs too much from the Leader Master server clock.",
 		"description": "The Follower's clock differs by more than 2 seconds from the Leader Master server clock. This is a severe, intolerable difference. Ideally, there should be no difference. Incorrect server clock settings may cause severe metadata synchronization issues, degrading cluster resilience. Among others, auto-healing and data redundancy routines may not work correctly. All clocks in the cluster should be accurate and thus synchronized.",
-		"solution": "Check and adjust all clocks in the cluster. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Contact MooseFS support if you need assistance."
+		"solution": "Check and adjust all clocks in the cluster. They should be accurate and thus synchronized. If possible, use an NTP server to synchronize them with a centralized time source. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"follower_checksum_mismatch": {
 		"severity": "Error",
 		"title": "The Follower's exports checksum does not match the Leader's exports checksum.",
 		"description": "Export checksums are one way to ensure exports configuration is the same across different Master servers.  A mismatch indicates a serious error, and the cause of the mismatch should be pinpointed and eliminated.",
-		"solution": "Review the content of <code>mfsexports.cfg</code> file on all Master servers and make sure the entries in this file on all servers are identical. Contact MooseFS support if you need assistance."
+		"solution": "Review the content of <code>mfsexports.cfg</code> file on all Master servers and make sure the entries in this file on all servers are identical. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"cs_unreachable": {
 		"severity": "Error",
 		"title": "The Chunkserver is unreachable.",
 		"description": "The Chunkserver is unreachable, so the desired level of data protection is not fulfilled. All Chunkservers should be up and running in the cluster, and this server should be brought back online as soon as possible. It is either turned off, or there is a networking problem. If too many Chunkservers are unreachable, the cluster may lose the Chunkserver quorum required to elect the Leader Master server. If the server is undergoing planned maintenance, it should be put into maintenance mode.",
-		"solution": "Check network configuration: ensure the Master servers, management tools (GUI/CLI), and Chunkservers are able to reach each other. Check any firewalls in between. Check if the <code>plfschunkserver</code> process is running on the Chunkserver. Check log files on servers. All Chunkservers should be brought online as soon as possible. Contact MooseFS support if the problem persists."
+		"solution": "Check network configuration: ensure the Master servers, management tools (GUI/CLI), and Chunkservers are able to reach each other. Check any firewalls in between. Check if the <code>plfschunkserver</code> process is running on the Chunkserver. Check log files on servers. All Chunkservers should be brought online as soon as possible. Contact PolarisFS GitHub Issues if the problem persists."
 	},
 	"cs_maintain": {
 		"severity": "Warning",
@@ -352,19 +352,19 @@
 	"cs_mfr_unknown": {
 		"severity": "Warning",
 		"title": "'Marked for removal' but detailed status is unrecognized.",
-		"description": "It is not clear if the disk is ready for removal or not. Check the cluster integrity and versions of the software components (GUI and Chunkserver). If the situation persists, contact MooseFS support."
+		"description": "It is not clear if the disk is ready for removal or not. Check the cluster integrity and versions of the software components (GUI and Chunkserver). If the situation persists, contact PolarisFS GitHub Issues."
 	},
 	"hdd_cs_too_old": {
 		"severity": "Error",
 		"title": "The Chunkserver's software version is too old",
 		"description": "The Chunkserver's software version is too old to provide information on its disks. The Chunkserver should be updated to the latest version.",
-		"solution": "Update the Chunkserver to the latest version. Use the latest available MooseFS software version. Contact MooseFS support if you need assistance."
+		"solution": "Update the Chunkserver to the latest version. Use the latest available PolarisFS software version. Contact PolarisFS GitHub Issues if you need assistance."
 	},
 	"hdd_cs_unreachable": {
 		"severity": "Error",
 		"title": "The Chunkserver is unreachable",
 		"description": "Can't get disk info because the Chunkserver is unreachable. It is either turned off, or there is a networking problem. If the server is undergoing planned maintenance, it should be put into maintenance mode.",
-		"solution": "Check network configuration: ensure the Master servers, management tools (GUI/CLI), and Chunkservers are able to reach each other. Check any firewalls in between. Check if the <code>plfschunkserver</code> process is running on the Chunkserver. Check log files on servers. All Chunkservers should be brought online as soon as possible. Contact MooseFS support if the problem persists."
+		"solution": "Check network configuration: ensure the Master servers, management tools (GUI/CLI), and Chunkservers are able to reach each other. Check any firewalls in between. Check if the <code>plfschunkserver</code> process is running on the Chunkserver. Check log files on servers. All Chunkservers should be brought online as soon as possible. Contact PolarisFS GitHub Issues if the problem persists."
 	},
 	"hdd_nearly_full": {
 		"severity": "Warning",
@@ -422,13 +422,13 @@
 	"hdd_mfr_unknown": {
 		"severity": "Warning",
 		"title": "'Marked for removal' but its status is unrecognized",
-		"description": "It is not clear if the disk is ready for removal or not. Check the cluster integrity and versions of the software components (GUI and Chunkserver). If the situation persists, contact MooseFS support."
+		"description": "It is not clear if the disk is ready for removal or not. Check the cluster integrity and versions of the software components (GUI and Chunkserver). If the situation persists, contact PolarisFS GitHub Issues."
 	},
 	"data_health_checking": {
 		"severity": "Warning",
 		"title": "It is unknown whether all data is stored with the desired redundancy, as the status check is still ongoing.",
 		"description": "It is unknown whether all data is stored with the desired redundancy, as the status check is still ongoing. Such a situation usually occurs after a Leader election or after a cluster restart. Please wait until the data check is complete.",
-		"solution": "Please wait until all Chunkservers reconnect and the data check is complete. Contact MooseFS support if the data check doesn't finish within a few minutes."
+		"solution": "Please wait until all Chunkservers reconnect and the data check is complete. Contact PolarisFS GitHub Issues if the data check doesn't finish within a few minutes."
 	},
 	"data_health_missing": {
 		"severity": "Error",
@@ -535,7 +535,7 @@
 	"lic_max_version": {
 		"severity": "Error",
 		"title": "Licence doesn't allow using this version of software.",
-		"description": "Licence is granted for the previous version of the software. You are not entitled using this version of MooseFS any longer. Please downgrade or contact support."
+		"description": "Licence is granted for the previous version of the software. You are not entitled to use this PolarisFS version any longer. Please downgrade or contact support."
 	},
 	"trash_large": {
 		"severity": "Warning",
@@ -547,7 +547,7 @@
 		"severity": "Warning",
 		"title": "The total number of objects may soon reach the limit of 2.14 billion inodes",
 		"description": "The cluster's total number of objects (inodes: files and folders) exceeds 95% of the maximum allowed number of objects. This is severe as soon users may be unable to create new files or folders. The maximum number of inodes is a POSIX file-system relevant value. Currently, it is 2^31 ~ 2.147 billion inodes. This is a metadata limit; it doesn't affect actual data: you may freely append data to existing files. Note that the redundancy level doesn't affect the number of used inodes.",
-		"solution": "Unnecessary data can be removed from the cluster and from the global trash, or the retention time for data in the trash can be shortened (see <code>mfssettrashretention</code>). Alternatively, you may decide to split a single namespace into multiple namespaces. Each namespace requires its own metadata Master server set, but it also has its own inode number limit. Refer to possible cluster setup scenarios. Contact MooseFS support for further assistance."
+		"solution": "Unnecessary data can be removed from the cluster and from the global trash, or the retention time for data in the trash can be shortened (see <code>mfssettrashretention</code>). Alternatively, you may decide to split a single namespace into multiple namespaces. Each namespace requires its own metadata Master server set, but it also has its own inode number limit. Refer to possible cluster setup scenarios. Contact PolarisFS GitHub Issues for further assistance."
 	},
 	"st_card_cluster_space": {
 		"severity": "Help",
@@ -654,7 +654,7 @@
 	},
 	"info_general_pro": {
 		"severity": "Help",
-		"title": "Indicates if MooseFS instance is in PRO version",
+		"title": "Indicates if PolarisFS instance is in PRO version",
 		"unit": "bool"
 	},
 	"info_general_memory_usage": {
@@ -1515,6 +1515,6 @@
 	},
 	"gui_instance_name": {
 		"severity": "Help",
-		"title": "Name of the MooseFS cluster instance"
+		"title": "Name of the PolarisFS cluster instance"
 	}
 }

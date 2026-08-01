@@ -1,25 +1,35 @@
 <p align="center">
-  <img src="docs/assets/polaris-fs-logo.svg" width="420" alt="PolarisFS">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/polaris-fs-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/polaris-fs-logo.svg">
+    <img src="docs/assets/polaris-fs-logo.svg" width="420" alt="PolarisFS">
+  </picture>
 </p>
 <p align="center">
-  Memory-safe Rust migration of MooseFS 4.59.2
+  Distributed storage moving from machine-translated C to memory-safe Rust.
 </p>
 <p align="center">
   <a href="https://github.com/weBj8/polaris-fs/actions/workflows/release.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/weBj8/polaris-fs/release.yml?branch=mfs-rust&style=flat-square&label=build"></a>
   <a href="https://github.com/weBj8/polaris-fs/pkgs/container/polaris-fs"><img alt="Container image" src="https://img.shields.io/github/actions/workflow/status/weBj8/polaris-fs/release.yml?branch=mfs-rust&style=flat-square&label=container&logo=docker"></a>
   <a href="rust-toolchain.toml"><img alt="Rust nightly" src="https://img.shields.io/badge/rust-nightly-E05D44?style=flat-square&logo=rust&logoColor=white"></a>
-  <a href="LICENSE"><img alt="GPL-2.0 license" src="https://img.shields.io/badge/license-GPL--2.0-2F855A?style=flat-square"></a>
-  <a href="docs/rewrite-plan.md"><img alt="Migration P4 partial" src="https://img.shields.io/badge/migration-P4%20partial-2B6CB0?style=flat-square"></a>
+  <a href="LICENSE"><img alt="GPL-2.0 license" src="https://img.shields.io/badge/license-GPL--2.0-16815D?style=flat-square"></a>
+  <a href="docs/rewrite-plan.md"><img alt="Migration P4 partial" src="https://img.shields.io/badge/migration-P4%20partial-078B99?style=flat-square"></a>
+</p>
+<p align="center">
+  <a href="docs/deployment.md">Deploy</a> ·
+  <a href="docs/README.md">Migration docs</a> ·
+  <a href="docs/verified-claims.md">Verified claims</a> ·
+  <a href="https://github.com/weBj8/polaris-fs/pkgs/container/polaris-fs">Container images</a>
 </p>
 
-PolarisFS incrementally replaces a complete c2rust translation of MooseFS
-4.59.2 with idiomatic safe Rust. C ABI boundaries, wire protocol, disk format,
-and observable behavior stay frozen at each merge point.
+PolarisFS is a working distributed filesystem undergoing an incremental
+memory-safety migration. Each merge replaces part of the c2rust baseline with
+idiomatic safe Rust while freezing C ABI boundaries, wire protocol, disk
+format, and observable behavior.
 
-Current daemons form a working cluster and interoperate with MooseFS 4.59.2.
-Reference tests, migration counters, and an end-to-end FUSE smoke test guard
-each migrated module. See [migration docs](docs/README.md) for methodology and
-evidence.
+Current daemons form a working cluster and remain wire- and disk-compatible
+with MooseFS 4.59.2. Reference tests, migration counters, and an end-to-end
+FUSE smoke test guard each migrated module.
 
 ## Quickstart
 

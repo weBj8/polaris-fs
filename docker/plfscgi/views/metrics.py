@@ -9,7 +9,7 @@ from common.constants import *
 
 def print_render(fields, masterhost, masterport):
 	print("Content-Type: text/plain; charset=UTF-8\r\n\r")
-	print('# HELP mfs_cgi_info MooseFS CGI general info')
+	print('# HELP mfs_cgi_info PolarisFS CGI general info')
 	print('# TYPE mfs_cgi_info gauge')
 	print("""mfs_cgi_info{version="%s"} 1.0""" % VERSION)
 	def filter_letters_and_commas(input_string):
@@ -140,7 +140,7 @@ class MFSMetrics:
 				command.append(str(masterport))
 			# print("Command: ", command)
 			# if len(command) == 2:
-			# 	return "Error: No valid scope selected for MooseFS metrics (see plfscli '-S__' argument documentation), actual: "+str(scope)+" allowed: "+str(allowed_scopes)
+			# 	return "Error: No valid scope selected for PolarisFS metrics (see plfscli '-S__' argument documentation), actual: "+str(scope)+" allowed: "+str(allowed_scopes)
 			# return f"{scope} {mastercharts} {cscharts} {masterhost} {masterport}"
 			if not show_anything:
 				return ""

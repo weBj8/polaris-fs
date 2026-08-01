@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" width="560" height="160" role="img" aria-labelledby="title">
+  <title id="title">PolarisFS</title>
+  <path fill="#39BFD0" d="M80 8 116 80H44Z"/>
+  <path fill="#DCE5EB" d="m80 152 36-72H44Z"/>
+  <text x="152" y="102" fill="#F4F7F9" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="56" font-weight="700">
+    Polaris<tspan fill="#39BFD0">FS</tspan>
+  </text>
+</svg>

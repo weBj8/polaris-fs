@@ -11,6 +11,7 @@ def render(dp, fields, vld, html_title, org, sectionset):
 	out.append("""<script type="text/javascript"><!--//--><![CDATA[//><!--
 		if (localStorage.getItem('theme')===null || localStorage.getItem('theme')==='dark') { document.documentElement.setAttribute('data-theme', 'dark');}	
 		//--><!]]></script>""")
+	out.append("""<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />""")
 	out.append("""<link rel="stylesheet" href="assets/mfs.css" type="text/css" />""")
 	out.append("""</head>""")
 	out.append("""<body>""")
@@ -44,14 +45,12 @@ def render(dp, fields, vld, html_title, org, sectionset):
 	out.append("""<div id="tooltip" class="tooltip"></div> <!-- Tooltip container -->""")
 
 	#MENUBAR
-	logo_src="assets/logo.svg"
+	logo_src="assets/favicon.svg"
 	out.append("""<div id="header">""")
 	out.append("""<table class="header-table">""")
 	out.append("""<tr>""")
-	out.append("""<td class="logo"><a href="https://moosefs.com/">""")
-	out.append("""<img class="lg" src="%s" alt="logo" />""" % logo_src)
-	out.append("""<img class="sm" src="assets/logomini.svg" alt="logo" />""")
-	out.append("""<img class="xs md" src="%s" alt="logo" />""" % logo_src)
+	out.append("""<td class="logo"><a href="https://github.com/weBj8/polaris-fs" target="_blank" rel="noopener noreferrer" aria-label="PolarisFS on GitHub">""")
+	out.append("""<img src="%s" alt="" /><span>Polaris<b>FS</b></span>""" % logo_src)
 	out.append("""</a></td>""")
 	out.append("""<td class="lg sm menu">""")
 

@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" width="560" height="160" role="img" aria-labelledby="title">
   <title id="title">PolarisFS</title>
-  <path fill="#3FA9F5" d="M80 8 L116 80 L44 80 Z"/>
+  <path fill="#39BFD0" d="M80 8 L116 80 L44 80 Z"/>
   <path fill="#1B2A3B" d="M80 152 L116 80 L44 80 Z"/>
   <text x="152" y="102" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
         font-size="56" font-weight="700" letter-spacing="0.5">
-    <tspan fill="#1B2A3B">Polaris</tspan><tspan fill="#3FA9F5">FS</tspan>
+    <tspan fill="#1B2A3B">Polaris</tspan><tspan fill="#078B99">FS</tspan>
   </text>
 </svg>

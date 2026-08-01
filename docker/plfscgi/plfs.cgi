@@ -25,10 +25,10 @@ if sys.version_info[0]<3 or (sys.version_info[0]==3 and sys.version_info[1]<4):
 	print("""<html lang="en">""")
 	print("""<head>""")
 	print("""<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />""")
-	print("""<title>MooseFS</title>""")
+	print("""<title>PolarisFS</title>""")
 	print("""</head>""")
 	print("""<body>""")
-	print("""<h2>MooseFS GUI: Unsupported python version, minimum required version is 3.4</h2>""")
+	print("""<h2>PolarisFS GUI: Unsupported python version, minimum required version is 3.4</h2>""")
 	print("""</body>""")
 	print("""</html>""")
 	sys.exit(1)
@@ -49,7 +49,7 @@ ajax_request = AJAX_NONE #is it ajax request?
 readonly = False     #if readonly - don't render CGI links for commands
 selectable = True    #if not selectable - don't render drop-downs and other selectors (to switch views with page reload)
 donotresolve = 0     #resolve or not various ip addresses
-instancename = "My MooseFS"
+instancename = "My PolarisFS"
 
 masterhost = DEFAULT_MASTERNAME
 masterport = DEFAULT_MASTER_CLIENT_PORT
@@ -91,7 +91,7 @@ if (cl.leaderfound()):
 	fields.append("leaderip",cl.master().host)
 
 
-html_title = "MooseFS"
+html_title = "PolarisFS"
 if len(mastername)>0: html_title += " (%s)" % htmlentities(mastername)
 
 errmsg = None
@@ -99,16 +99,16 @@ if cl.master()==None:
 	errmsg = cl.errormsg()
 if (cl.leaderfound() or cl.electfound() or cl.usurperfound() or cl.followerfound()):
 	if cl.master().version_unknown():
-		errmsg = """Can't detect the MooseFS Master server version (%s)""" % (masterhost)
+		errmsg = """Can't detect the PolarisFS Master server version (%s)""" % (masterhost)
 	elif cl.master().version_less_than(3,0,0):
-		errmsg = """This version of MooseFS Master server (%s) is not supported (pre 3.0.0)""" % (masterhost)
+		errmsg = """This version of PolarisFS Master server (%s) is not supported (pre 3.0.0)""" % (masterhost)
 if errmsg:
 	print("Content-Type: text/html; charset=UTF-8\r\n\r")
 	print("""<!DOCTYPE html>""")
 	print("""<html lang="en">""")
 	print("""<head>""")
 	print("""<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />""")
-	print("""<title>MooseFS GUI %s</title>""" % (htmlentities(mastername)))
+	print("""<title>PolarisFS GUI %s</title>""" % (htmlentities(mastername)))
 	# leave this script a the beginning to prevent screen blinking when using dark mode
 	print("""<script type="text/javascript"><!--//--><![CDATA[//><!--
 		if (localStorage.getItem('theme')===null || localStorage.getItem('theme')==='dark') { document.documentElement.setAttribute('data-theme', 'dark');}	

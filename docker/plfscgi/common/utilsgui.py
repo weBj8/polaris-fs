@@ -263,7 +263,7 @@ def print_exception():
 	try:
 		print("""<div class="tab_title ERROR">Oops!</div>""")
 		print("""<table class="FR MESSAGE">""")
-		print("""<tr><td align="left"><span class="ERROR">An error has occurred. Check your MooseFS configuration and network connections. </span><br/>If you decide to seek support because of this error, please include the following traceback:""")
+		print("""<tr><td align="left"><span class="ERROR">An error has occurred. Check your PolarisFS configuration and network connections. </span><br/>If you open a GitHub issue for this error, include the following traceback:""")
 		print("""<pre>""")
 		print(traceback.format_exc().strip())
 		print("""</pre></td></tr>""")
