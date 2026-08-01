@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">polaris-fs</title>
+  <desc id="desc">North star above three connected storage nodes</desc>
+  <rect width="128" height="128" rx="24" fill="#17212b"/>
+  <path d="M64 11l5.4 16.6L86 33l-16.6 5.4L64 55l-5.4-16.6L42 33l16.6-5.4z" fill="#f5c451"/>
+  <path d="M64 56v13M38 79l16-7M90 79l-16-7" fill="none" stroke="#8294a6" stroke-width="5" stroke-linecap="round"/>
+  <rect x="49" y="65" width="30" height="22" rx="5" fill="#38a6a5"/>
+  <rect x="17" y="78" width="30" height="22" rx="5" fill="#e7edf3"/>
+  <rect x="81" y="78" width="30" height="22" rx="5" fill="#e7edf3"/>
+  <circle cx="57" cy="76" r="2.5" fill="#17212b"/>
+  <circle cx="25" cy="89" r="2.5" fill="#38a6a5"/>
+  <circle cx="89" cy="89" r="2.5" fill="#38a6a5"/>
+  <path d="M64 87v12M32 100v10h64v-10" fill="none" stroke="#8294a6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="49" y="99" width="30" height="18" rx="5" fill="#f5c451"/>
+  <circle cx="57" cy="108" r="2.5" fill="#17212b"/>
+</svg>

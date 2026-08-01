@@ -166,7 +166,7 @@ phase in the ledger.
 
 ## Phase status log
 
-### P4 (plfsmount) — DONE (2026-07-30)
+### P4 status — `plfsmount` sub-scope DONE (2026-07-30)
 
 Scope delivered: the `plfsmount` crate (FUSE frontend, 53.3k transpiled
 LOC). 17 modules migrated to safe cores with C ABI boundaries preserved;
@@ -185,14 +185,16 @@ Annotated boundaries (justified in module headers):
   signal handlers, FUSE session loop); its extractable pure logic
   (comma escape/remove) is a tested safe core.
 
-Verification: 78 unit tests (76 lib + 2 bin), SMOKE OK at every merge
+Verification: 79 unit tests (77 lib + 2 bin), SMOKE OK at every merge
 point, gates green (baselines re-frozen per module), OWNERSHIP.tsv
 refreshed. Two real bugs caught by tests during the work and fixed
 before merge (probe-cursor hash clobber in dirblob_name_index;
 portable_usleep cross-module private symbol failing clean LTO builds).
 
-Remaining P4-named scope per the original split: `plfsbdev` (shares
-`plfsclient/`) — continues as its own phase effort.
+P4 overall remains **PARTIAL**. Remaining scope: migrate the 12-module shared
+`plfsclient` crate, then the divergent `plfsbdev` modules. The completed
+`plfsmount` frontend consumes `plfsclient`, but does not make that shared crate
+safe.
 
 Note (post-P4): the mount-only FUSE modules moved from
 `plfsmount/src/plfsclient/` to `plfsmount/src/fuse_client/` to stop the
