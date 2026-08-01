@@ -1,9 +1,0 @@
-VERSION = "4.59.2"
-
-PROTO_BASE = 0
-
-DEFAULT_MASTERNAME          = "mfsmaster"
-DEFAULT_MASTER_CLIENT_PORT  = 9421
-DEFAULT_MASTER_CONTROL_PORT = 9419
-
-BIN_PATH = "/home/ston/Workspaces/polaris-fs/target/mfs-port/mfs-build/../mfs-install/bin"

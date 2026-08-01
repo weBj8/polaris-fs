@@ -156,8 +156,8 @@ Dozens of agents resolving conflicts by "prefer the puller" can silently drop
 concurrent edits on shared files, with no record of what was dropped *(bun —
 phase-d/e workflow files)*.
 
-**Correction:** shared infrastructure files (`mfscommon/`, the duplicated
-`mfsclient/` tree, workspace-level `build.rs`, `OWNERSHIP.tsv`) are owned by
+**Correction:** shared infrastructure files (`plfscommon/`, the duplicated
+`plfsclient/` tree, workspace-level `build.rs`, `OWNERSHIP.tsv`) are owned by
 one lane at a time. Module partitions are by file; files that can't be
 partitioned are serialized, not merged-blind.
 
@@ -234,7 +234,7 @@ Every Bun failure — the escaped miscompile, the 36 post-merge findings, the 3
 buggy auto-fixes — is the long tail of class-level work. The audit caught the
 class; the codegen fix addressed the class; the per-site pass closed 22 of 23
 instances. polaris-fs has already produced its own instance-level evidence:
-the groups-cache use-after-free in `mfsmount` (fixed in commit `35f00f4`) was
+the groups-cache use-after-free in `plfsmount` (fixed in commit `35f00f4`) was
 a latent MooseFS bug that survived machine translation, behavioral smoke
 testing, and real usage until it crashed `opendir` for root.
 

@@ -8,7 +8,7 @@ references to `static mut` globals and through `void*` callback contexts —
 two live `&mut` to one allocation is language-level UB **regardless of what
 LLVM does with it today**.*
 
-**Precedent (ours, not Bun's):** the groups-cache use-after-free in `mfsmount`
+**Precedent (ours, not Bun's):** the groups-cache use-after-free in `plfsmount`
 (commit `35f00f4`) — a cached pointer held across a re-entrant operation that
 freed it. Same fault family this hunt targets: pointer/reference held across
 an invalidation point.
@@ -19,7 +19,7 @@ an invalidation point.
 
 | Stage | Count |
 | --- | --- |
-| Candidates enumerated (pattern match) | 1,786 `static mut` sites + `mfsclient` cache modules + callback-context `void*` sites (ungrepped) |
+| Candidates enumerated (pattern match) | 1,786 `static mut` sites + `plfsclient` cache modules + callback-context `void*` sites (ungrepped) |
 | Survived adversarial triage | — P0 |
 | Miri/ASM-verified `PROVEN` | — P0+ |
 | `NOT_CACHED` (UB, not currently exploited) | — P0+ |
@@ -42,7 +42,7 @@ Grep classes, each producing a candidate list with `file:line`:
 | Class | Pattern | Seed count |
 | --- | --- | --- |
 | A: `static mut` access | `static mut` declarations + every `&`/`&mut`/`addr_of!` use | 1,786 decls (VC-02) |
-| B: cache-pointer-across-callback | `mfsclient/*cache*.rs`, `fdcache.rs`, `sustained_*.rs`, `csdb.rs` — pointer/index held across `mastercomm` round-trips | ~14 modules (VC-06, M2) |
+| B: cache-pointer-across-callback | `plfsclient/*cache*.rs`, `fdcache.rs`, `sustained_*.rs`, `csdb.rs` — pointer/index held across `mastercomm` round-trips | ~14 modules (VC-06, M2) |
 | C: `void*` callback contexts | event-loop registrations casting `*mut c_void` to concrete ctx | ungrepped (P0) |
 | D: worker-thread shared state | `lwthread.rs`, `workers.rs`, `pcqueue.rs`, `squeue.rs` + their clients | 4 modules + clients |
 
@@ -86,29 +86,29 @@ shipped the 23rd; the re-audit is what catches ours.
 not (yet) proven. One inlining-heuristic change away from exploitable.
 Populated during P0–P4; seeded below with the class-B module list.*
 
-### Class B — `mfsclient` cache modules (audit against the `getgroups.rs` fix pattern)
+### Class B — `plfsclient` cache modules (audit against the `getgroups.rs` fix pattern)
 
 | Crate | Module | Pattern to check |
 | --- | --- | --- |
-| mfsmount | `fuse_client/dirattrcache.rs` | entry pointer held across master round-trip |
-| mfsmount | `fuse_client/negentrycache.rs` | same |
-| mfsmount | `fuse_client/symlinkcache.rs` | same |
-| mfsmount | `fuse_client/xattrcache.rs` | same |
-| mfsmount | `fuse_client/fdcache.rs` | same |
-| mfsmount | `fuse_client/dentry_invalidator.rs` | invalidation vs. held references |
-| mfsmount | `fuse_client/masterproxy.rs` | callback re-entrancy |
-| shared (post-dedup) | `mfsclient/chunksdatacache.rs` | same |
-| shared | `mfsclient/csdb.rs` | same |
-| shared | `mfsclient/mastercomm.rs` | re-added `_Atomic` counters (VC-07) + callback contexts |
-| mfsbdev | `mfsclient/mfsioint_lookupcache.rs` | same |
+| plfsmount | `fuse_client/dirattrcache.rs` | entry pointer held across master round-trip |
+| plfsmount | `fuse_client/negentrycache.rs` | same |
+| plfsmount | `fuse_client/symlinkcache.rs` | same |
+| plfsmount | `fuse_client/xattrcache.rs` | same |
+| plfsmount | `fuse_client/fdcache.rs` | same |
+| plfsmount | `fuse_client/dentry_invalidator.rs` | invalidation vs. held references |
+| plfsmount | `fuse_client/masterproxy.rs` | callback re-entrancy |
+| shared (post-dedup) | `plfsclient/chunksdatacache.rs` | same |
+| shared | `plfsclient/csdb.rs` | same |
+| shared | `plfsclient/mastercomm.rs` | re-added `_Atomic` counters (VC-07) + callback contexts |
+| plfsbdev | `plfsclient/mfsioint_lookupcache.rs` | same |
 
 ### Class D — worker-thread boundaries
 
 | Crate | Module | Pattern to check |
 | --- | --- | --- |
-| mfschunkserver | `mfscommon/lwthread.rs`, `mfscommon/pcqueue.rs` | producer/consumer shared state, `&mut` across queue handoff |
-| mfsbdev | `mfscommon/workers.rs`, `mfscommon/squeue.rs` | same |
-| mfsmaster | worker modules touching metadata | `static mut` metadata accessed from >1 thread |
+| plfschunkserver | `plfscommon/lwthread.rs`, `plfscommon/pcqueue.rs` | producer/consumer shared state, `&mut` across queue handoff |
+| plfsbdev | `plfscommon/workers.rs`, `plfscommon/squeue.rs` | same |
+| plfsmaster | worker modules touching metadata | `static mut` metadata accessed from >1 thread |
 
 *(Classes A and C are generated, not hand-listed: A = the OWNERSHIP.tsv rows;
 C = P0 grep for `*mut c_void` context registrations.)*

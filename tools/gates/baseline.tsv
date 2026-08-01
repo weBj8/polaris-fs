@@ -8,39 +8,39 @@
 # wrapping_ops floor for that crate with the claim ID in the commit message).
 # Frozen 2026-07-30 at commit 2e49c26 (unmigrated baseline). Evidence: VC-01/VC-02.
 # Baseline change (unused-unsafe sweep, 48 wrappers removed tree-wide):
-# Baseline change (P1): mfscommon migration (12/14 modules safe-ified) dropped
+# Baseline change (P1): plfscommon migration (12/14 modules safe-ified) dropped
 # its unsafe 336 -> 244 and wrapping 940 -> 832; migration_iou floor raised to
 # 1 for the charts IOU (verified-claims ledger, consumed by P2/P5).
-# Baseline change (P0 dedup): mfscommon extraction moved shared modules out of
-# the 6 daemon crates into the mfscommon crate; mfsclient extraction moved the
-# 12 shared client modules out of mfsmount/mfsbdev into the mfsclient crate.
+# Baseline change (P0 dedup): plfscommon extraction moved shared modules out of
+# the 6 daemon crates into the plfscommon crate; plfsclient extraction moved the
+# 12 shared client modules out of plfsmount/plfsbdev into the plfsclient crate.
 # Totals: unsafe 8,727 → 7,105, wrapping 11,498 → 8,387 (duplicates eliminated,
 # VC-05/VC-06).
-unsafe_sites	mfsmaster	le	3007
-unsafe_sites	mfschunkserver	le	1002
-unsafe_sites	mfsmetalogger	le	302
-unsafe_sites	mfsmount	le	859
-unsafe_sites	mfsbdev	le	570
-unsafe_sites	mfsgui	le	307
-unsafe_sites	mfsnetdump	le	44
-unsafe_sites	mfscommon	le	240
-unsafe_no_safety	mfsmaster	le	3007
-unsafe_no_safety	mfschunkserver	le	1002
-unsafe_no_safety	mfsmetalogger	le	302
-unsafe_no_safety	mfsmount	le	939
-unsafe_no_safety	mfsbdev	le	570
-unsafe_no_safety	mfsgui	le	307
-unsafe_no_safety	mfsnetdump	le	44
-unsafe_no_safety	mfscommon	le	171
+unsafe_sites	plfsmaster	le	3007
+unsafe_sites	plfschunkserver	le	1002
+unsafe_sites	plfsmetalogger	le	302
+unsafe_sites	plfsmount	le	859
+unsafe_sites	plfsbdev	le	570
+unsafe_sites	plfsgui	le	307
+unsafe_sites	plfsnetdump	le	44
+unsafe_sites	plfscommon	le	240
+unsafe_no_safety	plfsmaster	le	3007
+unsafe_no_safety	plfschunkserver	le	1002
+unsafe_no_safety	plfsmetalogger	le	302
+unsafe_no_safety	plfsmount	le	939
+unsafe_no_safety	plfsbdev	le	570
+unsafe_no_safety	plfsgui	le	307
+unsafe_no_safety	plfsnetdump	le	44
+unsafe_no_safety	plfscommon	le	171
 migration_iou	workspace	le	1
-unsafe_sites	mfsclient	le	562
-unsafe_no_safety	mfsclient	le	562
-wrapping_ops	mfsclient	ge	796
-wrapping_ops	mfsmaster	ge	4068
-wrapping_ops	mfschunkserver	ge	1316
-wrapping_ops	mfsmetalogger	ge	151
-wrapping_ops	mfsmount	ge	410
-wrapping_ops	mfsbdev	ge	240
-wrapping_ops	mfsgui	ge	149
-wrapping_ops	mfsnetdump	ge	68
-wrapping_ops	mfscommon	ge	832
+unsafe_sites	plfsclient	le	562
+unsafe_no_safety	plfsclient	le	562
+wrapping_ops	plfsclient	ge	796
+wrapping_ops	plfsmaster	ge	4068
+wrapping_ops	plfschunkserver	ge	1316
+wrapping_ops	plfsmetalogger	ge	151
+wrapping_ops	plfsmount	ge	410
+wrapping_ops	plfsbdev	ge	240
+wrapping_ops	plfsgui	ge	149
+wrapping_ops	plfsnetdump	ge	68
+wrapping_ops	plfscommon	ge	832

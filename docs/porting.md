@@ -12,7 +12,7 @@ protocol, disk, and FUSE surfaces, and (c) passes the default-deny verifier.
 
 ## Ground rules
 
-- **Migrate in place, same file path.** `mfsmaster/src/mfsmaster/matocsserv.rs`
+- **Migrate in place, same file path.** `plfsmaster/src/plfsmaster/matocsserv.rs`
   stays `matocsserv.rs`. Reviewers diff old↔new side-by-side; do not
   restructure the tree while migrating.
 - **Do not invent crate layouts.** The 7-crate layout
@@ -82,7 +82,7 @@ consumers — do not override it locally.
 | `libc::malloc/free` pairs | `Box`/`Vec`; if the allocation crosses FFI, `Box::into_raw`/`from_raw` at the boundary only | pairing must be visible in one function |
 | sentinel values (`-1`, `NULL`, `0` as error) | `Option<T>` / `Result<T, E>` at module boundary; sentinel preserved at the protocol/disk boundary | wire format is frozen — sentinels on the wire stay sentinels |
 | `c2rust_bitfields::BitfieldStruct` | stays (vendored derive, `vendor/c2rust-bitfields-derive`) until P6; new code uses explicit masks | the derive patch is load-bearing (`Ident::new_raw`); do not "simplify" bitfields mid-phase |
-| variadic fns (`VaList`, `mfslog`, `oplog`, `changelog`) | safe wrapper with fixed signature per call-site family; `c_variadic` confined to the leaf that formats | VaList sites: `mfscommon/mfslog.rs` (all crates), `mfsclient/oplog.rs`, `mfsclient/mfsio.rs`, `mfsmaster/changelog.rs`, `mfsgui/mfsgui.rs` |
+| variadic fns (`VaList`, `mfslog`, `oplog`, `changelog`) | safe wrapper with fixed signature per call-site family; `c_variadic` confined to the leaf that formats | VaList sites: `plfscommon/mfslog.rs` (all crates), `plfsclient/oplog.rs`, `plfsclient/mfsio.rs`, `plfsmaster/changelog.rs`, `plfsgui/plfsgui.rs` |
 | `core_intrinsics` uses (`likely`/`unlikely`/`abort` etc.) | `std::hint::likely`/`unlikely` where stable, else drop the hint; `std::process::abort` | removal of `core_intrinsics` is a per-module win toward P6 stable |
 | `wrapping_add` etc. | keep `wrapping_*` | 11,498 sites are machine-inserted C-semantics; do not "clean up" to panicking or `+` — that changes overflow behavior |
 | `transmute` | `#[repr(C)]` + field access, or `bytemuck`-free explicit byte conversion | every remaining `transmute` needs a `// SAFETY:` citing the layout invariant, plus a `const _: () = assert!(size_of …)` gate |

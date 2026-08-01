@@ -8,10 +8,10 @@ behavior frozen at every merge point. License: GPLv2 (see LICENSE).
 
 | Path | What |
 | --- | --- |
-| `mfscommon/` | shared crate: safe-migrated common modules (P1) |
-| `mfsclient/` | shared crate: transpiled client backend modules (dedup P0) |
-| `mfsmount/` | FUSE frontend (P4: safe cores + 2 annotated boundaries) |
-| `mfsmaster/` `mfschunkserver/` `mfsmetalogger/` `mfsgui/` `mfsbdev/` `mfsnetdump/` | daemons, still transpiled c2rust output |
+| `plfscommon/` | shared crate: safe-migrated common modules (P1) |
+| `plfsclient/` | shared crate: transpiled client backend modules (dedup P0) |
+| `plfsmount/` | FUSE frontend (P4: safe cores + 2 annotated boundaries) |
+| `plfsmaster/` `plfschunkserver/` `plfsmetalogger/` `plfsgui/` `plfsbdev/` `plfsnetdump/` | daemons, still transpiled c2rust output |
 | `docs/` | migration methodology, plan, verified-claims, facts (OWNERSHIP.tsv, dedup-map, ffi-boundaries) |
 | `tools/gates/` | regression gates (check.sh + baseline.tsv) |
 | `tools/smoke_test.sh` | end-to-end cluster + FUSE smoke test |
@@ -19,16 +19,16 @@ behavior frozen at every merge point. License: GPLv2 (see LICENSE).
 ## Build / verify (always in this order)
 
 ```bash
-cargo test --release -p mfsmount --lib            # unit tests (78)
+cargo test --release -p plfsmount --lib            # unit tests (78)
 RUSTFLAGS="-L $PWD/target/fuse318/fuse-3.18.2/build/lib" cargo build --release --workspace --locked
 LD_LIBRARY_PATH=$PWD/target/fuse318/fuse-3.18.2/build/lib bash tools/smoke_test.sh   # SMOKE OK
 bash tools/gates/check.sh                          # exit 0
 ```
 
-- mfsmount needs libfuse ≥ 3.17; the prebuilt one lives at
+- plfsmount needs libfuse ≥ 3.17; the prebuilt one lives at
   `target/fuse318/fuse-3.18.2/build/lib` (RUSTFLAGS at build,
   LD_LIBRARY_PATH at runtime).
-- mfsnetdump needs `libpcap-dev` (missing locally; CI has it).
+- plfsnetdump needs `libpcap-dev` (missing locally; CI has it).
 - Baselines: after an intentional metrics change, re-freeze
   `tools/gates/baseline.tsv` in the SAME commit.
 
@@ -44,7 +44,7 @@ bash tools/gates/check.sh                          # exit 0
   Write reference tests for parsers/serializers against C semantics.
 - Genuine C-only modules (kernel callbacks, process bootstrap) become
   **annotated boundaries**: module-header justification, not forced
-  rewrites (see mfs_fuse.rs, mfsmount.rs, mfscommon/sockets.rs).
+  rewrites (see mfs_fuse.rs, plfsmount.rs, plfscommon/sockets.rs).
 
 ## Traps learned the hard way (don't repeat)
 
@@ -55,7 +55,7 @@ bash tools/gates/check.sh                          # exit 0
    LTO on clean builds. Per-TU private symbols are NOT linkable;
    c2rust's model gives each module its own copy. Mirror that or use
    `#[unsafe(no_mangle)]`.)
-2. **Tests in the mfsmount *binary* target** (`src/fuse_client/mfsmount.rs`
+2. **Tests in the plfsmount *binary* target** (`src/fuse_client/plfsmount.rs`
    is the bin root, not the lib) only run with `cargo test` /
    `--bins`, not `--lib`.
 3. **Probe cursors ≠ content keys.** When porting hash tables that cache

@@ -26,80 +26,80 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
-name = "mfsbdev"
-version = "0.0.0"
+name = "plfsbdev"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfsclient",
- "mfscommon",
+ "plfsclient",
+ "plfscommon",
 ]
 
 [[package]]
-name = "mfschunkserver"
-version = "0.0.0"
+name = "plfschunkserver"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfscommon",
+ "plfscommon",
 ]
 
 [[package]]
-name = "mfsclient"
-version = "0.0.0"
-dependencies = [
- "c2rust-bitfields",
- "libc",
-]
-
-[[package]]
-name = "mfscommon"
-version = "0.0.0"
+name = "plfsclient"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
 ]
 
 [[package]]
-name = "mfsgui"
-version = "0.0.0"
+name = "plfscommon"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfscommon",
 ]
 
 [[package]]
-name = "mfsmaster"
-version = "0.0.0"
+name = "plfsgui"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfscommon",
+ "plfscommon",
 ]
 
 [[package]]
-name = "mfsmetalogger"
-version = "0.0.0"
+name = "plfsmaster"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfscommon",
+ "plfscommon",
 ]
 
 [[package]]
-name = "mfsmount"
-version = "0.0.0"
+name = "plfsmetalogger"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
- "mfsclient",
- "mfscommon",
+ "plfscommon",
 ]
 
 [[package]]
-name = "mfsnetdump"
-version = "0.0.0"
+name = "plfsmount"
+version = "0.1.0"
+dependencies = [
+ "c2rust-bitfields",
+ "libc",
+ "plfsclient",
+ "plfscommon",
+]
+
+[[package]]
+name = "plfsnetdump"
+version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
 ]

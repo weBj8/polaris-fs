@@ -25,11 +25,11 @@ Measured baseline of what we're carrying (see
 | `static mut` declarations | 1,786 | aliasing-mutability class |
 | `extern "C"` occurrences | 5,151 | intra-crate C ABI seams |
 | `wrapping_*` arithmetic ops | 11,498 | C overflow semantics, machine-inserted |
-| Raw-pointer casts in `mfsmaster/src` alone | 12,664 | `as *mut` / `as *const` |
+| Raw-pointer casts in `plfsmaster/src` alone | 12,664 | `as *mut` / `as *const` |
 | Nightly-only features | `core_intrinsics`, `c_variadic` in all 7 crates | blocks stable toolchain |
 
 And one existence proof that the baseline ships real memory bugs: the
-groups-cache use-after-free in `mfsmount` — a latent MooseFS bug that crashed
+groups-cache use-after-free in `plfsmount` — a latent MooseFS bug that crashed
 `opendir` under root workloads, fixed in commit `35f00f4`. It survived
 translation, smoke tests, and deployment. It is the kind of bug the borrow
 checker makes unrepresentable.
@@ -98,24 +98,24 @@ package, one daemon binary.
 
 | Phase | Crate(s) | LOC | unsafe | Why this position |
 | --- | --- | ---: | ---: | --- |
-| ~~P1 (pilot)~~ | ~~`mfsnetdump`~~ | ~~2,711~~ | ~~44~~ | ~~Smallest; single file; no cluster role~~ **Revised (user directive, 2026-07-30):** P1 targets the shared `mfscommon` crate first — every daemon benefits, and the shim pattern it requires (extern "C" signatures kept for symbol-linking consumers) is the pattern all later phases need. `mfsnetdump` demoted to a P6 cleanup item. |
-| **P1 (revised)** | `mfscommon` (14 shared modules) | 16,088 | 336 | Shared by all daemons; calibrates the shim pattern + gates on real shared code |
-| P2 | `mfsmetalogger`, `mfsgui` | 27,658 | 944 | Small, single-purpose daemons; real network protocol surface |
-| P3 | `mfschunkserver` | 97,856 | 1,288 | Data path: chunk I/O, CRC, disk layout. Heavy `static mut` and buffer management |
-| P4 | `mfsmount` + `mfsbdev` | 224,562 | 3,167 | **Shared `mfsclient/` tree in two copies** — must be de-duplicated into one shared crate *first* (else every fix lands twice) |
-| P5 | `mfsmaster` | 145,499 | 3,284 | Metadata core, hardest, last — methodology and test infra are most mature here |
+| ~~P1 (pilot)~~ | ~~`plfsnetdump`~~ | ~~2,711~~ | ~~44~~ | ~~Smallest; single file; no cluster role~~ **Revised (user directive, 2026-07-30):** P1 targets the shared `plfscommon` crate first — every daemon benefits, and the shim pattern it requires (extern "C" signatures kept for symbol-linking consumers) is the pattern all later phases need. `plfsnetdump` demoted to a P6 cleanup item. |
+| **P1 (revised)** | `plfscommon` (14 shared modules) | 16,088 | 336 | Shared by all daemons; calibrates the shim pattern + gates on real shared code |
+| P2 | `plfsmetalogger`, `plfsgui` | 27,658 | 944 | Small, single-purpose daemons; real network protocol surface |
+| P3 | `plfschunkserver` | 97,856 | 1,288 | Data path: chunk I/O, CRC, disk layout. Heavy `static mut` and buffer management |
+| P4 | `plfsmount` + `plfsbdev` | 224,562 | 3,167 | **Shared `plfsclient/` tree in two copies** — must be de-duplicated into one shared crate *first* (else every fix lands twice) |
+| P5 | `plfsmaster` | 145,499 | 3,284 | Metadata core, hardest, last — methodology and test infra are most mature here |
 | P6 | workspace-wide | — | — | nightly-feature removal, vendor-patch upstreaming, stable toolchain |
 
-`mfscommon/` exists per-crate as transpiled copies (measured: 15 files
+`plfscommon/` exists per-crate as transpiled copies (measured: 15 files
 byte-identical across crates — `clocks`, `crc`, `md5`, `mfslog`,
 `processname`, `sockets`, `timeparser`, `charts`, `cpuusage`, `memusage`,
 `conncache`, `delayrun`, `labelparser`, `lwthread`; 5 divergent — `cfg.rs`,
 `main.rs`, `pcqueue.rs`, `random.rs`, `strerr.rs` differ per daemon because
 MooseFS compiles the convenience library per-binary with different configure
-defines). `mfsclient/` similarly: 12 files byte-identical between `mfsmount`
-and `mfsbdev`, the rest diverge (FUSE vs NBD paths). **P0 therefore splits
+defines). `plfsclient/` similarly: 12 files byte-identical between `plfsmount`
+and `plfsbdev`, the rest diverge (FUSE vs NBD paths). **P0 therefore splits
 into two tracks:** (a) mechanically de-duplicate byte-identical files into
-shared `mfscommon` / `mfsclient` crates — zero behavior risk, the copies are
+shared `plfscommon` / `plfsclient` crates — zero behavior risk, the copies are
 md5-identical; (b) divergent files stay per-crate and migrate with their
 owning crate. Migrating six identical copies of `mfslog.rs` to safe Rust six
 times is waste; migrating divergent `cfg.rs` into one shared file is a
@@ -151,11 +151,11 @@ Per [methodology.md](methodology.md) #6: no unbounded loops. Caps:
 | P3 | 20 | 6 weeks |
 | P4 | 25 | 8 weeks |
 
-P4 no longer de-duplicates `mfsclient/` itself — the byte-identical share
+P4 no longer de-duplicates `plfsclient/` itself — the byte-identical share
 (12 files) moves into a shared crate in P0; P4 migrates the shared crate's
 client modules plus each daemon's divergent files (`mfs_fuse.rs`,
-`getgroups.rs`, cache modules in `mfsmount`; `mfsioint_*`, `squeue.rs`,
-`workers.rs` in `mfsbdev`).
+`getgroups.rs`, cache modules in `plfsmount`; `mfsioint_*`, `squeue.rs`,
+`workers.rs` in `plfsbdev`).
 | P5 | 30 | 10 weeks |
 | P6 | — | 2 weeks |
 
@@ -166,9 +166,9 @@ phase in the ledger.
 
 ## Phase status log
 
-### P4 (mfsmount) — DONE (2026-07-30)
+### P4 (plfsmount) — DONE (2026-07-30)
 
-Scope delivered: the `mfsmount` crate (FUSE frontend, 53.3k transpiled
+Scope delivered: the `plfsmount` crate (FUSE frontend, 53.3k transpiled
 LOC). 17 modules migrated to safe cores with C ABI boundaries preserved;
 2 modules documented as annotated unsafe boundaries.
 
@@ -181,7 +181,7 @@ masterproxy, pcqueue, strerr, mfs_meta_fuse.
 Annotated boundaries (justified in module headers):
 - `mfs_fuse.rs` — libfuse kernel callback protocol (raw request/buffer
   lifetimes owned by libfuse, reply-exactly-once C contract).
-- `mfsmount.rs` — process bootstrap (argv/fuse_args, daemonize, setuid,
+- `plfsmount.rs` — process bootstrap (argv/fuse_args, daemonize, setuid,
   signal handlers, FUSE session loop); its extractable pure logic
   (comma escape/remove) is a tested safe core.
 
@@ -191,12 +191,12 @@ refreshed. Two real bugs caught by tests during the work and fixed
 before merge (probe-cursor hash clobber in dirblob_name_index;
 portable_usleep cross-module private symbol failing clean LTO builds).
 
-Remaining P4-named scope per the original split: `mfsbdev` (shares
-`mfsclient/`) — continues as its own phase effort.
+Remaining P4-named scope per the original split: `plfsbdev` (shares
+`plfsclient/`) — continues as its own phase effort.
 
 Note (post-P4): the mount-only FUSE modules moved from
-`mfsmount/src/mfsclient/` to `mfsmount/src/fuse_client/` to stop the
-name collision with the shared `mfsclient` crate. Pure rename — no
+`plfsmount/src/plfsclient/` to `plfsmount/src/fuse_client/` to stop the
+name collision with the shared `plfsclient` crate. Pure rename — no
 behavior change; paths in the entries above predate it.
 
 ## Exit criteria per phase

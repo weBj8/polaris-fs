@@ -1,17 +1,20 @@
 [workspace]
 members = [
-    "mfsbdev",
-    "mfschunkserver",
-    "mfsclient",
-    "mfscommon",
-    "mfsgui",
-    "mfsmaster",
-    "mfsmetalogger",
-    "mfsmount",
-    "mfsnetdump",
+    "plfsbdev",
+    "plfschunkserver",
+    "plfsclient",
+    "plfscommon",
+    "plfsgui",
+    "plfsmaster",
+    "plfsmetalogger",
+    "plfsmount",
+    "plfsnetdump",
 ]
 exclude = ["vendor"]
 resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
 
 [profile.dev]
 overflow-checks = false
@@ -20,6 +23,6 @@ overflow-checks = false
 lto = true
 codegen-units = 1
 
-[profile.release.package.mfsmount]
+[profile.release.package.plfsmount]
 strip = "none"
 debug = true

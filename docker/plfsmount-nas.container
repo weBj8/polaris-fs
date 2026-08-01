@@ -1,0 +1,22 @@
+# Podman quadlet example for a FUSE client mount
+# Install: copy to /etc/containers/systemd/plfsmount.container
+#          then `systemctl daemon-reload && systemctl start plfsmount`
+[Unit]
+Description=MooseFS FUSE mount (c2rust port)
+After=network-online.target plfschunkserver.service
+Wants=network-online.target
+[Container]
+Image=docker.io/library/plfs-rust:4.59.2
+ContainerName=plfsmount
+Network=host
+Environment=ROLE=plfsmount
+Environment=MASTER_HOST=192.168.1.1
+Environment=MOUNT_POINT=/mnt/plfs
+AddDevice=/dev/fuse
+AddCapability=SYS_ADMIN
+Volume=/mnt/plfs:/mnt/plfs:rshared
+[Service]
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

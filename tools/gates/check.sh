@@ -10,7 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 
-crates="mfsmaster mfschunkserver mfsmetalogger mfsmount mfsbdev mfsgui mfsnetdump mfscommon mfsclient"
+crates="plfsmaster plfschunkserver plfsmetalogger plfsmount plfsbdev plfsgui plfsnetdump plfscommon plfsclient"
 
 count_unsafe()      { grep -rE 'unsafe (fn|\{|impl)' "$1/src" --include='*.rs' | wc -l; }
 count_wrapping()    { grep -rn 'wrapping_' "$1/src" --include='*.rs' | wc -l; }

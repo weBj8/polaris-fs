@@ -1,0 +1,14 @@
+[package]
+name = "plfsclient"
+version.workspace = true
+publish = false
+edition = "2024"
+
+[lib]
+name = "plfsclient"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
+libc = "0.2"

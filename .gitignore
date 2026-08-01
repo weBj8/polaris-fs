@@ -3,3 +3,5 @@ target/
 .omo/
 .pi-subagents/
 *.img
+__pycache__/
+*.py[cod]

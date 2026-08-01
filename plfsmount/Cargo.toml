@@ -1,0 +1,20 @@
+[package]
+name = "plfsmount"
+authors = ["C2Rust"]
+version.workspace = true
+publish = false
+edition = "2024"
+autobins = false
+
+[lib]
+name = "plfsmount"
+path = "lib.rs"
+crate-type = ["staticlib", "rlib"]
+[[bin]]
+path = "src/fuse_client/plfsmount.rs"
+name = "plfsmount"
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
+libc = "0.2"
+plfscommon = { path = "../plfscommon" }
+plfsclient = { path = "../plfsclient" }

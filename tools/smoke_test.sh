@@ -10,13 +10,13 @@ cd "$(dirname "$0")/.."
 
 W="${1:-target/smoke}"
 mkdir -p "$W"; W=$(realpath "$W")
-BIN=$(realpath "${MFS_BIN_DIR:-target/release}")
+BIN=$(realpath "${PLFS_BIN_DIR:-target/release}")
 ML_PORT=19419 CS_PORT=19420 CL_PORT=19421 CSS_PORT=19422
 # chunkserver refuses a loopback MASTER_HOST ("use ip address of network controller")
 HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 HOST_IP=${HOST_IP:-127.0.0.1}
 
-for b in mfsmaster mfschunkserver mfsmetalogger mfsmount; do
+for b in plfsmaster plfschunkserver plfsmetalogger plfsmount; do
   [ -x "$BIN/$b" ] || { echo "missing $BIN/$b - run cargo build --release"; exit 1; }
 done
 [ -e /dev/fuse ] || { echo "/dev/fuse unavailable"; exit 1; }
@@ -26,7 +26,7 @@ PIDS=""
 cleanup() {
   set +e
   for p in $PIDS; do kill "$p" 2>/dev/null; done
-  pkill -f "$BIN/mfsmount" 2>/dev/null
+  pkill -f "$BIN/plfsmount" 2>/dev/null
   wait 2>/dev/null
 }
 trap cleanup EXIT
@@ -46,7 +46,7 @@ mkcfg "$W/master" "EXPORTS_FILENAME = $W/master/mfsexports.cfg
 MATOML_LISTEN_PORT = $ML_PORT
 MATOCS_LISTEN_PORT = $CS_PORT
 MATOCL_LISTEN_PORT = $CL_PORT"
-"$BIN/mfsmaster" -f -c "$W/master/mfs.cfg" >"$W/master.log" 2>&1 &
+"$BIN/plfsmaster" -f -c "$W/master/mfs.cfg" >"$W/master.log" 2>&1 &
 PIDS="$PIDS $!"
 
 mkcfg "$W/cs" "MASTER_HOST = $HOST_IP
@@ -54,12 +54,12 @@ MASTER_PORT = $CS_PORT
 CSSERV_LISTEN_PORT = $CSS_PORT
 HDD_CONF_FILENAME = $W/cs/mfshdd.cfg"
 echo "$W/cs/hdd" >"$W/cs/mfshdd.cfg"
-"$BIN/mfschunkserver" -f -c "$W/cs/mfs.cfg" >"$W/cs.log" 2>&1 &
+"$BIN/plfschunkserver" -f -c "$W/cs/mfs.cfg" >"$W/cs.log" 2>&1 &
 PIDS="$PIDS $!"
 
 mkcfg "$W/metalogger" "MASTER_HOST = 127.0.0.1
 MASTER_PORT = $ML_PORT"
-"$BIN/mfsmetalogger" -f -c "$W/metalogger/mfs.cfg" >"$W/metalogger.log" 2>&1 &
+"$BIN/plfsmetalogger" -f -c "$W/metalogger/mfs.cfg" >"$W/metalogger.log" 2>&1 &
 PIDS="$PIDS $!"
 
 for i in $(seq 1 30); do
@@ -74,7 +74,7 @@ done
 cat >"$W/inner.sh" <<EOF
 set -euo pipefail
 export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
-"$BIN/mfsmount" -f -H 127.0.0.1 -P $CL_PORT "$W/mnt" >"$W/mount.log" 2>&1 &
+"$BIN/plfsmount" -f -H 127.0.0.1 -P $CL_PORT "$W/mnt" >"$W/mount.log" 2>&1 &
 MPID=\$!
 trap 'kill \$MPID 2>/dev/null || true; wait \$MPID 2>/dev/null || true; umount "$W/mnt" 2>/dev/null || true' EXIT
 for i in \$(seq 1 30); do mountpoint -q "$W/mnt" && break; sleep 0.5; done

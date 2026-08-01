@@ -1,0 +1,24 @@
+# Podman quadlet example for a chunkserver
+# Install: copy to /etc/containers/systemd/plfschunkserver.container
+#          then `systemctl daemon-reload && systemctl start plfschunkserver`
+[Unit]
+Description=MooseFS chunkserver (c2rust port)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/plfs-rust:4.59.2
+ContainerName=plfschunkserver
+Network=host
+Environment=ROLE=plfschunkserver
+Environment=MASTER_HOST=192.168.1.1
+Environment=HDD_PATHS=/mnt/hdd/plfs
+Volume=/var/lib/plfschunkserver:/var/lib/plfs
+Volume=/mnt/hdd/plfs:/mnt/hdd/plfs
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

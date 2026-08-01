@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes zlib1g-dev libpcap-dev meson ninja-build pkg-config curl
 
-      # ubuntu-24.04 ships libfuse 3.14, but the transpiled mfsmount uses
+      # ubuntu-24.04 ships libfuse 3.14, but the transpiled plfsmount uses
       # fuse_session_new_versioned (libfuse >= 3.17). Build 3.18 from source.
       - name: Cache libfuse 3.18
         id: cache-fuse
@@ -95,18 +95,21 @@ jobs:
           RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
         run: cargo build --release --workspace --locked
 
+      - name: Check CGI route references
+        run: '! grep -RIn "mfs\\.cgi" docker/plfscgi --exclude-dir=__pycache__'
+
       - name: Smoke-test executables
         shell: bash
         run: |
           set -euo pipefail
-          target/release/mfsmaster -v
-          target/release/mfschunkserver -v
-          target/release/mfsmetalogger -v
-          target/release/mfsgui -v
-          target/release/mfsmount --version
-          target/release/mfsbdev --help >/dev/null || true
-          file target/release/mfsmaster target/release/mfsmount
-          readelf --version-info target/release/mfsmaster \
+          target/release/plfsmaster -v
+          target/release/plfschunkserver -v
+          target/release/plfsmetalogger -v
+          target/release/plfsgui -v
+          target/release/plfsmount --version
+          target/release/plfsbdev --help >/dev/null || true
+          file target/release/plfsmaster target/release/plfsmount
+          readelf --version-info target/release/plfsmaster \
             | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -3
 
       - name: Cluster smoke test (master+chunkserver+metalogger+FUSE mount)
@@ -118,10 +121,10 @@ jobs:
           # process cwd (repo root — smoke_test.sh cd's there).
           sudo sh -c 'ulimit -c unlimited && sysctl -w kernel.core_pattern=core.%e.%p && LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu bash tools/smoke_test.sh'
           rc=$?
-          # Preserve crash artifacts before cleanup. The mfsmount binary is
+          # Preserve crash artifacts before cleanup. The plfsmount binary is
           # bundled so the core can be symbolized against the exact build.
           mkdir -p target/smoke-artifacts
-          sudo sh -c 'cp -f target/release/mfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null'
+          sudo sh -c 'cp -f target/release/plfsmount core* target/smoke/*.log target/smoke/inner.sh target/smoke-artifacts/ 2>/dev/null'
           sudo chown -R "$(id -u):$(id -g)" target/smoke-artifacts
           sudo rm -rf target/smoke core*   # drop root-owned artifacts so later cache hashFiles works
           exit $rc
@@ -130,7 +133,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mfsmount-crash-${{ github.sha }}
+          name: plfsmount-crash-${{ github.sha }}
           path: target/smoke-artifacts/
           if-no-files-found: warn
           retention-days: 14
@@ -138,15 +141,15 @@ jobs:
       - name: Upload release executables
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mfs-dist-x86_64-unknown-linux-gnu
+          name: plfs-dist-x86_64-unknown-linux-gnu
           path: |
-            target/release/mfsmaster
-            target/release/mfschunkserver
-            target/release/mfsmetalogger
-            target/release/mfsgui
-            target/release/mfsmount
-            target/release/mfsbdev
-            target/release/mfsnetdump
+            target/release/plfsmaster
+            target/release/plfschunkserver
+            target/release/plfsmetalogger
+            target/release/plfsgui
+            target/release/plfsmount
+            target/release/plfsbdev
+            target/release/plfsnetdump
           if-no-files-found: error
           retention-days: 90
           compression-level: 9

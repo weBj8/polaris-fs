@@ -42,12 +42,12 @@ punch-list).
 | # | Category | Site | Divergence | Risk |
 | --- | --- | --- | --- | --- |
 | D1 | aliasing-mutability | 1,786 `static mut` sites tree-wide | `&mut`/`&` formed to `static mut` globals across the event loop; any two overlapping `&mut` = UB | HIGH (class) |
-| D2 | dropped-definitions | 6 `_Atomic` statics, `mfsmount`+`mfsbdev` `mastercomm.rs`/`readdata.rs`/`writedata.rs` | definitions dropped by c2rust, re-added by hand; regression risk on every regeneration | MEDIUM |
-| D3 | aliasing-mutability | `mfsclient` cache modules (`getgroups.rs` fixed at `35f00f4`; sibling caches un-audited) | re-entrant callback invalidating cached pointers — one latent UAF already shipped | MEDIUM (class) |
+| D2 | dropped-definitions | 6 `_Atomic` statics, `plfsmount`+`plfsbdev` `mastercomm.rs`/`readdata.rs`/`writedata.rs` | definitions dropped by c2rust, re-added by hand; regression risk on every regeneration | MEDIUM |
+| D3 | aliasing-mutability | `plfsclient` cache modules (`getgroups.rs` fixed at `35f00f4`; sibling caches un-audited) | re-entrant callback invalidating cached pointers — one latent UAF already shipped | MEDIUM (class) |
 | D4 | UB-preserving-semantics | 11,498 `wrapping_*` sites | machine-inserted C overflow semantics; any "cleanup" to plain `+`/`-` silently changes overflow behavior | MEDIUM (anti-fix class) |
 | D5 | keyword-mangling | `vendor/c2rust-bitfields-derive-0.22.1` patch | stock derive panics on `r#type`; vendored patch is load-bearing | LOW |
 | D6 | UB-preserving-semantics | `transmute` sites (ungrepped at P0) | layout invariants unasserted; Bun shipped 148 layout asserts, we ship ~0 | LOW (class) |
-| D7 | UB-preserving-semantics | variadic leaves (`mfslog`, `oplog`, `mfsio`, `changelog`, `mfsgui`) | `VaList` misuse is UB; nightly `c_variadic` API drift already bit once (`arg` → `next_arg` rename) | LOW |
+| D7 | UB-preserving-semantics | variadic leaves (`mfslog`, `oplog`, `mfsio`, `changelog`, `plfsgui`) | `VaList` misuse is UB; nightly `c_variadic` API drift already bit once (`arg` → `next_arg` rename) | LOW |
 
 ---
 
@@ -91,10 +91,10 @@ re-transpile, diff the symbol table against the previous tree for
 used-but-undefined statics. **Gate:** build + `nm`-level check in the
 regeneration runbook (`README.md` §Regenerating), not in per-PR CI.
 
-## M2. Re-entrant callback invalidation in `mfsclient` caches
+## M2. Re-entrant callback invalidation in `plfsclient` caches
 
 **Evidence:** commit `35f00f4` — groups-cache UAF crashing `opendir` for
-root. The `mfsclient/` tree holds a family of similar caches
+root. The `plfsclient/` tree holds a family of similar caches
 (`dirattrcache.rs`, `negentrycache.rs`, `symlinkcache.rs`, `xattrcache.rs`,
 `chunksdatacache.rs`, `fdcache.rs`, `sustained_*`) following the same
 pattern: cache pointer held across a network round-trip that can run
@@ -102,7 +102,7 @@ callbacks invalidating the cache.
 
 **Symptom:** crash or stale data under re-entrant load; one instance shipped.
 
-**Recommended fix:** P4 audits every `mfsclient` cache module against the
+**Recommended fix:** P4 audits every `plfsclient` cache module against the
 `getgroups.rs` fix pattern (VC-09). Class fix: cache handles become
 generation-checked or `Rc`-owned so a held handle keeps the entry alive.
 

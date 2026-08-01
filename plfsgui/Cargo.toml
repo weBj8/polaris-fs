@@ -1,0 +1,19 @@
+[package]
+name = "plfsgui"
+authors = ["C2Rust"]
+version.workspace = true
+publish = false
+edition = "2024"
+autobins = false
+
+[lib]
+name = "plfsgui"
+path = "lib.rs"
+crate-type = ["staticlib", "rlib"]
+[[bin]]
+path = "src/plfscommon/main.rs"
+name = "plfsgui"
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
+libc = "0.2"
+plfscommon = { path = "../plfscommon" }

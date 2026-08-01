@@ -1,8 +1,8 @@
-FROM mfs-rust:4.59.2
+FROM plfs-rust:4.59.2
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gdb \
  && rm -rf /var/lib/apt/lists/*
 
 # unstripped binary for symbolized backtraces
-COPY target/release/mfsmount /usr/local/sbin/mfsmount
+COPY target/release/plfsmount /usr/local/sbin/plfsmount

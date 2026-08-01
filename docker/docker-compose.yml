@@ -1,56 +1,54 @@
-# docker compose for the metadata tier on core@10.192.1.23
-# Deploy:  scp this file, then `docker compose up -d` in the same directory.
+# Local metadata-tier example. Override PLFS_IMAGE, PLFS_DATA_DIR,
+# PLFS_MASTER_HOST, and PLFS_MOUNT_DIR for your deployment.
 services:
-  mfsmaster:
-    image: mfs-rust:4.59.2
-    container_name: mfsmaster
+  plfsmaster:
+    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    container_name: plfsmaster
     restart: unless-stopped
     network_mode: host
     environment:
-      ROLE: mfsmaster
+      ROLE: plfsmaster
     volumes:
-      - /var/mnt/nvme1/mfsmaster:/var/lib/mfs
+      - ${PLFS_DATA_DIR:-./data}/master:/var/lib/plfs
 
-  mfsmetalogger:
-    image: mfs-rust:4.59.2
-    container_name: mfsmetalogger
+  plfsmetalogger:
+    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    container_name: plfsmetalogger
     restart: unless-stopped
     network_mode: host
     environment:
-      ROLE: mfsmetalogger
-      MASTER_HOST: 10.10.0.1
+      ROLE: plfsmetalogger
+      MASTER_HOST: ${PLFS_MASTER_HOST:-192.168.1.1}
     volumes:
-      - /var/mnt/nvme1/mfsmetalogger:/var/lib/mfs
+      - ${PLFS_DATA_DIR:-./data}/metalogger:/var/lib/plfs
     depends_on:
-      - mfsmaster
+      - plfsmaster
 
-  mfsmount:
-    image: mfs-rust:4.59.2
-    container_name: mfsmount
+  plfsmount:
+    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    container_name: plfsmount
     restart: unless-stopped
     network_mode: host
     privileged: true
     devices:
       - /dev/fuse
     environment:
-      ROLE: mfsmount
-      MASTER_HOST: 10.10.0.1
+      ROLE: plfsmount
+      MASTER_HOST: ${PLFS_MASTER_HOST:-192.168.1.1}
       MOUNT_POINT: /mnt/plfs
     volumes:
-      - /mnt/plfs:/mnt/plfs:shared
+      - ${PLFS_MOUNT_DIR:-./mnt}:/mnt/plfs:shared
     depends_on:
-      - mfsmaster
+      - plfsmaster
 
-  mfsgui:
-    image: mfs-rust:4.59.2
-    container_name: mfsgui
+  plfsgui:
+    image: ${PLFS_IMAGE:-plfs-rust:4.59.2}
+    container_name: plfsgui
     restart: unless-stopped
     network_mode: host
     environment:
-      ROLE: mfsgui
-    extra_hosts:
-      - "mfsmaster:10.10.0.1"
+      ROLE: plfsgui
     volumes:
-      - /var/mnt/nvme1/mfsgui:/var/lib/mfs
+      - ${PLFS_DATA_DIR:-./data}/gui:/var/lib/plfs
     depends_on:
-      - mfsmaster
+      - plfsmaster

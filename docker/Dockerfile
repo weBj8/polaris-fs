@@ -4,14 +4,14 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends zlib1g libpcap0.8 libfuse3-4 python3 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY docker/mfscgi/ /usr/share/mfscgi/
-RUN printf '#!/bin/sh\nPYTHONPATH=/usr/share/mfscgi exec /usr/bin/python3 /usr/share/mfscgi/mfscli "$@"\n' > /usr/local/bin/mfscli \
- && chmod +x /usr/local/bin/mfscli /usr/share/mfscgi/mfscli
+COPY docker/plfscgi/ /usr/share/plfscgi/
+RUN printf '#!/bin/sh\nPYTHONPATH=/usr/share/plfscgi exec /usr/bin/python3 /usr/share/plfscgi/plfscli "$@"\n' > /usr/local/bin/plfscli \
+ && chmod +x /usr/local/bin/plfscli /usr/share/plfscgi/plfscli
 
-COPY target/release/mfsbdev target/release/mfschunkserver target/release/mfsgui target/release/mfsmaster target/release/mfsmetalogger target/release/mfsmount target/release/mfsnetdump /usr/local/sbin/
-COPY docker/mfs-entry.sh /usr/local/bin/mfs-entry.sh
-RUN chmod +x /usr/local/bin/mfs-entry.sh /usr/local/sbin/mfs*
+COPY target/release/plfsbdev target/release/plfschunkserver target/release/plfsgui target/release/plfsmaster target/release/plfsmetalogger target/release/plfsmount target/release/plfsnetdump /usr/local/sbin/
+COPY docker/plfs-entry.sh /usr/local/bin/plfs-entry.sh
+RUN chmod +x /usr/local/bin/plfs-entry.sh /usr/local/sbin/plfs*
 
-# role: mfsmaster | mfsmetalogger | mfschunkserver | mfsgui | mfsmount | mfsbdev | mfsnetdump
-ENV ROLE=mfsmaster
-ENTRYPOINT ["/usr/local/bin/mfs-entry.sh"]
+# role: plfsmaster | plfsmetalogger | plfschunkserver | plfsgui | plfsmount | plfsbdev | plfsnetdump
+ENV ROLE=plfsmaster
+ENTRYPOINT ["/usr/local/bin/plfs-entry.sh"]

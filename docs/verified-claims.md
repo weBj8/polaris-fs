@@ -28,10 +28,10 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 ### VC-01 — unsafe baseline per crate
 
 - FACT: the transpiled tree contains 8,727 `unsafe fn`/`unsafe {}`/`unsafe
-  impl` sites across 498,286 `.rs` LOC in 7 crates: `mfsnetdump` 44 (2,711
-  LOC), `mfsmetalogger` 469 (13,480), `mfsgui` 475 (14,178), `mfschunkserver`
-  1,288 (97,856), `mfsbdev` 1,403 (103,038), `mfsmount` 1,764 (121,524),
-  `mfsmaster` 3,284 (145,499).
+  impl` sites across 498,286 `.rs` LOC in 7 crates: `plfsnetdump` 44 (2,711
+  LOC), `plfsmetalogger` 469 (13,480), `plfsgui` 475 (14,178), `plfschunkserver`
+  1,288 (97,856), `plfsbdev` 1,403 (103,038), `plfsmount` 1,764 (121,524),
+  `plfsmaster` 3,284 (145,499).
 - RUST: this is the frozen CI baseline for the unsafe counter gate; the count
   may only decrease.
 - GATE: CI job runs the same grep and diffs against the frozen numbers.
@@ -43,13 +43,13 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 - FACT: the tree contains 1,786 `static mut` declarations, 5,151 `extern "C"`
   occurrences, 11,498 `wrapping_*` arithmetic ops, and 12,664 raw-pointer
-  casts (`as *mut`/`as *const`) in `mfsmaster/src` alone.
+  casts (`as *mut`/`as *const`) in `plfsmaster/src` alone.
   **Correction (v2):** an earlier revision of this claim said 1,898. That
-  count came from a shell glob (`mfs*/src mfsgui/src mfsnetdump/src`) that
-  passed `mfsgui/src` and `mfsnetdump/src` twice, double-counting 112 hits.
+  count came from a shell glob (`mfs*/src plfsgui/src plfsnetdump/src`) that
+  passed `plfsgui/src` and `plfsnetdump/src` twice, double-counting 112 hits.
   The unique-declaration count is 1,786 (668 scalar → STATIC, 621 buffer/struct
-  → BUF, 497 pointer → UNKNOWN; per-crate: mfsmaster 727, mfsmount 345,
-  mfschunkserver 291, mfsbdev 213, mfsgui 103, mfsmetalogger 98, mfsnetdump 9
+  → BUF, 497 pointer → UNKNOWN; per-crate: plfsmaster 727, plfsmount 345,
+  plfschunkserver 291, plfsbdev 213, plfsgui 103, plfsmetalogger 98, plfsnetdump 9
   — `tools/gen_ownership.py`).
 - RUST: `static mut` is the largest single ownership class; every one must be
   classified in `docs/facts/OWNERSHIP.tsv` (P0). `wrapping_*` sites are
@@ -59,13 +59,13 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 - SRC: `grep -rn 'static mut' --include='*.rs' . --exclude-dir=vendor | wc -l`
   = 1,786 (unique; `grep -rn 'static mut' --include='*.rs' . --exclude-dir=vendor
   --exclude-dir=target | wc -l`); `grep -rn 'extern "C"' …` = 5,151; `grep -rn 'wrapping_' …` =
-  11,498; `grep -rc 'as \*mut\|as \*const' mfsmaster/src | awk '{s+=$1} END
+  11,498; `grep -rc 'as \*mut\|as \*const' plfsmaster/src | awk '{s+=$1} END
   {print s}'` = 12,664 (run 2026-07-30).
 
 ### VC-03 — nightly feature dependencies
 
 - FACT: every crate root (`<crate>/lib.rs`) and each daemon's main TU
-  (`src/mfscommon/main.rs` or the daemon main file) carries
+  (`src/plfscommon/main.rs` or the daemon main file) carries
   `#![feature(core_intrinsics)]` and `#![feature(c_variadic)]`.
 - RUST: `core_intrinsics` uses are removed per-module as migrated (stable
   `std::hint` / `std::process::abort` equivalents); `c_variadic` retreats to
@@ -88,10 +88,10 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 ## Code duplication facts
 
-### VC-05 — mfscommon duplication map
+### VC-05 — plfscommon duplication map
 
-- FACT: `mfscommon/` exists as per-crate transpiled copies in 6 crates (all
-  but `mfsnetdump`). 15 files are **byte-identical** across every crate that
+- FACT: `plfscommon/` exists as per-crate transpiled copies in 6 crates (all
+  but `plfsnetdump`). 15 files are **byte-identical** across every crate that
   has them — `clocks.rs`, `crc.rs`, `md5.rs`, `mfslog.rs`, `processname.rs`,
   `sockets.rs`, `timeparser.rs` (6 copies each); `charts.rs`, `cpuusage.rs`,
   `memusage.rs` (2); `conncache.rs`, `labelparser.rs`, `lwthread.rs` (3);
@@ -100,34 +100,34 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   (2/2), `strerr.rs` (2/6). Cause: MooseFS compiles its convenience library
   per-binary with different configure defines, and the transpile ran per
   binary (`README.md` §Regenerating, steps 3–4).
-- RUST: ~~P0 de-duplicates the byte-identical files into a shared `mfscommon`
+- RUST: ~~P0 de-duplicates the byte-identical files into a shared `plfscommon`
   crate (mechanical, zero behavior risk). Divergent files stay per-crate and
   migrate with their owning daemon.~~ **CLOSED (P0, commit `e167823`):** 14
-  modules extracted to `mfscommon/`, consumers use `pub use` reachability so
+  modules extracted to `plfscommon/`, consumers use `pub use` reachability so
   fat LTO retains the `#[no_mangle]` symbols. Smoke + gates green after
   extraction.
 - GATE: post-dedup, `md5sum` of the shared file equals the md5 of every copy
   it replaced; daemons build and pass smoke unchanged.
-- SRC: `md5sum */src/mfscommon/<file>` matrix (run 2026-07-30; full table in
+- SRC: `md5sum */src/plfscommon/<file>` matrix (run 2026-07-30; full table in
   `docs/facts/dedup-map.md`, to be generated in P0).
 
-### VC-06 — mfsclient duplication map (mfsmount vs mfsbdev)
+### VC-06 — plfsclient duplication map (plfsmount vs plfsbdev)
 
-- FACT: `mfsclient/` is transpiled into both `mfsmount` and `mfsbdev`. 12
+- FACT: `plfsclient/` is transpiled into both `plfsmount` and `plfsbdev`. 12
   files are byte-identical (`mastercomm.rs`, `readdata.rs`, `writedata.rs`,
   `csdb.rs`, `csorder.rs`, `chunkrwlock.rs`, `chunksdatacache.rs`,
   `extrapackets.rs`, `heapsorter.rs`, `inoleng.rs`, `stats.rs`,
   `truncate.rs`); the rest diverge (FUSE path: `mfs_fuse.rs`,
-  `mfs_meta_fuse.rs`, `getgroups.rs`, cache modules — mfsmount-only or
-  differing; NBD path: `mfsbdev.rs`, `mfsioint_lookupcache.rs`,
-  `squeue.rs`/`workers.rs` in `mfsbdev/src/mfscommon`).
-- RUST: ~~P0 moves the 12 identical files into a shared `mfsclient` crate;
+  `mfs_meta_fuse.rs`, `getgroups.rs`, cache modules — plfsmount-only or
+  differing; NBD path: `plfsbdev.rs`, `mfsioint_lookupcache.rs`,
+  `squeue.rs`/`workers.rs` in `plfsbdev/src/plfscommon`).
+- RUST: ~~P0 moves the 12 identical files into a shared `plfsclient` crate;
   divergent files migrate with their daemon in P4. Without this, every
   client-side fix would land twice.~~ **CLOSED (P0, commit `91a7221`):**
-  12 modules extracted to `mfsclient/`; needed `#![feature(core_intrinsics)]`
+  12 modules extracted to `plfsclient/`; needed `#![feature(core_intrinsics)]`
   (inoleng). Smoke + gates green after extraction.
 - GATE: same as VC-05.
-- SRC: `cmp -s mfsmount/src/mfsclient/<f> mfsbdev/src/mfsclient/<f>` sweep
+- SRC: `cmp -s plfsmount/src/plfsclient/<f> plfsbdev/src/plfsclient/<f>` sweep
   (run 2026-07-30).
 
 ## Translation-artifact facts (local patches the migration must not regress)
@@ -136,8 +136,8 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 - FACT: c2rust 0.22.1 drops definitions of file statics declared inside
   `#if HAVE_ATOMICS` blocks while keeping their uses. Six were re-added
-  manually: `rcnt/wcnt/fcnt/rbyt/wbyt` in `mfsmount/src/mfsclient/mastercomm.rs`
-  and `mfsbdev/src/mfsclient/mastercomm.rs`, `total_bytes_rcvd` in
+  manually: `rcnt/wcnt/fcnt/rbyt/wbyt` in `plfsmount/src/plfsclient/mastercomm.rs`
+  and `plfsbdev/src/plfsclient/mastercomm.rs`, `total_bytes_rcvd` in
   `readdata.rs`, `total_bytes_sent` in `writedata.rs` (both crates).
 - RUST: these are statistics counters — the TSV class for each is
   `STATIC → AtomicU64` (relaxed ordering suffices; they are diagnostics).
@@ -146,7 +146,7 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 - GATE: `-v`/stats output still increments counters; Miri clean on the
   migrated module.
 - SRC: `README.md` §Local patches, item 2; `grep -n 'ponytail:'
-  mfsmount/src/mfsclient/mastercomm.rs`.
+  plfsmount/src/plfsclient/mastercomm.rs`.
 
 ### VC-08 — vendored bitfields derive patch
 
@@ -163,20 +163,20 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 ### VC-09 — known latent-bug class evidence (groups-cache UAF)
 
 - FACT: commit `35f00f4` fixed a use-after-free in the groups cache crashing
-  `mfsmount` on `opendir` under root workloads — a latent MooseFS bug that
+  `plfsmount` on `opendir` under root workloads — a latent MooseFS bug that
   survived translation, smoke testing, and deployment.
 - RUST: instance-level memory bugs exist in the baseline independent of
-  translation artifacts. The cache modules of `mfsclient/` (see VC-06
+  translation artifacts. The cache modules of `plfsclient/` (see VC-06
   divergent list) are a priority cluster for the aliasing hunt.
-- GATE: the P4 plan must include a re-audit of all `mfsclient` cache modules
+- GATE: the P4 plan must include a re-audit of all `plfsclient` cache modules
   against the fixed `getgroups.rs` pattern.
-- SRC: `git show 35f00f4`; `mfsmount/src/fuse_client/getgroups.rs`.
+- SRC: `git show 35f00f4`; `plfsmount/src/fuse_client/getgroups.rs`.
 
 ### VC-10 — variadic logging leaves
 
-- FACT: C-variadic functions remain in: `mfscommon/mfslog.rs` (all 6 crates),
-  `fuse_client/oplog.rs` (mfsmount), `mfsclient/mfsio.rs` (mfsbdev),
-  `mfsmaster/changelog.rs`, `mfsgui/mfsgui.rs`.
+- FACT: C-variadic functions remain in: `plfscommon/mfslog.rs` (all 6 crates),
+  `fuse_client/oplog.rs` (plfsmount), `plfsclient/mfsio.rs` (plfsbdev),
+  `plfsmaster/changelog.rs`, `plfsgui/plfsgui.rs`.
 - RUST: these are the `c_variadic` confinement leaves
   ([porting.md](porting.md) type map). Safe wrappers get fixed signatures;
   the variadic leaf survives until Rust 1.99.
@@ -191,7 +191,7 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 - FACT: `.github/workflows/release.yml` builds all daemons on push to
   `mfs-rust`; it builds libfuse 3.18 from source (ubuntu-24.04 ships 3.14,
-  but `mfsmount` uses `fuse_session_new_versioned` ≥ 3.17) and runs no tests.
+  but `plfsmount` uses `fuse_session_new_versioned` ≥ 3.17) and runs no tests.
 - RUST: the P0 gate work (unsafe counter, IOU counter, smoke test) extends
   this workflow; the libfuse-from-source cache steps are reused.
 - GATE: P0 exit = all new gates green on the unmigrated baseline.
@@ -207,4 +207,4 @@ Columns: item · blocking crate/module · reason · created (phase) · consumed
 
 | item | blocked_on | reason | created | consumed | status |
 | --- | --- | --- | --- | --- | --- |
-| mfscommon::charts | P2 (mfsgui renders charts) + P5 (mfsmaster writes via chartsdata) | 5.2k lines of binary chart-format I/O + CGI rendering; subtle mistakes corrupt stats history; needs its owning daemons' phases for behavioral verification | P1 (2026-07-30) | — | open |
+| plfscommon::charts | P2 (plfsgui renders charts) + P5 (plfsmaster writes via chartsdata) | 5.2k lines of binary chart-format I/O + CGI rendering; subtle mistakes corrupt stats history; needs its owning daemons' phases for behavioral verification | P1 (2026-07-30) | — | open |

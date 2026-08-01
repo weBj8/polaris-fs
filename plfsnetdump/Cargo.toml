@@ -1,0 +1,17 @@
+[package]
+name = "plfsnetdump"
+authors = ["C2Rust"]
+version.workspace = true
+publish = false
+edition = "2024"
+autobins = false
+
+[lib]
+name = "plfsnetdump"
+path = "lib.rs"
+crate-type = ["staticlib", "rlib"]
+[[bin]]
+path = "src/plfsnetdump.rs"
+name = "plfsnetdump"
+[dependencies]
+c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }

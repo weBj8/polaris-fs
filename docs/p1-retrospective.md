@@ -1,6 +1,6 @@
-# P1 pilot retrospective — mfscommon migration
+# P1 pilot retrospective — plfscommon migration
 
-*2026-07-30, branch `p1/mfscommon-safe`. Scope: 14 shared modules, 16,088
+*2026-07-30, branch `p1/plfscommon-safe`. Scope: 14 shared modules, 16,088
 LOC, 336 unsafe sites. Outcome: 12/14 modules safe-ified, 2 classified as
 annotated boundaries (1 with IOU). 11 unit tests added. SMOKE + gates green
 throughout.*
@@ -72,9 +72,9 @@ phase without silent accumulation.
 
 | Metric | Before P1 | After |
 | --- | ---: | ---: |
-| mfscommon unsafe sites | 336 | 244 (sockets wrappers + charts) |
+| plfscommon unsafe sites | 336 | 244 (sockets wrappers + charts) |
 | — of which without SAFETY note | 336 | 175 |
-| mfscommon `static mut` (TSV classes) | all `auto:type-shape` | resolved per module (atomics/Mutex/LazyLock/boundary) |
+| plfscommon `static mut` (TSV classes) | all `auto:type-shape` | resolved per module (atomics/Mutex/LazyLock/boundary) |
 | Modules fully safe-ified | 0/14 | 12/14 |
 | Unit tests | 0 | 11 |
 | Variadic leaves confined | — | mfslog (2 fns) |
