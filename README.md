@@ -37,7 +37,8 @@ Detailed scope, exit criteria, and status history live in
 
 ## Build and verify
 
-Requires x86_64 Linux, Rust nightly, zlib, libpcap, and libfuse 3.17 or newer.
+Requires x86_64 Linux, pinned Rust nightly from `rust-toolchain.toml`, zlib,
+libpcap, and libfuse 3.17 or newer.
 Set `FUSE_LIB` only when libfuse is outside system search paths:
 
 ```bash
@@ -48,7 +49,8 @@ LD_LIBRARY_PATH=$FUSE_LIB bash tools/smoke_test.sh
 bash tools/gates/check.sh
 ```
 
-CI runs workspace build, migration gates, executable checks, and full cluster +
+CI caches Cargo dependencies and release build artifacts, then runs workspace
+tests, workspace build, migration gates, executable checks, and full cluster +
 FUSE smoke test on every push to `mfs-rust`.
 
 ## Workspace

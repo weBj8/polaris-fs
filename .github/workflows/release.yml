@@ -25,8 +25,10 @@ jobs:
         run: bash tools/gates/check.sh
 
   build:
-    name: Build all daemons
+    name: Test and build all daemons
     runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -74,25 +76,20 @@ jobs:
             usr/local/include/fuse3
           sudo ldconfig
 
-      - name: Install Rust (nightly for c_variadic/extern_types-era features)
+      - name: Install pinned Rust nightly
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-29
 
-      - name: Cache Cargo downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Cargo dependencies and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'vendor/**/Cargo.lock') }}
-          restore-keys: |
-            cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+          cache-workspace-crates: true
+
+      - name: Test workspace
+        run: cargo test --release --workspace --locked
 
       - name: Build workspace
-        env:
-          RUSTFLAGS: -L /usr/local/lib/x86_64-linux-gnu
         run: cargo build --release --workspace --locked
 
       - name: Check CGI route references
