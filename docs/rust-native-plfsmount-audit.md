@@ -102,17 +102,25 @@ fixes the supplementary-group leak and validates a nonempty master response
 pointer before copying at the FFI boundary.
 
 Residual mount work is explicit: readdata/writedata remain shared raw
-backends. Their job
-queues now use typed Rust ownership directly; worker-thread lifecycle (spawn,
-counters, termination wait/join) now uses `std::thread` plus a Rust
-`Mutex`/`Condvar` pool per module, while per-inodedata/chunkdata pthread locks,
-inoleng, chunkrwlock and mastercomm pthread state remain for a later wave. Supplementary groups now use `Arc<[u32]>` ownership from the cache
+backends, but their synchronization is now Rust-owned. Their job
+queues use typed Rust ownership directly; worker-thread lifecycle (spawn,
+counters, termination wait/join) uses `std::thread` plus a Rust
+`Mutex`/`Condvar` pool per module; the global inode/hash locks and all
+per-inodedata mutex/cond pairs use `std::sync::Mutex`/`Condvar` with
+same-thread guard-slot helpers (1:1 site parity verified against C).
+mastercomm global locks and per-thread request record mutex/cond pairs
+likewise use Rust guard-slot helpers; timedwaits are relative monotonic
+(documented divergence from CLOCK_REALTIME abstime). Its nop/receive threads
+use `std::thread` JoinHandles and the per-thread record lives in a Rust
+thread-local whose Drop runs the C key-destructor protocol. readdata's
+ranges scratch storage is a thread-local owned `Vec`. Supplementary groups now use `Arc<[u32]>` ownership from the cache
 through every `mfs_fuse` caller; only immediate backend FFI borrows remain.
 The finfo registry/state is now typed Rust ownership; its `ReadDataHandle` and
 `WriteDataHandle` are narrow RAII adapters whose Drop methods call the existing
-backend end functions. This does not claim shared IO migration complete: raw
-readdata/writedata APIs and their callback-facing resource semantics remain a
-residual risk until those backends receive their own safe-core migration.
+backend end functions. Remaining backend raw state: malloc-owned
+rrequest/inodedata/chunkdata/cblock structures and free lists, and the
+callback-facing raw APIs. This does not claim shared
+IO migration complete until those receive their own safe-core migration.
 
 ## Completed thread wave
 
@@ -127,5 +135,7 @@ The first native-thread wave now uses `std::thread::Builder`, `JoinHandle`,
 POSIX signal-mask calls remain at the system boundary. These modules no longer
 use pthread start-routine or pthread join protocols internally. `mfs_fuse` has
 no remaining pthread mutex/condition or pthread TLS protocol; ACL scratch data
-uses Rust thread-local ownership. Shared IO backends and the separate bdev data
-path retain pthread/raw state for later waves.
+uses Rust thread-local ownership. readdata/writedata/mastercomm no longer use
+pthread mutexes, condition variables, thread-spawn/join, or pthread-key TLS;
+malloc-owned backend structures and the separate bdev data path remain for
+later waves.
