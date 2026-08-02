@@ -166,11 +166,12 @@ phase in the ledger.
 
 ## Phase status log
 
-### P4 status — `plfsmount` sub-scope DONE (2026-07-30)
+### P4 historical checkpoint — initial `plfsmount` sub-scope (2026-07-30)
 
-Scope delivered: the `plfsmount` crate (FUSE frontend, 53.3k transpiled
-LOC). 17 modules migrated to safe cores with C ABI boundaries preserved;
-2 modules documented as annotated unsafe boundaries.
+Historical checkpoint: the `plfsmount` crate (FUSE frontend, 53.3k
+transpiled LOC) had 17 modules migrated to safe cores with C ABI boundaries
+preserved; 2 modules were documented as annotated unsafe boundaries. Later P4
+waves continued this work and changed the current status below.
 
 Migrated (safe core in `#[deny(unsafe_code)] mod imp`, tests):
 dirblob_name_index, dirblob_node_index, oplog, sustained_inodes,
@@ -185,21 +186,42 @@ Annotated boundaries (justified in module headers):
   signal handlers, FUSE session loop); its extractable pure logic
   (comma escape/remove) is a tested safe core.
 
-Verification: 79 unit tests (77 lib + 2 bin), SMOKE OK at every merge
-point, gates green (baselines re-frozen per module), OWNERSHIP.tsv
-refreshed. Two real bugs caught by tests during the work and fixed
-before merge (probe-cursor hash clobber in dirblob_name_index;
+Verification at that checkpoint: 79 unit tests (77 lib + 2 bin), SMOKE OK at
+every merge point, gates green (baselines re-frozen per module), and
+OWNERSHIP.tsv refreshed. Two real bugs were caught by tests during that work
+and fixed before merge (probe-cursor hash clobber in dirblob_name_index;
 portable_usleep cross-module private symbol failing clean LTO builds).
 
-P4 overall remains **PARTIAL**. Remaining scope: migrate the 12-module shared
-`plfsclient` crate, then the divergent `plfsbdev` modules. The completed
-`plfsmount` frontend consumes `plfsclient`, but does not make that shared crate
-safe.
+P4 overall remains **PARTIAL**. Remaining scope at that checkpoint: migrate the 12-module shared
+`plfsclient` crate, then the divergent `plfsbdev` modules. Subsequent waves
+have migrated typed ownership/thread pieces in shared `plfsclient` and
+`plfsmount`; current residuals are recorded in
+[`docs/rust-native-plfsmount-audit.md`](rust-native-plfsmount-audit.md).
 
 Note (post-P4): the mount-only FUSE modules moved from
 `plfsmount/src/plfsclient/` to `plfsmount/src/fuse_client/` to stop the
 name collision with the shared `plfsclient` crate. Pure rename — no
 behavior change; paths in the entries above predate it.
+
+Current-source correction: `dirblob_name_index.rs` and
+`dirblob_node_index.rs` were later folded into the owned Rust map implementation
+in `fuse_client/dirattrcache.rs`; they are historical module names, not current
+source files. The current source map is generated in
+[`docs/facts/dedup-map.md`](facts/dedup-map.md).
+
+### P4 continuation — current status (2026-08-02)
+
+Completed in current waves: direct Rust APIs for `inoleng`, `stats`, `csdb`,
+`chunksdatacache`, `chunkrwlock`, and `extrapackets`; typed `Arc`/`Weak` and
+owned blobs for mount `dirattrcache`; owned `FdEntry` for `fdcache`; Rust
+`Arc<Mutex<Sinfo>>` state for stats/params handles; Rust worker threads for
+mount and shared helper paths. Current verification: mount lib 72 tests, mount
+bin 2 tests, client 12 tests, workspace release build, gates, and cluster/FUSE
+smoke all pass at commit `7e4742d`.
+
+Not complete: generated `mfs_fuse` dirbuf/finfo pthread lock/condition
+protocol, groups and pcqueue boundary ownership, and remaining bdev data-path
+migration. P4 remains partial.
 
 ## Exit criteria per phase
 

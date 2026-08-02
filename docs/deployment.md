@@ -35,6 +35,12 @@ port 9421 beyond a private network.
 The image includes libfuse 3.18.2. Host libfuse version does not affect the
 container.
 
+Latest verified deployment: commit `7e4742d`, image tag
+`7e4742d21cb9`, digest
+`sha256:3df8ce060e99eac1bd1505961765cc219c00f644a89e5b65721f5e414186c7eb`.
+CI run `30742916264` passed gates, release build, workspace tests, and cluster
+smoke before publishing this image.
+
 ## Single-host Compose
 
 `docker/docker-compose.single.yml` runs every core role on one machine. Set the

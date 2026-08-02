@@ -9,14 +9,16 @@ occurrences tree-wide, of which the table below is the complete genuine set.
 Migration consequence ([porting.md](porting.md) type map): intra-crate
 `extern "C" fn` becomes plain `fn`; only this page's rows keep the C ABI.
 
-Evidence commands are reproducible; numbers as of commit `2e49c26`.
+Evidence commands are reproducible; baseline numbers are historical (`2e49c26`).
+Current libfuse callback locations are refreshed below; current migration-wave
+metrics live in `docs/rust-native-plfsmount-audit.md`.
 
 ## Genuine boundaries
 
 | Crate | C library | Direction | Sites | Evidence |
 | --- | --- | --- | --- | --- |
-| `plfsmount` | libfuse3 (≥3.17; CI builds 3.18) | Rust→C: session setup, `fuse_session_new_versioned` | `plfsmount/src/fuse_client/plfsmount.rs:93` (extern decl), `:1125` (`fuse_session_new_fn` compat wrapper), `:1138` (call) | `grep -n fuse_session_new_versioned plfsmount/src/fuse_client/plfsmount.rs` |
-| `plfsmount` | libfuse3 | **C→Rust callbacks**: the two `fuse_lowlevel_ops` vtables | `plfsmount.rs:1311` (`mfs_oper`), `:1197` (`mfs_meta_oper`), struct def `:741` | every fn pointer in these tables is a re-entrant C→Rust entry point — aliasing-hunt class C |
+| `plfsmount` | libfuse3 (>=3.17; CI builds 3.18) | Rust→C: session setup, `fuse_session_new_versioned` | `plfsmount/src/fuse_client/plfsmount.rs:103` (extern decl), `:1126` (`fuse_session_new_fn` compat wrapper), `:1139` (call) | `grep -n fuse_session_new_versioned plfsmount/src/fuse_client/plfsmount.rs` |
+| `plfsmount` | libfuse3 | **C→Rust callbacks**: the two `fuse_lowlevel_ops` vtables | `plfsmount.rs:1312` (`mfs_oper`), `:1198` (`mfs_meta_oper`), struct def `:742` | every fn pointer in these tables is a re-entrant C→Rust entry point — aliasing-hunt class C |
 | `plfsmaster` | zlib (`-l z`) | Rust→C: metadata (de)compression | `plfsmaster/build.rs` link line; users: `plfsmaster/src/plfsmaster/bio.rs`, `metadata.rs`, `bgsaver.rs` | `grep -l 'deflate\|inflate\|zlib' plfsmaster/src/plfsmaster/*.rs` |
 | `plfschunkserver` | zlib (`-l z`) | Rust→C: chunk CRC helpers | `plfschunkserver/build.rs`; `plfscommon/crc.rs`, `plfschunkserver/replicator.rs`, `hddspacemgr.rs` | same grep |
 | `plfsnetdump` | libpcap (`-l pcap`) | Rust→C: capture open/read | `plfsnetdump/src/plfsnetdump.rs:60–76` (`pcap_lookupnet`, `pcap_open_live`, `pcap_open_offline`, …) | `grep -n pcap_ plfsnetdump/src/plfsnetdump.rs` |

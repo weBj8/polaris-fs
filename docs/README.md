@@ -31,6 +31,15 @@ names the Bun artifact it adapts.
 | [p1-retrospective.md](p1-retrospective.md) | — (ours) | P1 pilot calibration: what the gates caught/missed, canonical shim layout, adjustments adopted for P2+. |
 | [facts/](facts/) | `LIFETIMES.tsv` | Generated fact artifacts: `OWNERSHIP.tsv` (static-mut pre-classification), `dedup-map.md`, `ffi-boundaries.md`. Regenerate with `tools/gen_*.py` / `tools/gen_*.sh`. |
 
+## Current status
+
+P4 remains partial. Current mount/client ownership and thread waves are recorded
+in [rust-native-plfsmount-audit.md](rust-native-plfsmount-audit.md). Commit
+`7e4742d` passed workspace tests, migration gates, release build, and cluster
+smoke; verified image `7e4742d21cb9` is deployed per
+[deployment.md](deployment.md). Residual `mfs_fuse` dirbuf/finfo lock state,
+groups/queue ownership, and bdev data-path work remain open.
+
 ## House rules (from methodology.md, binding on all docs here)
 
 1. **Facts before plans.** `verified-claims.md` is written and reviewed before

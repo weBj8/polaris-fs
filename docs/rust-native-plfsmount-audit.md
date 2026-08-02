@@ -77,7 +77,11 @@ Verification for this wave:
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
-- `cargo fmt --all` and `git diff --check`: passed.
+- `cargo fmt --all` and `git diff --check`: passed;
+- CI run `30742916264`: gates, workspace tests, release build, cluster smoke,
+  container build, and GHCR publish all passed;
+- deployed image `7e4742d21cb9` digest
+  `sha256:3df8ce060e99eac1bd1505961765cc219c00f644a89e5b65721f5e414186c7eb`.
 
 Residual mount work is explicit: `mfs_fuse` still contains the generated
 `dirbuf`/`finfo` pthread lock and condition-variable protocol, `getgroups`
@@ -97,5 +101,6 @@ The first native-thread wave now uses `std::thread::Builder`, `JoinHandle`,
 
 POSIX signal-mask calls remain at the system boundary. These modules no longer
 use pthread start-routine or pthread join protocols internally. Remaining
-pthread occurrences are tracked as the next lock/data-path waves, especially
-`oplog`, `negentrycache`, `mfs_meta_fuse`, and `plfsclient` request workers.
+pthread occurrences are concentrated in the generated `mfs_fuse` dirbuf/finfo
+lock protocol and the separate bdev data path; typed cache/thread modules above
+are no longer part of that residual list.

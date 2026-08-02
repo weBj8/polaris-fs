@@ -127,8 +127,10 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   12 modules extracted to `plfsclient/`; needed `#![feature(core_intrinsics)]`
   (inoleng). Smoke + gates green after extraction.
 - GATE: same as VC-05.
-- SRC: `cmp -s plfsmount/src/plfsclient/<f> plfsbdev/src/plfsclient/<f>` sweep
-  (run 2026-07-30).
+- SRC: historical `cmp -s plfsmount/src/plfsclient/<f>
+  plfsbdev/src/plfsclient/<f>` sweep (run 2026-07-30); current shared source
+  is `plfsclient/src/` and current frontend-only files are listed in
+  `docs/facts/dedup-map.md`.
 
 ## Translation-artifact facts (local patches the migration must not regress)
 
@@ -136,17 +138,18 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 - FACT: c2rust 0.22.1 drops definitions of file statics declared inside
   `#if HAVE_ATOMICS` blocks while keeping their uses. Six were re-added
-  manually: `rcnt/wcnt/fcnt/rbyt/wbyt` in `plfsmount/src/plfsclient/mastercomm.rs`
-  and `plfsbdev/src/plfsclient/mastercomm.rs`, `total_bytes_rcvd` in
-  `readdata.rs`, `total_bytes_sent` in `writedata.rs` (both crates).
+  manually: `rcnt/wcnt/fcnt/rbyt/wbyt` in `plfsclient/src/mastercomm.rs`,
+  `total_bytes_rcvd` in `plfsclient/src/readdata.rs`, and `total_bytes_sent`
+  in `plfsclient/src/writedata.rs`.
 - RUST: these are statistics counters — the TSV class for each is
   `STATIC → AtomicU64` (relaxed ordering suffices; they are diagnostics).
   Migration of `mastercomm/readdata/writedata` must convert them, not
   re-drop them.
 - GATE: `-v`/stats output still increments counters; Miri clean on the
   migrated module.
-- SRC: `README.md` §Local patches, item 2; `grep -n 'ponytail:'
-  plfsmount/src/plfsclient/mastercomm.rs`.
+- SRC: `plfsclient/src/mastercomm.rs`, `plfsclient/src/readdata.rs`, and
+  `plfsclient/src/writedata.rs`; shared-crate dependency map in
+  `docs/facts/dedup-map.md`.
 
 ### VC-08 — vendored bitfields derive patch
 
@@ -158,7 +161,9 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   module containing bitfields means explicit mask/shift accessors or keeping
   the derive — never "upgrade to upstream" mid-phase.
 - GATE: modules with bitfields compile; P6 considers upstreaming the patch.
-- SRC: `README.md` §Local patches, item 1; `vendor/c2rust-bitfields-derive-0.22.1/`.
+- SRC: `docs/porting.md` bitfield type map;
+  `vendor/c2rust-bitfields-derive-0.22.1/`; path dependency in the workspace
+  Cargo manifests.
 
 ### VC-09 — known latent-bug class evidence (groups-cache UAF)
 
@@ -187,15 +192,19 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 
 ## Build/CI facts
 
-### VC-11 — existing CI is build-only
+### VC-11 — CI verification pipeline
 
 - FACT: `.github/workflows/release.yml` builds all daemons on push to
   `mfs-rust`; it builds libfuse 3.18 from source (ubuntu-24.04 ships 3.14,
-  but `plfsmount` uses `fuse_session_new_versioned` ≥ 3.17) and runs no tests.
-- RUST: the P0 gate work (unsafe counter, IOU counter, smoke test) extends
-  this workflow; the libfuse-from-source cache steps are reused.
-- GATE: P0 exit = all new gates green on the unmigrated baseline.
-- SRC: `.github/workflows/release.yml` (libfuse comment at the cache step).
+  but `plfsmount` uses `fuse_session_new_versioned` >= 3.17), runs workspace
+  tests, migration gates, a cluster/FUSE smoke test, and publishes a verified
+  GHCR image only after those jobs pass.
+- RUST: release build, tests, gates, and smoke remain required evidence for
+  each migration wave; the libfuse-from-source cache steps are reused.
+- GATE: current P4 wave passed all jobs at commit `7e4742d`; published image
+  tag is `7e4742d21cb9`.
+- SRC: `.github/workflows/release.yml`; CI run
+  `30742916264`; `docs/rust-native-plfsmount-audit.md` current-wave evidence.
 
 ---
 

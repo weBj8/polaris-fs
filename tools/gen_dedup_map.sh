@@ -19,6 +19,9 @@ echo "\`A\`/\`B\`/\`C\`… distinct variants (same letter = same md5), \`-\` abs
 echo
 echo "## plfscommon/"
 echo
+echo '`plfscommon/src/` is authoritative shared source. Table below shows remaining'
+echo 'per-daemon copies and their variants.'
+echo
 printf '| file |'
 for c in $crates; do printf ' %s |' "$c"; done
 echo
@@ -49,18 +52,17 @@ for f in $files; do
 done
 
 echo
-echo "## plfsclient/ (plfsmount vs plfsbdev)"
+echo "## plfsclient/ (shared crate and frontend-specific modules)"
 echo
-echo '| file | plfsmount | plfsbdev |'
-echo '| --- | --- | --- |'
-files=$( (ls plfsmount/src/fuse_client; ls plfsbdev/src/plfsclient) | sort -u)
+echo '| file | shared plfsclient | plfsmount-only | plfsbdev-only |'
+echo '| --- | --- | --- | --- |'
+files=$( (ls plfsclient/src 2>/dev/null; ls plfsmount/src/fuse_client 2>/dev/null; ls plfsbdev/src/plfsclient 2>/dev/null) | sort -u)
 for f in $files; do
-  a="plfsmount/src/fuse_client/$f"; b="plfsbdev/src/plfsclient/$f"
-  if [ -f "$a" ] && [ -f "$b" ]; then
-    if cmp -s "$a" "$b"; then row="| $f | = | = |"; else row="| $f | A | B |"; fi
-  elif [ -f "$a" ]; then row="| $f | present | - |"
-  else row="| $f | - | present |"; fi
-  echo "$row"
+  shared='-'; mount='-'; bdev='-'
+  [ -f "plfsclient/src/$f" ] && shared='shared'
+  [ -f "plfsmount/src/fuse_client/$f" ] && mount='present'
+  [ -f "plfsbdev/src/plfsclient/$f" ] && bdev='present'
+  printf '| %s | %s | %s | %s |\n' "$f" "$shared" "$mount" "$bdev"
 done
 } > "$out"
 echo "wrote $out"

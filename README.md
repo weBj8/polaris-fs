@@ -59,7 +59,7 @@ backup, upgrade, and rollback: [deployment guide](docs/deployment.md).
 | P1 | Shared `plfscommon` | **Done** — 12/14 modules migrated |
 | P2 | `plfsmetalogger`, `plfsgui` | Pending |
 | P3 | `plfschunkserver` | Pending |
-| P4 | `plfsmount`, shared `plfsclient`, `plfsbdev` | **Partial** — `plfsmount` done: 17 safe cores, 2 annotated boundaries, 79 tests; `plfsclient` and `plfsbdev` remain |
+| P4 | `plfsmount`, shared `plfsclient`, `plfsbdev` | **Partial** — mount/client ownership and thread waves migrated; mount has 72 lib tests + 2 bin tests; `mfs_fuse` dirbuf/finfo locks, groups/queue boundaries, and bdev data path remain |
 | P5 | `plfsmaster` | Pending |
 | P6 | Stable toolchain and remaining boundaries | Pending |
 
@@ -94,8 +94,8 @@ docker pull ghcr.io/webj8/polaris-fs:latest
 | Path | Role |
 | --- | --- |
 | [`plfscommon/`](plfscommon/) | Shared common modules; P1 safe migration |
-| [`plfsclient/`](plfsclient/) | Shared client backend; deduplicated, migration pending |
-| [`plfsmount/`](plfsmount/) | FUSE frontend; safe cores plus two annotated boundaries |
+| [`plfsclient/`](plfsclient/) | Shared client backend; deduplicated, partial Rust-native migration |
+| [`plfsmount/`](plfsmount/) | FUSE frontend; migrated cache/thread cores plus annotated FUSE state-machine boundaries |
 | [`plfsbdev/`](plfsbdev/) | Block-device frontend |
 | [`plfsmaster/`](plfsmaster/) | Metadata master |
 | [`plfschunkserver/`](plfschunkserver/) | Chunk storage daemon |
