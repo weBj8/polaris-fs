@@ -541,7 +541,10 @@ fn fcb_signal() {
     FCB_COND.notify_one();
 }
 static mut fcbwaiting: uint16_t = 0;
-static mut cacheblocks: *mut cblock = ::core::ptr::null_mut::<cblock>();
+// Owned slab of cache blocks; replaces malloc'd `cacheblocks`. Raw
+// intrusive free-list pointers inside are only walked via freecblockshead
+// under FCB_LOCK; the Box keeps storage contiguous and pointer-stable.
+static mut CACHEBLOCKS_ARENA: Option<Box<[cblock]>> = None;
 static mut freecblockshead: *mut cblock = ::core::ptr::null_mut::<cblock>();
 static mut freecacheblocks: uint32_t = 0;
 static mut cacheblockcount: uint32_t = 0;
@@ -550,7 +553,10 @@ static mut maxretries: uint32_t = 0;
 static mut minlogretry: uint32_t = 0;
 static mut erroronlostchunk: uint8_t = 0;
 static mut erroronnospace: uint8_t = 0;
-static mut idhash: *mut *mut inodedata = ::core::ptr::null_mut::<*mut inodedata>();
+// Owned fixed-size bucket table; replaces malloc'd `*mut *mut inodedata`.
+// Entries remain raw intrusive-list heads mutated under HASH_LOCK.
+static mut idhash: [*mut inodedata; IDHASHSIZE as usize] =
+    [::core::ptr::null_mut::<inodedata>(); IDHASHSIZE as usize];
 // Global inode-table lock (C hashlock). Same thread_local guard-slot
 // emulation as FCB_LOCK above.
 // INVARIANT: every lock/unlock pair runs on the same thread (verified 4/4
@@ -844,7 +850,7 @@ pub unsafe extern "C" fn write_find_inodedata(mut inode: uint32_t) -> *mut inode
             .wrapping_rem(IDHASHSIZE as uint32_t);
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         hashlock_lock();
-        ind = *idhash.offset(indh as isize);
+        ind = idhash[indh as usize];
         while !ind.is_null() {
             if (*ind).inode == inode {
                 (*ind).lcnt = (*ind).lcnt.wrapping_add(1);
@@ -868,7 +874,7 @@ pub unsafe extern "C" fn write_get_inodedata(
             .wrapping_rem(IDHASHSIZE as uint32_t);
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         hashlock_lock();
-        ind = *idhash.offset(indh as isize);
+        ind = idhash[indh as usize];
         while !ind.is_null() {
             if (*ind).inode == inode {
                 (*ind).lcnt = (*ind).lcnt.wrapping_add(1);
@@ -936,8 +942,8 @@ pub unsafe extern "C" fn write_get_inodedata(
         std::ptr::write(&raw mut (*ind).writecond, std::sync::Condvar::new());
         std::ptr::write(&raw mut (*ind).chunkcond, std::sync::Condvar::new());
         std::ptr::write(&raw mut (*ind).lock, std::sync::Mutex::new(()));
-        (*ind).next = *idhash.offset(indh as isize) as *mut inodedata_s;
-        *idhash.offset(indh as isize) = ind;
+        (*ind).next = idhash[indh as usize] as *mut inodedata_s;
+        idhash[indh as usize] = ind;
         hashlock_unlock();
         return ind;
     }
@@ -952,7 +958,7 @@ pub unsafe extern "C" fn write_free_inodedata(mut fid: *mut inodedata) {
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         let mut indp: *mut *mut inodedata = ::core::ptr::null_mut::<*mut inodedata>();
         hashlock_lock();
-        indp = idhash.offset(indh as isize);
+        indp = &raw mut idhash[indh as usize];
         loop {
             ind = *indp;
             if ind.is_null() {
@@ -2742,51 +2748,13 @@ pub unsafe extern "C" fn write_data_init(
             cacheblockcount = 10 as uint32_t;
         }
         fcbwaiting = 0 as uint16_t;
-        cacheblocks =
-            malloc(::core::mem::size_of::<cblock>().wrapping_mul(cacheblockcount as size_t))
-                as *mut cblock;
-        if cacheblocks.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1641 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"cacheblocks\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1641 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"cacheblocks\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if cacheblocks
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut cblock
-        {
-            let mut _mfs_errorstring_9: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1641 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"cacheblocks\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_9,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1641 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"cacheblocks\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_9,
-            );
-            abort();
-        }
+        // Owned slab replaces C malloc; allocation failure aborts, matching
+        // passert(cacheblocks). Zeroed blocks are safe: C only reads block
+        // fields after writing them (next is chain-linked below).
+        let mut arena: Box<[cblock]> =
+            vec![::core::mem::zeroed::<cblock>(); cacheblockcount as usize].into_boxed_slice();
+        let cacheblocks: *mut cblock = arena.as_mut_ptr();
+        CACHEBLOCKS_ARENA = Some(arena);
         i = 0 as uint32_t;
         while i < cacheblockcount.wrapping_sub(1 as uint32_t) {
             (*cacheblocks.offset(i as isize)).next =
@@ -2797,55 +2765,8 @@ pub unsafe extern "C" fn write_data_init(
             ::core::ptr::null_mut::<cblock_s>();
         freecblockshead = cacheblocks;
         freecacheblocks = cacheblockcount;
-        idhash = malloc(::core::mem::size_of::<*mut inodedata>().wrapping_mul(IDHASHSIZE as size_t))
-            as *mut *mut inodedata;
-        if idhash.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"idhash\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"idhash\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if idhash
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut *mut inodedata
-        {
-            let mut _mfs_errorstring_10: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"idhash\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_10,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"idhash\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_10,
-            );
-            abort();
-        }
-        i = 0 as uint32_t;
-        while i < IDHASHSIZE as uint32_t {
-            *idhash.offset(i as isize) = ::core::ptr::null_mut::<inodedata>();
-            i = i.wrapping_add(1);
-        }
+        // idhash buckets are a null-initialized static array (see decl);
+        // write_data_term re-nulls heads, so re-init needs no zeroing here.
         JQUEUE.init();
         mystacksize = __sysconf(__SC_THREAD_STACK_MIN_VALUE) as size_t;
         if mystacksize < 0x20000 as ::core::ffi::c_int as size_t {
@@ -2886,7 +2807,10 @@ pub unsafe extern "C" fn write_data_term() {
         hashlock_lock();
         i = 0 as uint32_t;
         while i < IDHASHSIZE as uint32_t {
-            ind = *idhash.offset(i as isize);
+            ind = idhash[i as usize];
+            // Null the bucket head so a later write_data_init cannot dangle
+            // (C freed and re-malloc'd the table, re-zeroing all heads).
+            idhash[i as usize] = ::core::ptr::null_mut::<inodedata>();
             while !ind.is_null() {
                 indn = (*ind).next as *mut inodedata;
                 ind_lock(ind);
@@ -2902,9 +2826,9 @@ pub unsafe extern "C" fn write_data_term() {
             }
             i = i.wrapping_add(1);
         }
-        free(idhash as *mut ::core::ffi::c_void);
         hashlock_unlock();
-        free(cacheblocks as *mut ::core::ffi::c_void);
+        // Drop the owned slab (C: free(cacheblocks)).
+        drop(::core::ptr::replace(&raw mut CACHEBLOCKS_ARENA, None));
     }
 }
 #[unsafe(no_mangle)]
