@@ -15,8 +15,6 @@ unsafe extern "C" {
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
@@ -32,7 +30,6 @@ unsafe extern "C" {
         __dest: *mut ::core::ffi::c_char,
         __src: *const ::core::ffi::c_char,
     ) -> *mut ::core::ffi::c_char;
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
     unsafe fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
     unsafe fn nanosleep(
         __requested_time: *const timespec,
@@ -209,9 +206,9 @@ pub struct _md5ctx {
 }
 pub type md5ctx = _md5ctx;
 // std::sync primitives replace pthread_mutex_t/pthread_cond_t: futex-based,
-// no heap resources, initialized in place with ptr::write after malloc in
+// no heap resources, created with Mutex::new/Condvar::new inside Box::new in
 // fs_get_my_threc. Copy/Clone derive dropped (Mutex is not Copy); the struct
-// is only ever handled through malloc'd pointers.
+// is only ever handled through Box::into_raw'd pointers.
 #[repr(C)]
 pub struct _threc {
     pub lock: std::sync::Mutex<()>,
@@ -658,7 +655,7 @@ global_lock_helpers!(amtime_lock, amtime_unlock, AMTIME_LOCK, AMTIME_LOCK_GUARD)
 // moving to the next hash entry), fs_createpacket/fs_sendandreceive*/term
 // each touch a single rec. Single slot suffices. Nests inside FD_LOCK and
 // REC_LOCK at the sites documented above; it is always the innermost lock.
-// SAFETY (guard lifetime): the guard borrows (*rec).lock inside malloc'd
+// SAFETY (guard lifetime): the guard borrows (*rec).lock inside Box'd
 // threc; transmuted to 'static. Sound because the guard is only dropped via
 // threc_unlock/threc_cond_* on the same thread, and threc is freed only in
 // fs_term (after all threads are joined) or recycled via threcfree under
@@ -1012,13 +1009,14 @@ pub unsafe extern "C" fn fs_atime(mut inode: uint32_t) {
             }
             amfptr = (*amfptr).next as *mut amtime_file;
         }
-        amfptr = malloc(::core::mem::size_of::<amtime_file>()) as *mut amtime_file;
-        (*amfptr).inode = inode;
-        (*amfptr).atimeage = 0 as uint16_t;
-        (*amfptr).mtimeage = 0 as uint16_t;
-        (*amfptr).atime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
-        (*amfptr).mtime = 0 as uint64_t;
-        (*amfptr).next = amtime_hash[amhash as usize] as *mut _amtime_file;
+        amfptr = Box::into_raw(Box::new(_amtime_file {
+            inode,
+            atimeage: 0 as uint16_t,
+            mtimeage: 0 as uint16_t,
+            atime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
+            mtime: 0 as uint64_t,
+            next: amtime_hash[amhash as usize] as *mut _amtime_file,
+        }));
         amtime_hash[amhash as usize] = amfptr;
         amtime_unlock();
     }
@@ -1040,13 +1038,14 @@ pub unsafe extern "C" fn fs_mtime(mut inode: uint32_t) {
             }
             amfptr = (*amfptr).next as *mut amtime_file;
         }
-        amfptr = malloc(::core::mem::size_of::<amtime_file>()) as *mut amtime_file;
-        (*amfptr).inode = inode;
-        (*amfptr).atimeage = 0 as uint16_t;
-        (*amfptr).mtimeage = 0 as uint16_t;
-        (*amfptr).mtime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
-        (*amfptr).atime = 0 as uint64_t;
-        (*amfptr).next = amtime_hash[amhash as usize] as *mut _amtime_file;
+        amfptr = Box::into_raw(Box::new(_amtime_file {
+            inode,
+            atimeage: 0 as uint16_t,
+            mtimeage: 0 as uint16_t,
+            atime: 0 as uint64_t,
+            mtime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
+            next: amtime_hash[amhash as usize] as *mut _amtime_file,
+        }));
         amtime_hash[amhash as usize] = amfptr;
         amtime_unlock();
     }
@@ -1166,7 +1165,9 @@ unsafe extern "C" fn fs_af_add_to_lru(mut afptr: *mut acquired_file) {
                     *afpptr = (*iafptr).next as *mut acquired_file;
                     crate::chunksdatacache::clear_inode((*iafptr).inode, 0 as uint32_t);
                     fs_af_remove_from_lru(iafptr);
-                    free(iafptr as *mut ::core::ffi::c_void);
+                    // C: free(iafptr) — pairs with Box::into_raw in
+                    // fs_add_entry/fs_inc_acnt.
+                    drop(Box::from_raw(iafptr));
                 } else {
                     afpptr = &raw mut (*iafptr).next as *mut *mut acquired_file;
                 }
@@ -1220,14 +1221,15 @@ pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
             }
             afptr = (*afptr).next as *mut acquired_file;
         }
-        afptr = malloc(::core::mem::size_of::<acquired_file>()) as *mut acquired_file;
-        (*afptr).inode = inode;
-        (*afptr).cnt = 0 as uint16_t;
-        (*afptr).dentry = 1 as uint8_t;
-        (*afptr).age = 0 as uint8_t;
-        (*afptr).lrunext = ::core::ptr::null_mut::<_acquired_file>();
-        (*afptr).lruprev = ::core::ptr::null_mut::<*mut _acquired_file>();
-        (*afptr).next = af_hash[afhash as usize] as *mut _acquired_file;
+        afptr = Box::into_raw(Box::new(_acquired_file {
+            inode,
+            cnt: 0 as uint16_t,
+            age: 0 as uint8_t,
+            dentry: 1 as uint8_t,
+            next: af_hash[afhash as usize] as *mut _acquired_file,
+            lrunext: ::core::ptr::null_mut::<_acquired_file>(),
+            lruprev: ::core::ptr::null_mut::<*mut _acquired_file>(),
+        }));
         af_hash[afhash as usize] = afptr;
         af_unlock();
     }
@@ -1303,14 +1305,15 @@ pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
             }
             afptr = (*afptr).next as *mut acquired_file;
         }
-        afptr = malloc(::core::mem::size_of::<acquired_file>()) as *mut acquired_file;
-        (*afptr).inode = inode;
-        (*afptr).cnt = 1 as uint16_t;
-        (*afptr).dentry = 0 as uint8_t;
-        (*afptr).age = 0 as uint8_t;
-        (*afptr).lrunext = ::core::ptr::null_mut::<_acquired_file>();
-        (*afptr).lruprev = ::core::ptr::null_mut::<*mut _acquired_file>();
-        (*afptr).next = af_hash[afhash as usize] as *mut _acquired_file;
+        afptr = Box::into_raw(Box::new(_acquired_file {
+            inode,
+            cnt: 1 as uint16_t,
+            age: 0 as uint8_t,
+            dentry: 0 as uint8_t,
+            next: af_hash[afhash as usize] as *mut _acquired_file,
+            lrunext: ::core::ptr::null_mut::<_acquired_file>(),
+            lruprev: ::core::ptr::null_mut::<*mut _acquired_file>(),
+        }));
         af_hash[afhash as usize] = afptr;
         af_unlock();
     }
@@ -1424,12 +1427,21 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
                 threcfree = rec;
                 threc_lock(rec);
                 if !(*rec).obuff.is_null() {
-                    free((*rec).obuff as *mut ::core::ffi::c_void);
+                    // C: free(rec->obuff) — Box<[u8]> from
+                    // fs_output_buffer_init, length from obuffsize.
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        (*rec).obuff,
+                        (*rec).obuffsize as usize,
+                    )));
                     (*rec).obuff = ::core::ptr::null_mut::<uint8_t>();
                     (*rec).obuffsize = 0 as uint32_t;
                 }
                 if !(*rec).ibuff.is_null() {
-                    free((*rec).ibuff as *mut ::core::ffi::c_void);
+                    // C: free(rec->ibuff) — Box<[u8]> from fs_input_buffer_init.
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        (*rec).ibuff,
+                        (*rec).ibuffsize as usize,
+                    )));
                     (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
                     (*rec).ibuffsize = 0 as uint32_t;
                 }
@@ -1462,11 +1474,27 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
             rec = threcfree;
             threcfree = (*rec).next as *mut threc;
         } else {
-            rec = malloc(::core::mem::size_of::<threc>()) as *mut threc;
+            // C: malloc(sizeof(threc)) + pthread_mutex/cond_init. Box literal
+            // sets every field; freed with Box::from_raw in fs_term (Mutex/
+            // Condvar Drop runs there, matching C's process-end teardown).
             threcnextid = threcnextid.wrapping_add(1);
-            (*rec).packetid = threcnextid as uint32_t;
-            std::ptr::write(&raw mut (*rec).lock, std::sync::Mutex::new(()));
-            std::ptr::write(&raw mut (*rec).cond, std::sync::Condvar::new());
+            rec = Box::into_raw(Box::new(_threc {
+                lock: std::sync::Mutex::new(()),
+                cond: std::sync::Condvar::new(),
+                obuff: ::core::ptr::null_mut::<uint8_t>(),
+                obuffsize: 0 as uint32_t,
+                odataleng: 0 as uint32_t,
+                ibuff: ::core::ptr::null_mut::<uint8_t>(),
+                ibuffsize: 0 as uint32_t,
+                idataleng: 0 as uint32_t,
+                sent: 0 as uint8_t,
+                status: 0 as uint8_t,
+                rcvd: 0 as uint8_t,
+                receiving: 0 as uint8_t,
+                rcvd_cmd: 0 as uint32_t,
+                packetid: threcnextid as uint32_t,
+                next: ::core::ptr::null_mut::<_threc>(),
+            }));
         }
         rechash = (*rec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
         (*rec).next = threchash[rechash as usize] as *mut _threc;
@@ -1517,110 +1545,31 @@ pub unsafe extern "C" fn fs_output_buffer_init(mut rec: *mut threc, mut size: ui
     unsafe {
         if size > DEFAULT_OUTPUT_BUFFSIZE as uint32_t {
             if !(*rec).obuff.is_null() {
-                free((*rec).obuff as *mut ::core::ffi::c_void);
+                // C: free(rec->obuff) — Box<[u8]>, length from obuffsize.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).obuff,
+                    (*rec).obuffsize as usize,
+                )));
             }
-            (*rec).obuff = malloc(size as size_t) as *mut uint8_t;
-            if (*rec).obuff.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    794 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    794 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*rec).obuff
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint8_t
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    794 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    794 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
+            // C: malloc(size) + passert. Box aborts on OOM (passert branch
+            // dead); uninit payload matches C — caller writes the packet
+            // before any read.
+            (*rec).obuff = Box::into_raw(Box::<[u8]>::new_uninit_slice(size as usize).assume_init())
+                as *mut uint8_t;
             (*rec).obuffsize = size;
         } else if (*rec).obuffsize != DEFAULT_OUTPUT_BUFFSIZE as uint32_t {
             if !(*rec).obuff.is_null() {
-                free((*rec).obuff as *mut ::core::ffi::c_void);
+                // C: free(rec->obuff) — Box<[u8]>, length from obuffsize.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).obuff,
+                    (*rec).obuffsize as usize,
+                )));
             }
-            (*rec).obuff = malloc(DEFAULT_OUTPUT_BUFFSIZE as size_t) as *mut uint8_t;
-            if (*rec).obuff.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    801 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    801 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*rec).obuff
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint8_t
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    801 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    801 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->obuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
+            // C: malloc(DEFAULT_OUTPUT_BUFFSIZE) + passert (dead, Box aborts
+            // on OOM).
+            (*rec).obuff = Box::into_raw(
+                Box::<[u8]>::new_uninit_slice(DEFAULT_OUTPUT_BUFFSIZE as usize).assume_init(),
+            ) as *mut uint8_t;
             (*rec).obuffsize = DEFAULT_OUTPUT_BUFFSIZE as uint32_t;
         }
     }
@@ -1630,110 +1579,30 @@ pub unsafe extern "C" fn fs_input_buffer_init(mut rec: *mut threc, mut size: uin
     unsafe {
         if size > DEFAULT_INPUT_BUFFSIZE as uint32_t {
             if !(*rec).ibuff.is_null() {
-                free((*rec).ibuff as *mut ::core::ffi::c_void);
+                // C: free(rec->ibuff) — Box<[u8]>, length from ibuffsize.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).ibuff,
+                    (*rec).ibuffsize as usize,
+                )));
             }
-            (*rec).ibuff = malloc(size as size_t) as *mut uint8_t;
-            if (*rec).ibuff.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    815 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    815 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*rec).ibuff
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint8_t
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    815 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    815 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
+            // C: malloc(size) + passert (dead, Box aborts on OOM); uninit
+            // payload matches C — receiver fills it from the socket.
+            (*rec).ibuff = Box::into_raw(Box::<[u8]>::new_uninit_slice(size as usize).assume_init())
+                as *mut uint8_t;
             (*rec).ibuffsize = size;
         } else if (*rec).ibuffsize != DEFAULT_INPUT_BUFFSIZE as uint32_t {
             if !(*rec).ibuff.is_null() {
-                free((*rec).ibuff as *mut ::core::ffi::c_void);
+                // C: free(rec->ibuff) — Box<[u8]>, length from ibuffsize.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).ibuff,
+                    (*rec).ibuffsize as usize,
+                )));
             }
-            (*rec).ibuff = malloc(DEFAULT_INPUT_BUFFSIZE as size_t) as *mut uint8_t;
-            if (*rec).ibuff.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    822 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    822 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*rec).ibuff
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint8_t
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    822 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    822 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"rec->ibuff\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
+            // C: malloc(DEFAULT_INPUT_BUFFSIZE) + passert (dead, Box aborts
+            // on OOM).
+            (*rec).ibuff = Box::into_raw(
+                Box::<[u8]>::new_uninit_slice(DEFAULT_INPUT_BUFFSIZE as usize).assume_init(),
+            ) as *mut uint8_t;
             (*rec).ibuffsize = DEFAULT_INPUT_BUFFSIZE as uint32_t;
         }
     }
@@ -2308,11 +2177,19 @@ pub unsafe extern "C" fn fs_connect(
                 rleng = (rleng as ::core::ffi::c_int + 8 as ::core::ffi::c_int) as int32_t;
             }
         }
-        regbuff = malloc(rleng as size_t) as *mut uint8_t;
+        // C: regbuff = malloc(rleng). Box<[u8]> leaked as raw ptr; uninit
+        // matches C (put32bit/memcpy fill it before any read). Every C
+        // free(regbuff) site below is on a return path; the retry loop's
+        // `continue` paths keep it alive, same as C.
+        regbuff = Box::into_raw(Box::<[u8]>::new_uninit_slice(rleng as usize).assume_init())
+            as *mut uint8_t;
         loop {
             fd = tcpsocket();
             if fd < 0 as ::core::ffi::c_int {
-                free(regbuff as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    regbuff,
+                    rleng as usize,
+                )));
                 return -1 as ::core::ffi::c_int;
             }
             if tcpnodelay(fd) < 0 as ::core::ffi::c_int {
@@ -2351,7 +2228,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -2370,7 +2250,10 @@ pub unsafe extern "C" fn fs_connect(
                             (*cargs).masterportname,
                         ) < 0 as ::core::ffi::c_int
                         {
-                            free(regbuff as *mut ::core::ffi::c_void);
+                            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                                regbuff,
+                                rleng as usize,
+                            )));
                             return -1 as ::core::ffi::c_int;
                         }
                         i = 4 as uint32_t;
@@ -2383,7 +2266,10 @@ pub unsafe extern "C" fn fs_connect(
                             &raw mut masterstrip as *mut ::core::ffi::c_char,
                             masterport as ::core::ffi::c_int,
                         );
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                 } else {
@@ -2395,7 +2281,10 @@ pub unsafe extern "C" fn fs_connect(
                         &raw mut masterstrip as *mut ::core::ffi::c_char,
                         masterport as ::core::ffi::c_int,
                     );
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
             } else {
@@ -2435,7 +2324,10 @@ pub unsafe extern "C" fn fs_connect(
                         }
                         tcpclose(fd);
                         fd = -1 as ::core::ffi::c_int;
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                     if tcptoread(
@@ -2463,7 +2355,10 @@ pub unsafe extern "C" fn fs_connect(
                         }
                         tcpclose(fd);
                         fd = -1 as ::core::ffi::c_int;
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                     rptr = regbuff;
@@ -2486,7 +2381,10 @@ pub unsafe extern "C" fn fs_connect(
                         }
                         tcpclose(fd);
                         fd = -1 as ::core::ffi::c_int;
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                     i = get32bit(&raw mut rptr);
@@ -2508,7 +2406,10 @@ pub unsafe extern "C" fn fs_connect(
                         }
                         tcpclose(fd);
                         fd = -1 as ::core::ffi::c_int;
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                     if tcptoread(
@@ -2536,7 +2437,10 @@ pub unsafe extern "C" fn fs_connect(
                         }
                         tcpclose(fd);
                         fd = -1 as ::core::ffi::c_int;
-                        free(regbuff as *mut ::core::ffi::c_void);
+                        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            regbuff,
+                            rleng as usize,
+                        )));
                         return -1 as ::core::ffi::c_int;
                     }
                     md5_init(&raw mut ctx);
@@ -2625,7 +2529,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 if tcptoread(
@@ -2655,7 +2562,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 rptr = regbuff;
@@ -2678,7 +2588,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 i = get32bit(&raw mut rptr);
@@ -2710,7 +2623,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 if tcptoread(
@@ -2740,7 +2656,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 rptr = regbuff;
@@ -2764,7 +2683,10 @@ pub unsafe extern "C" fn fs_connect(
                     }
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
-                    free(regbuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        regbuff,
+                        rleng as usize,
+                    )));
                     return -1 as ::core::ffi::c_int;
                 }
                 if i == 4 as uint32_t {
@@ -2792,7 +2714,10 @@ pub unsafe extern "C" fn fs_connect(
                         if oninit != 0 {
                             portable_sleep(2 as uint64_t);
                         } else {
-                            free(regbuff as *mut ::core::ffi::c_void);
+                            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                                regbuff,
+                                rleng as usize,
+                            )));
                             return -1 as ::core::ffi::c_int;
                         }
                     } else {
@@ -2860,7 +2785,10 @@ pub unsafe extern "C" fn fs_connect(
             }
             tcpclose(fd);
             fd = -1 as ::core::ffi::c_int;
-            free(regbuff as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                regbuff,
+                rleng as usize,
+            )));
             return -1 as ::core::ffi::c_int;
         }
         attrsize = (if masterversion
@@ -2955,7 +2883,10 @@ pub unsafe extern "C" fn fs_connect(
         } else {
             masterprocessid = metaid;
         }
-        free(regbuff as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            regbuff,
+            rleng as usize,
+        )));
         lastwrite = monotonic_seconds();
         if oninit as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
             if sessionlost == 2 as ::core::ffi::c_int {
@@ -2980,10 +2911,16 @@ pub unsafe extern "C" fn fs_connect(
                 0 as ::core::ffi::c_int,
                 16 as size_t,
             );
-            free((*cargs).passworddigest as *mut ::core::ffi::c_void);
+            // C: free(cargs->passworddigest) — Box<[u8; 16]> from
+            // fs_init_master_connection.
+            drop(Box::from_raw((*cargs).passworddigest as *mut [uint8_t; 16]));
             (*cargs).passworddigest = ::core::ptr::null_mut::<uint8_t>();
         }
-        infobuff = malloc(INFOBUFF_SIZE as size_t) as *mut ::core::ffi::c_char;
+        // C: infobuff = malloc(INFOBUFF_SIZE). Zeroed (unlike C's malloc)
+        // because the mfs_log %s below reads it as a C string even when no
+        // sesflag bit set a byte — malloc garbage there was latent C UB.
+        infobuff = Box::into_raw(vec![0 as uint8_t; INFOBUFF_SIZE as usize].into_boxed_slice())
+            as *mut ::core::ffi::c_char;
         ibleng = 0 as uint32_t;
         j = 0 as uint32_t;
         i = 0 as uint32_t;
@@ -3427,7 +3364,10 @@ pub unsafe extern "C" fn fs_connect(
                 infobuff,
             );
         }
-        free(infobuff as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            infobuff as *mut uint8_t,
+            INFOBUFF_SIZE as usize,
+        )));
         return 0 as ::core::ffi::c_int;
     }
 }
@@ -3865,7 +3805,11 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
             if inodesleng > 0 as int32_t {
                 inodesleng =
                     (inodesleng as ::core::ffi::c_int + 8 as ::core::ffi::c_int) as int32_t;
-                inodespacket = malloc(inodesleng as size_t) as *mut uint8_t;
+                // C: inodespacket = malloc(inodesleng). Box<[u8]> leaked as
+                // raw ptr; every entry written before the send below.
+                inodespacket =
+                    Box::into_raw(Box::<[u8]>::new_uninit_slice(inodesleng as usize).assume_init())
+                        as *mut uint8_t;
                 ptr = inodespacket;
                 put32bit(&raw mut ptr, CLTOMA_FUSE_AMTIME_INODES as uint32_t);
                 put32bit(&raw mut ptr, (inodesleng - 8 as int32_t) as uint32_t);
@@ -3907,7 +3851,9 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
                             amfpptr = &raw mut (*amfptr).next as *mut *mut amtime_file;
                         } else {
                             *amfpptr = (*amfptr).next as *mut amtime_file;
-                            free(amfptr as *mut ::core::ffi::c_void);
+                            // C: free(amfptr) — pairs with Box::into_raw in
+                            // fs_atime/fs_mtime.
+                            drop(Box::from_raw(amfptr));
                         }
                     }
                     amhash = amhash.wrapping_add(1);
@@ -3933,7 +3879,10 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
                     );
                     master_stats_inc(MASTER_PACKETSSENT as ::core::ffi::c_int as uint8_t);
                 }
-                free(inodespacket as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    inodespacket,
+                    inodesleng as usize,
+                )));
                 return;
             }
         }
@@ -3957,7 +3906,9 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
                     amfpptr = &raw mut (*amfptr).next as *mut *mut amtime_file;
                 } else {
                     *amfpptr = (*amfptr).next as *mut amtime_file;
-                    free(amfptr as *mut ::core::ffi::c_void);
+                    // C: free(amfptr) — pairs with Box::into_raw in
+                    // fs_atime/fs_mtime.
+                    drop(Box::from_raw(amfptr));
                 }
             }
             amhash = amhash.wrapping_add(1);
@@ -3993,7 +3944,9 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
                         *afpptr = (*afptr).next as *mut acquired_file;
                         crate::chunksdatacache::clear_inode((*afptr).inode, 0 as uint32_t);
                         fs_af_remove_from_lru(afptr);
-                        free(afptr as *mut ::core::ffi::c_void);
+                        // C: free(afptr) — pairs with Box::into_raw in
+                        // fs_add_entry/fs_inc_acnt.
+                        drop(Box::from_raw(afptr));
                         continue;
                     }
                 }
@@ -4003,10 +3956,15 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
             hash = hash.wrapping_add(1);
         }
         inodes = heap_elements();
-        inodespacket = malloc(
-            inodes
-                .wrapping_mul(4 as uint32_t)
-                .wrapping_add(8 as uint32_t) as size_t,
+        // C: inodespacket = malloc(inodes*4+8). Box<[u8]> leaked as raw ptr;
+        // header + every entry written before the send below.
+        inodespacket = Box::into_raw(
+            Box::<[u8]>::new_uninit_slice(
+                inodes
+                    .wrapping_mul(4 as uint32_t)
+                    .wrapping_add(8 as uint32_t) as usize,
+            )
+            .assume_init(),
         ) as *mut uint8_t;
         ptr = inodespacket;
         if masterversion
@@ -4054,7 +4012,11 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
             );
             master_stats_inc(MASTER_PACKETSSENT as ::core::ffi::c_int as uint8_t);
         }
-        free(inodespacket as *mut ::core::ffi::c_void);
+        // C: free(inodespacket) — i still holds inodes*4+8, the alloc len.
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            inodespacket,
+            i as usize,
+        )));
     }
 }
 #[unsafe(no_mangle)]
@@ -4855,21 +4817,41 @@ pub unsafe extern "C" fn fs_init_master_connection(
             0 as ::core::ffi::c_int,
         );
         donotsendsustainedinodes = 0 as ::core::ffi::c_int;
+        // C: strdup(...) for each string arg. CString::into_raw is the Box
+        // equivalent; freed with CString::from_raw in fs_term. unwrap is
+        // unreachable: CStr sources contain no interior NUL by definition.
         if !bindhostname.is_null() {
-            connect_args.bindhostname = strdup(bindhostname);
+            connect_args.bindhostname =
+                std::ffi::CString::new(std::ffi::CStr::from_ptr(bindhostname).to_bytes())
+                    .unwrap()
+                    .into_raw();
         } else {
             connect_args.bindhostname = ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        connect_args.masterhostname = strdup(masterhostname);
-        connect_args.masterportname = strdup(masterportname);
+        connect_args.masterhostname =
+            std::ffi::CString::new(std::ffi::CStr::from_ptr(masterhostname).to_bytes())
+                .unwrap()
+                .into_raw();
+        connect_args.masterportname =
+            std::ffi::CString::new(std::ffi::CStr::from_ptr(masterportname).to_bytes())
+                .unwrap()
+                .into_raw();
         connect_args.meta = meta;
         connect_args.clearpassword = donotrememberpassword;
-        connect_args.info = strdup(info);
-        connect_args.subfolder = strdup(subfolder);
+        connect_args.info = std::ffi::CString::new(std::ffi::CStr::from_ptr(info).to_bytes())
+            .unwrap()
+            .into_raw();
+        connect_args.subfolder =
+            std::ffi::CString::new(std::ffi::CStr::from_ptr(subfolder).to_bytes())
+                .unwrap()
+                .into_raw();
         if passworddigest.is_null() {
             connect_args.passworddigest = ::core::ptr::null_mut::<uint8_t>();
         } else {
-            connect_args.passworddigest = malloc(16 as size_t) as *mut uint8_t;
+            // C: malloc(16) + memcpy. Box<[u8; 16]>, freed with Box::from_raw
+            // in fs_connect (clearpassword) and fs_term.
+            connect_args.passworddigest =
+                Box::into_raw(Box::new([0 as uint8_t; 16])) as *mut uint8_t;
             memcpy(
                 connect_args.passworddigest as *mut ::core::ffi::c_void,
                 passworddigest as *const ::core::ffi::c_void,
@@ -4997,12 +4979,18 @@ pub unsafe extern "C" fn fs_term() {
                 );
                 recn = (*rec).next as *mut threc;
                 if !(*rec).obuff.is_null() {
-                    free((*rec).obuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        (*rec).obuff,
+                        (*rec).obuffsize as usize,
+                    )));
                 }
                 if !(*rec).ibuff.is_null() {
-                    free((*rec).ibuff as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                        (*rec).ibuff,
+                        (*rec).ibuffsize as usize,
+                    )));
                 }
-                free(rec as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(rec));
                 rec = recn;
             }
             rechash = rechash.wrapping_add(1);
@@ -5011,12 +4999,18 @@ pub unsafe extern "C" fn fs_term() {
         while !rec.is_null() {
             recn = (*rec).next as *mut threc;
             if !(*rec).obuff.is_null() {
-                free((*rec).obuff as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).obuff,
+                    (*rec).obuffsize as usize,
+                )));
             }
             if !(*rec).ibuff.is_null() {
-                free((*rec).ibuff as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).ibuff,
+                    (*rec).ibuffsize as usize,
+                )));
             }
-            free(rec as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(rec));
             rec = recn;
         }
         rec_unlock();
@@ -5029,7 +5023,7 @@ pub unsafe extern "C" fn fs_term() {
             af = af_hash[i as usize];
             while !af.is_null() {
                 afn = (*af).next as *mut acquired_file;
-                free(af as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(af));
                 af = afn;
             }
             i = i.wrapping_add(1);
@@ -5039,7 +5033,7 @@ pub unsafe extern "C" fn fs_term() {
             amf = amtime_hash[i as usize];
             while !amf.is_null() {
                 amfn = (*amf).next as *mut amtime_file;
-                free(amf as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(amf));
                 amf = amfn;
             }
             i = i.wrapping_add(1);
@@ -5047,15 +5041,28 @@ pub unsafe extern "C" fn fs_term() {
         if fd >= 0 as ::core::ffi::c_int {
             tcpclose(fd);
         }
+        // C: free() on each strdup'd string. free(NULL) is a no-op in C;
+        // CString::from_raw(null) would be UB, so every site is null-guarded
+        // (identical behavior).
         if !connect_args.bindhostname.is_null() {
-            free(connect_args.bindhostname as *mut ::core::ffi::c_void);
+            drop(std::ffi::CString::from_raw(connect_args.bindhostname));
         }
-        free(connect_args.masterhostname as *mut ::core::ffi::c_void);
-        free(connect_args.masterportname as *mut ::core::ffi::c_void);
-        free(connect_args.info as *mut ::core::ffi::c_void);
-        free(connect_args.subfolder as *mut ::core::ffi::c_void);
+        if !connect_args.masterhostname.is_null() {
+            drop(std::ffi::CString::from_raw(connect_args.masterhostname));
+        }
+        if !connect_args.masterportname.is_null() {
+            drop(std::ffi::CString::from_raw(connect_args.masterportname));
+        }
+        if !connect_args.info.is_null() {
+            drop(std::ffi::CString::from_raw(connect_args.info));
+        }
+        if !connect_args.subfolder.is_null() {
+            drop(std::ffi::CString::from_raw(connect_args.subfolder));
+        }
         if !connect_args.passworddigest.is_null() {
-            free(connect_args.passworddigest as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(
+                connect_args.passworddigest as *mut [uint8_t; 16],
+            ));
         }
         heap_term();
         crate::extrapackets::term();
