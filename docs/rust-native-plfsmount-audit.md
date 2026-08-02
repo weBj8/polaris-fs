@@ -70,13 +70,14 @@ owned copies; its registry is `Weak<DirCache>` and its indexes are ordinary
 Rust maps. Directory read handles are opaque `u64` tokens resolving to
 `Arc<DirSlot>`; credentials, supplementary groups, master response blocks,
 cursor state, and cache handles are owned behind Rust `Mutex`/`Condvar` state.
-`fdcache::acquire` returns an owned `FdEntry`, and `.stats/.params` handles use
-`Arc<Mutex<Sinfo>>` with `Vec<u8>` buffers.
+`fdcache::acquire` returns an owned `FdEntry`, `.stats/.params` handles use
+`Arc<Mutex<Sinfo>>` with `Vec<u8>` buffers, and file handles use a generation-
+checked `Arc<FileInfo>` registry with Rust state guards and open waiters.
 
 Verification for this wave:
 
 - `cargo test --release -p plfsclient`: 12 passed;
-- `cargo test --release -p plfsmount --lib`: 84 passed after the dirbuf wave;
+- `cargo test --release -p plfsmount --lib`: 91 passed after dirbuf/finfo waves;
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
@@ -96,11 +97,14 @@ readdir replies, waits for an active fetch, and rejects stale handles. It also
 fixes the supplementary-group leak and validates a nonempty master response
 pointer before copying at the FFI boundary.
 
-Residual mount work is explicit: `mfs_fuse` still contains the generated
-`finfo` pthread lock and condition-variable protocol, `getgroups` still exposes
-its groups blob at the FUSE/C boundary, and `pcqueue` plus some FUSE metadata
-handles retain boundary-shaped ownership. These remain next migration waves;
-this commit does not claim raw/pthread global zero.
+Residual mount work is explicit: `getgroups` still exposes its groups blob at
+the FUSE/C boundary, `pcqueue` plus some FUSE metadata handles retain
+boundary-shaped ownership, and readdata/writedata remain shared raw backends.
+The finfo registry/state is now typed Rust ownership; its `ReadDataHandle` and
+`WriteDataHandle` are narrow RAII adapters whose Drop methods call the existing
+backend end functions. This does not claim shared IO migration complete: raw
+readdata/writedata APIs and their callback-facing resource semantics remain a
+residual risk until those backends receive their own safe-core migration.
 
 ## Completed thread wave
 
@@ -113,6 +117,7 @@ The first native-thread wave now uses `std::thread::Builder`, `JoinHandle`,
 - mount symlink and xattr caches (Rust mutexes; xattr values use `Arc`).
 
 POSIX signal-mask calls remain at the system boundary. These modules no longer
-use pthread start-routine or pthread join protocols internally. Remaining pthread occurrences are concentrated in the generated `mfs_fuse`
-`finfo` lock protocol and the separate bdev data path; typed cache/thread and
-dirbuf modules above are no longer part of that residual list.
+use pthread start-routine or pthread join protocols internally. `mfs_fuse` has
+no remaining pthread mutex/condition protocol; its ACL scratch storage still
+uses pthread TLS. Shared IO backends and the separate bdev data path retain
+pthread/raw state for later waves.

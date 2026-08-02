@@ -35,10 +35,12 @@ names the Bun artifact it adapts.
 
 P4 remains partial. Current mount/client ownership and thread waves are recorded
 in [rust-native-plfsmount-audit.md](rust-native-plfsmount-audit.md). Commit
-`7e4742d` passed workspace tests, migration gates, release build, and cluster
-smoke; verified image `7e4742d21cb9` is deployed per
-[deployment.md](deployment.md). Residual `mfs_fuse` dirbuf/finfo lock state,
-groups/queue ownership, and bdev data-path work remain open.
+The latest completed source waves migrate `mfs_fuse` dirbuf and finfo ownership
+to typed Rust registries with `Arc`, `Mutex`, and `Condvar`; mount now has 91
+lib tests plus 2 bin tests. Production still runs verified image
+`7e4742d21cb9` per [deployment.md](deployment.md). ACL pthread TLS,
+groups/queue ownership, shared IO backends, and bdev data-path work remain
+open.
 
 ## House rules (from methodology.md, binding on all docs here)
 

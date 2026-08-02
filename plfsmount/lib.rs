@@ -38,6 +38,7 @@ pub mod src {
         pub mod dirattrcache;
         pub mod dirbuf;
         pub mod fdcache;
+        pub mod finfo;
         pub mod getgroups;
         pub mod masterproxy;
         pub mod mfs_fuse;

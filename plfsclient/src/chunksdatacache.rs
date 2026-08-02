@@ -75,8 +75,11 @@ pub fn find(inode: u32, chunk: u32) -> Option<CachedChunk> {
 mod tests {
     use super::*;
 
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn insert_find_change_invalidate() {
+        let _guard = TEST_LOCK.lock().unwrap();
         init();
         insert(1, 2, 10, 3, 4, b"servers");
         assert_eq!(
@@ -97,6 +100,7 @@ mod tests {
 
     #[test]
     fn clear_inode_keeps_lower_chunks_and_other_inodes() {
+        let _guard = TEST_LOCK.lock().unwrap();
         init();
         for chunk in 0..4 {
             insert(1, chunk, chunk as u64, 1, 0, &[]);

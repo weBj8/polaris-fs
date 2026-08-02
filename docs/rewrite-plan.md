@@ -219,9 +219,11 @@ mount and shared helper paths. Current verification: mount lib 72 tests, mount
 bin 2 tests, client 12 tests, workspace release build, gates, and cluster/FUSE
 smoke all pass at commit `7e4742d`.
 
-Not complete: generated `mfs_fuse` dirbuf/finfo pthread lock/condition
-protocol, groups and pcqueue boundary ownership, and remaining bdev data-path
-migration. P4 remains partial.
+Current continuation: `mfs_fuse` dirbuf and finfo raw registries plus pthread
+lock/condition protocols have been replaced by typed Rust ownership. Not
+complete: ACL pthread TLS, groups and pcqueue boundary ownership, shared
+readdata/writedata backends, and remaining bdev data-path migration. P4 remains
+partial.
 
 ## Exit criteria per phase
 
