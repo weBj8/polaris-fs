@@ -511,7 +511,6 @@ unsafe impl Send for NbdcPtr {}
 #[repr(C)]
 pub struct _bdlist {
     pub nbdcp: *mut nbdcommon,
-    pub next: *mut _bdlist,
 }
 pub type bdlist = _bdlist;
 /// C strdup: copy a borrowed C string into a CString-owned raw pointer.
@@ -827,7 +826,13 @@ static mut NbdTimeout: ::core::ffi::c_int = 1800 as ::core::ffi::c_int;
 pub const FLAG_READONLY: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const FLAG_IGNORELOCK: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 static mut workers_set: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-static mut bdhead: *mut bdlist = ::core::ptr::null_mut::<bdlist>();
+static mut BDHEAD: Vec<Box<bdlist>> = Vec::new();
+// Edition-2024 static-mut access helper: single ownership point for the
+// device registry (C bdhead). Callers hold no borrow across fn calls.
+#[inline]
+unsafe fn bdhead_list() -> &'static mut Vec<Box<bdlist>> {
+    unsafe { &mut *(&raw mut BDHEAD) }
+}
 static mut mcfg: mfscfg = mfscfg {
     masterhost: ::core::ptr::null_mut::<::core::ffi::c_char>(),
     masterport: ::core::ptr::null_mut::<::core::ffi::c_char>(),
@@ -2408,7 +2413,6 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                     active: 0,
                     aqueue: ::core::ptr::null_mut(),
                 })),
-                next: ::core::ptr::null_mut(),
             }));
             (*(*bdl).nbdcp).linkname = linkname_generate(
                 (*(*bdl).nbdcp).linkname,
@@ -2451,16 +2455,13 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                     (*(*bdl).nbdcp).fsize as ::core::ffi::c_double
                         / (1024.0f64 * 1024.0f64 * 1024.0f64),
                 );
-                (*bdl).next = bdhead as *mut _bdlist;
-                bdhead = bdl;
+                bdhead_list().insert(0, Box::from_raw(bdl));
             }
         }
         free(lbuff as *mut ::core::ffi::c_void);
         fclose(cfd);
-        bdl = bdhead;
-        while !bdl.is_null() {
-            nbd_force_partition_reread((*bdl).nbdcp);
-            bdl = (*bdl).next as *mut bdlist;
+        for i in 0..bdhead_list().len() {
+            nbd_force_partition_reread(bdhead_list()[i].nbdcp);
         }
         return 1 as uint8_t;
     }
@@ -2629,7 +2630,6 @@ pub unsafe extern "C" fn nbd_handle_add_device(
                     active: 0,
                     aqueue: ::core::ptr::null_mut(),
                 })),
-                next: ::core::ptr::null_mut(),
             }));
             (*(*bdl).nbdcp).linkname = linkname_generate(
                 (*(*bdl).nbdcp).linkname,
@@ -2676,8 +2676,7 @@ pub unsafe extern "C" fn nbd_handle_add_device(
                         / (1024.0f64 * 1024.0f64 * 1024.0f64),
                 ) as uint32_t;
                 status = MFSNBD_OK as ::core::ffi::c_int as uint8_t;
-                (*bdl).next = bdhead as *mut _bdlist;
-                bdhead = bdl;
+                bdhead_list().insert(0, Box::from_raw(bdl));
             }
         }
         wptr = (&raw mut ans as *mut uint8_t).offset(4 as ::core::ffi::c_int as isize);
@@ -2714,7 +2713,7 @@ pub unsafe extern "C" fn nbd_handle_remove_device(
         let mut dleng: uint8_t = 0;
         let mut nleng: uint8_t = 0;
         static mut bdl: *mut bdlist = ::core::ptr::null_mut::<bdlist>();
-        static mut bdlp: *mut *mut bdlist = ::core::ptr::null_mut::<*mut bdlist>();
+        let mut bi: usize = 0;
         let mut found: uint8_t = 0;
         wptr = &raw mut ans as *mut uint8_t;
         put32bit(
@@ -2783,11 +2782,9 @@ pub unsafe extern "C" fn nbd_handle_remove_device(
         }
         found = 0 as uint8_t;
         msglen = 0 as uint32_t;
-        bdlp = &raw mut bdhead;
-        while found as ::core::ffi::c_int == 0 as ::core::ffi::c_int && {
-            bdl = *bdlp;
-            !bdl.is_null()
-        } {
+        bi = 0;
+        while found as ::core::ffi::c_int == 0 as ::core::ffi::c_int && bi < bdhead_list().len() {
+            bdl = &mut *bdhead_list()[bi] as *mut bdlist;
             if nbd_match(
                 (*bdl).nbdcp,
                 pleng as uint32_t,
@@ -2812,11 +2809,10 @@ pub unsafe extern "C" fn nbd_handle_remove_device(
                 ) as uint32_t;
                 nbd_stop((*bdl).nbdcp);
                 nbd_free((*bdl).nbdcp);
-                *bdlp = (*bdl).next as *mut bdlist;
-                drop(Box::from_raw(bdl));
+                drop(bdhead_list().remove(bi));
                 found = 1 as uint8_t;
             } else {
-                bdlp = &raw mut (*bdl).next as *mut *mut bdlist;
+                bi += 1;
             }
         }
         if found as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
@@ -2881,8 +2877,9 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
         }
         dcnt = 0 as uint8_t;
         dsize = 1 as uint32_t;
-        bdl = bdhead;
-        while !bdl.is_null() {
+        let mut bi = 0usize;
+        while bi < bdhead_list().len() {
+            bdl = &mut *bdhead_list()[bi] as *mut bdlist;
             pleng = strlen((*(*bdl).nbdcp).mfsfile) as uint32_t;
             dleng = strlen((*(*bdl).nbdcp).nbddevice) as uint32_t;
             nleng = strlen(
@@ -2906,7 +2903,7 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
                     .wrapping_add(20 as uint32_t),
             );
             dcnt = dcnt.wrapping_add(1);
-            bdl = (*bdl).next as *mut bdlist;
+            bi += 1;
         }
         // C: malloc(8+dsize) + free(ans); now Vec-owned reply buffer.
         let mut ans: Vec<u8> = vec![0; (8 as uint32_t).wrapping_add(dsize) as usize];
@@ -2914,8 +2911,9 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
         put32bit(&raw mut wptr, MFSNBD_LIST as ::core::ffi::c_int as uint32_t);
         put32bit(&raw mut wptr, dsize);
         put8bit(&raw mut wptr, dcnt);
-        bdl = bdhead;
-        while !bdl.is_null() {
+        bi = 0;
+        while bi < bdhead_list().len() {
+            bdl = &mut *bdhead_list()[bi] as *mut bdlist;
             pleng = strlen((*(*bdl).nbdcp).mfsfile) as uint32_t;
             dleng = strlen((*(*bdl).nbdcp).nbddevice) as uint32_t;
             nleng = strlen(
@@ -2959,7 +2957,7 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
             put64bit(&raw mut wptr, (*(*bdl).nbdcp).fsize);
             put32bit(&raw mut wptr, (*(*bdl).nbdcp).bsize);
             put32bit(&raw mut wptr, (*(*bdl).nbdcp).flags);
-            bdl = (*bdl).next as *mut bdlist;
+            bi += 1;
         }
         unixtowrite(
             sock,
@@ -3059,8 +3057,9 @@ pub unsafe extern "C" fn nbd_handle_resize_device(
         size = get64bit(&raw mut rptr);
         found = 0 as uint8_t;
         msglen = 0 as uint32_t;
-        bdl = bdhead;
-        while found as ::core::ffi::c_int == 0 as ::core::ffi::c_int && !bdl.is_null() {
+        let mut bi = 0usize;
+        while found as ::core::ffi::c_int == 0 as ::core::ffi::c_int && bi < bdhead_list().len() {
+            bdl = &mut *bdhead_list()[bi] as *mut bdlist;
             if nbd_match(
                 (*bdl).nbdcp,
                 pleng as uint32_t,
@@ -3186,7 +3185,7 @@ pub unsafe extern "C" fn nbd_handle_resize_device(
                 }
                 found = 1 as uint8_t;
             }
-            bdl = (*bdl).next as *mut bdlist;
+            bi += 1;
         }
         if found as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
             msglen = snprintf(
@@ -3286,18 +3285,10 @@ pub unsafe extern "C" fn nbd_handle_request(mut sock: ::core::ffi::c_int) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_stop_all_devices() {
     unsafe {
-        static mut bdl: *mut bdlist = ::core::ptr::null_mut::<bdlist>();
-        static mut bdlp: *mut *mut bdlist = ::core::ptr::null_mut::<*mut bdlist>();
-        bdlp = &raw mut bdhead;
-        loop {
-            bdl = *bdlp;
-            if bdl.is_null() {
-                break;
-            }
-            nbd_stop((*bdl).nbdcp);
-            nbd_free((*bdl).nbdcp);
-            *bdlp = (*bdl).next as *mut bdlist;
-            drop(Box::from_raw(bdl));
+        // Head-first stop order matches the C list walk; drain drops each node.
+        for entry in bdhead_list().drain(..) {
+            nbd_stop(entry.nbdcp);
+            nbd_free(entry.nbdcp);
         }
     }
 }
@@ -3811,7 +3802,7 @@ pub unsafe extern "C" fn nbd_start_daemon(
         lsockname = ::core::ptr::null_mut::<::core::ffi::c_char>();
         initfname = ::core::ptr::null_mut::<::core::ffi::c_char>();
         fg = 0 as ::core::ffi::c_int;
-        bdhead = ::core::ptr::null_mut::<bdlist>();
+        bdhead_list().clear();
         loop {
             ch = getopt(
                 argc,
@@ -4106,7 +4097,7 @@ pub unsafe extern "C" fn nbd_start_daemon(
             b"got term signal - closing nbd devices\0".as_ptr() as *const ::core::ffi::c_char,
         );
         nbd_stop_all_devices();
-        if bdhead.is_null() {
+        if bdhead_list().is_empty() {
         } else {
             fprintf(
                 stderr,
