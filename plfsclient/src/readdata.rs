@@ -33,7 +33,6 @@ unsafe extern "C" {
         __timeout: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int;
     unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
     unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn qsort(
@@ -524,19 +523,6 @@ unsafe extern "C" fn close_pipe(mut handles: *mut ::core::ffi::c_int) -> ::core:
             res = -1 as ::core::ffi::c_int;
         }
         return res;
-    }
-}
-#[inline]
-unsafe extern "C" fn mfsrealloc(
-    mut ptr: *mut ::core::ffi::c_void,
-    mut size: size_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut pptr: *mut ::core::ffi::c_void = realloc(ptr, size);
-        if pptr.is_null() {
-            free(ptr);
-        }
-        return pptr;
     }
 }
 pub const CHUNKSERVER_ACTIVITY_TIMEOUT: ::core::ffi::c_double = 5.0f64;

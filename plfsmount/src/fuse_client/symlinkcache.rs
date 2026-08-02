@@ -6,20 +6,17 @@
 //! → symlink target path, time-based expiry, oldest-slot eviction.
 //!
 //! All cache logic is safe Rust in `imp` (paths owned as boxed byte strings,
-//! NUL-terminated for C export). The boundary keeps the global lock, the
-//! stats tree, and C-string ownership: inserted paths are copied in,
-//! search-hit paths are returned as libc-malloc'd copies (caller frees with
-//! free(3), matching the C contract — mfs_fuse does exactly that).
+//! NUL-terminated for the FUSE boundary). The boundary keeps the global lock,
+//! the stats tree, and C-string ownership: inserted paths are copied in, and
+//! search hits are returned as owned NUL-terminated copies (the sole caller,
+//! mfs_readlink, passes the bytes to fuse_reply_readlink then drops them).
 
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
 }
 pub type size_t = usize;
 pub type uint8_t = u8;
 pub type uint32_t = u32;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 
 pub const INSERTS: usize = 0;
 pub const SEARCH_HITS: usize = 1;
@@ -206,36 +203,30 @@ pub unsafe extern "C" fn symlink_cache_insert(inode: uint32_t, path: *const uint
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn symlink_cache_search(inode: uint32_t) -> *mut uint8_t {
-    unsafe {
-        let t = monotonic_seconds();
-        let outcome = CACHE
-            .lock()
-            .unwrap()
-            .as_mut()
-            .expect("symlink cache used before init")
-            .search(inode, t);
-        match outcome {
-            SearchOutcome::Hit(path) => {
-                stats_inc(SEARCH_HITS);
-                // libc malloc: caller frees with free(3) (mfs_fuse does).
-                let p = malloc(path.len()) as *mut uint8_t;
-                if p.is_null() {
-                    return ::core::ptr::null_mut();
-                }
-                ::core::ptr::copy_nonoverlapping(path.as_ptr(), p, path.len());
-                p
-            }
-            SearchOutcome::Expired => {
-                stats_dec(LINKS);
-                stats_inc(SEARCH_MISSES);
-                ::core::ptr::null_mut()
-            }
-            SearchOutcome::Miss => {
-                stats_inc(SEARCH_MISSES);
-                ::core::ptr::null_mut()
-            }
+/// Internal API (sole caller: mfs_readlink). Returns an owned NUL-terminated
+/// copy of the cached path on hit; None on miss/expiry.
+pub fn symlink_cache_search(inode: uint32_t) -> Option<Box<[u8]>> {
+    // SAFETY: monotonic_seconds is a pure clock read.
+    let t = unsafe { monotonic_seconds() };
+    let outcome = CACHE
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("symlink cache used before init")
+        .search(inode, t);
+    match outcome {
+        SearchOutcome::Hit(path) => {
+            stats_inc(SEARCH_HITS);
+            Some(path)
+        }
+        SearchOutcome::Expired => {
+            stats_dec(LINKS);
+            stats_inc(SEARCH_MISSES);
+            None
+        }
+        SearchOutcome::Miss => {
+            stats_inc(SEARCH_MISSES);
+            None
         }
     }
 }

@@ -21,6 +21,7 @@ use crate::src::fuse_client::dirbuf;
 use crate::src::fuse_client::fdcache;
 use crate::src::fuse_client::finfo as finfo_core;
 use crate::src::fuse_client::getgroups;
+use crate::src::fuse_client::symlinkcache;
 use ::c2rust_bitfields;
 use std::cell::RefCell;
 unsafe extern "C" {
@@ -102,9 +103,6 @@ unsafe extern "C" {
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
@@ -479,7 +477,6 @@ unsafe extern "C" {
     unsafe fn sstats_set(inode: uint32_t, attr: *const uint8_t, createflag: uint8_t);
     unsafe fn sparents_add(inode: uint32_t, parent: uint32_t, timeout: uint32_t);
     unsafe fn symlink_cache_insert(inode: uint32_t, path: *const uint8_t);
-    unsafe fn symlink_cache_search(inode: uint32_t) -> *mut uint8_t;
     unsafe fn negentry_cache_remove(inode: uint32_t, nleng: uint8_t, name: *const uint8_t);
     unsafe fn negentry_cache_insert(inode: uint32_t, nleng: uint8_t, name: *const uint8_t);
     unsafe fn negentry_cache_search(
@@ -1103,19 +1100,6 @@ unsafe extern "C" fn portable_usleep(mut usec: uint64_t) {
     }
 }
 pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[inline]
-unsafe extern "C" fn mfsrealloc(
-    mut ptr: *mut ::core::ffi::c_void,
-    mut size: size_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut pptr: *mut ::core::ffi::c_void = realloc(ptr, size);
-        if pptr.is_null() {
-            free(ptr);
-        }
-        return pptr;
-    }
-}
 pub const READDIR_BUFFSIZE: ::core::ffi::c_int = 50000 as ::core::ffi::c_int;
 pub const READDIR_EDGELIMIT: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 pub const MAX_FILE_SIZE: int64_t = MFS_MAX_FILE_SIZE as int64_t;
@@ -5289,7 +5273,6 @@ pub unsafe extern "C" fn mfs_symlink(
 pub unsafe extern "C" fn mfs_readlink(mut req: fuse_req_t, mut ino: fuse_ino_t) {
     unsafe {
         let mut status: ::core::ffi::c_int = 0;
-        let mut path: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut cpath: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut ctx: fuse_ctx = fuse_ctx {
             uid: 0,
@@ -5311,17 +5294,16 @@ pub unsafe extern "C" fn mfs_readlink(mut req: fuse_req_t, mut ino: fuse_ino_t) 
                 ino as ::core::ffi::c_ulong,
             );
         }
-        path = symlink_cache_search(ino as uint32_t);
-        if !path.is_null() {
+        // Owned NUL-terminated path copy; borrowed by oplog/reply, dropped after.
+        if let Some(path) = symlinkcache::symlink_cache_search(ino as uint32_t) {
             mfs_stats_inc(OP_READLINK_CACHED as ::core::ffi::c_int as uint8_t);
             oplog_printf(
                 &raw mut ctx,
                 b"readlink (%lu) (using cache): OK (%s)\0".as_ptr() as *const ::core::ffi::c_char,
                 ino as ::core::ffi::c_ulong,
-                path as *mut ::core::ffi::c_char,
+                path.as_ptr() as *const ::core::ffi::c_char,
             );
-            fuse_reply_readlink(req, path as *mut ::core::ffi::c_char);
-            free(path as *mut ::core::ffi::c_void);
+            fuse_reply_readlink(req, path.as_ptr() as *const ::core::ffi::c_char);
             return;
         }
         mfs_stats_inc(OP_READLINK_MASTER as ::core::ffi::c_int as uint8_t);
@@ -8010,11 +7992,10 @@ pub unsafe extern "C" fn mfs_read(
             return;
         }
         if ino == RANDOM_INODE as fuse_ino_t {
-            let mut rbptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
             let mut nextr: uint32_t = 0;
-            buff = malloc(size) as *mut uint8_t;
+            let mut randbuff: Vec<u8> = vec![0 as uint8_t; size];
+            let mut rboff: usize = 0 as usize;
             ssize = size as uint32_t;
-            rbptr = buff;
             let _random_guard = RANDOM_LOCK.lock().unwrap();
             while ssize >= 4 as uint32_t {
                 rndz = (36969 as uint32_t)
@@ -8031,18 +8012,14 @@ pub unsafe extern "C" fn mfs_read(
                 rndjsr ^= rndjsr << 5 as ::core::ffi::c_int;
                 nextr = ((rndz << 16 as ::core::ffi::c_int).wrapping_add(rndw) ^ rndjcong)
                     .wrapping_add(rndjsr);
-                let c2rust_fresh3 = rbptr;
-                rbptr = rbptr.offset(1);
-                *c2rust_fresh3 = (nextr >> 24 as ::core::ffi::c_int) as uint8_t;
-                let c2rust_fresh4 = rbptr;
-                rbptr = rbptr.offset(1);
-                *c2rust_fresh4 = (nextr >> 16 as ::core::ffi::c_int) as uint8_t;
-                let c2rust_fresh5 = rbptr;
-                rbptr = rbptr.offset(1);
-                *c2rust_fresh5 = (nextr >> 8 as ::core::ffi::c_int) as uint8_t;
-                let c2rust_fresh6 = rbptr;
-                rbptr = rbptr.offset(1);
-                *c2rust_fresh6 = nextr as uint8_t;
+                randbuff[rboff] = (nextr >> 24 as ::core::ffi::c_int) as uint8_t;
+                rboff += 1;
+                randbuff[rboff] = (nextr >> 16 as ::core::ffi::c_int) as uint8_t;
+                rboff += 1;
+                randbuff[rboff] = (nextr >> 8 as ::core::ffi::c_int) as uint8_t;
+                rboff += 1;
+                randbuff[rboff] = nextr as uint8_t;
+                rboff += 1;
                 ssize = ssize.wrapping_sub(4 as uint32_t);
             }
             if ssize > 0 as uint32_t {
@@ -8061,16 +8038,14 @@ pub unsafe extern "C" fn mfs_read(
                 nextr = ((rndz << 16 as ::core::ffi::c_int).wrapping_add(rndw) ^ rndjcong)
                     .wrapping_add(rndjsr);
                 while ssize > 0 as uint32_t {
-                    let c2rust_fresh7 = rbptr;
-                    rbptr = rbptr.offset(1);
-                    *c2rust_fresh7 = (nextr >> 24 as ::core::ffi::c_int) as uint8_t;
+                    randbuff[rboff] = (nextr >> 24 as ::core::ffi::c_int) as uint8_t;
+                    rboff += 1;
                     nextr <<= 8 as ::core::ffi::c_int;
                     ssize = ssize.wrapping_sub(1);
                 }
             }
             drop(_random_guard);
-            fuse_reply_buf(req, buff as *mut ::core::ffi::c_char, size);
-            free(buff as *mut ::core::ffi::c_void);
+            fuse_reply_buf(req, randbuff.as_ptr() as *mut ::core::ffi::c_char, size);
             return;
         }
         if ino == MOOSE_INODE as fuse_ino_t {
@@ -10968,7 +10943,6 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
         let mut leng: uint32_t = 0;
         let mut aclbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut aclleng: uint32_t = 0;
-        let mut resbuff: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
         let mut resleng: uint32_t = 0;
         let mut hasaccacl: uint8_t = 0;
         let mut hasdefacl: uint8_t = 0;
@@ -11148,35 +11122,30 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
                         0 as ::core::ffi::c_int
                     }) as uint32_t,
                 );
-            resbuff = malloc(resleng as size_t) as *mut ::core::ffi::c_char;
+            let mut resbuff: Vec<uint8_t> = vec![0 as uint8_t; resleng as usize];
             memcpy(
-                resbuff as *mut ::core::ffi::c_void,
+                resbuff.as_mut_ptr() as *mut ::core::ffi::c_void,
                 buff as *const ::core::ffi::c_void,
                 leng as size_t,
             );
             if hasdefacl != 0 {
                 memcpy(
-                    resbuff.offset(leng as isize) as *mut ::core::ffi::c_void,
-                    b"system.posix_acl_default\0".as_ptr() as *const ::core::ffi::c_char
-                        as *const ::core::ffi::c_void,
+                    resbuff.as_mut_ptr().add(leng as usize) as *mut ::core::ffi::c_void,
+                    b"system.posix_acl_default\0".as_ptr() as *const ::core::ffi::c_void,
                     25 as size_t,
                 );
                 if hasaccacl != 0 {
                     memcpy(
-                        resbuff
-                            .offset(leng as isize)
-                            .offset(25 as ::core::ffi::c_int as isize)
+                        resbuff.as_mut_ptr().add(leng as usize).add(25 as usize)
                             as *mut ::core::ffi::c_void,
-                        b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_char
-                            as *const ::core::ffi::c_void,
+                        b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_void,
                         24 as size_t,
                     );
                 }
             } else if hasaccacl != 0 {
                 memcpy(
-                    resbuff.offset(leng as isize) as *mut ::core::ffi::c_void,
-                    b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_char
-                        as *const ::core::ffi::c_void,
+                    resbuff.as_mut_ptr().add(leng as usize) as *mut ::core::ffi::c_void,
+                    b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_void,
                     24 as size_t,
                 );
             }
@@ -11186,11 +11155,10 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
                 ctx.gid as uint32_t,
                 0 as uint32_t,
                 ::core::ptr::null::<uint8_t>(),
-                resbuff as *const uint8_t,
+                resbuff.as_ptr() as *const uint8_t,
                 resleng,
                 MFS_STATUS_OK,
             );
-            free(resbuff as *mut ::core::ffi::c_void);
         }
         if !xattr_value_release.is_null() {
             if size == 0 as size_t {
@@ -11270,35 +11238,30 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
                 );
                 fuse_reply_err(req, ERANGE);
             } else if resleng > leng {
-                resbuff = malloc(resleng as size_t) as *mut ::core::ffi::c_char;
+                let mut resbuff: Vec<uint8_t> = vec![0 as uint8_t; resleng as usize];
                 memcpy(
-                    resbuff as *mut ::core::ffi::c_void,
+                    resbuff.as_mut_ptr() as *mut ::core::ffi::c_void,
                     buff as *const ::core::ffi::c_void,
                     leng as size_t,
                 );
                 if hasdefacl != 0 {
                     memcpy(
-                        resbuff.offset(leng as isize) as *mut ::core::ffi::c_void,
-                        b"system.posix_acl_default\0".as_ptr() as *const ::core::ffi::c_char
-                            as *const ::core::ffi::c_void,
+                        resbuff.as_mut_ptr().add(leng as usize) as *mut ::core::ffi::c_void,
+                        b"system.posix_acl_default\0".as_ptr() as *const ::core::ffi::c_void,
                         25 as size_t,
                     );
                     if hasaccacl != 0 {
                         memcpy(
-                            resbuff
-                                .offset(leng as isize)
-                                .offset(25 as ::core::ffi::c_int as isize)
+                            resbuff.as_mut_ptr().add(leng as usize).add(25 as usize)
                                 as *mut ::core::ffi::c_void,
-                            b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_char
-                                as *const ::core::ffi::c_void,
+                            b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_void,
                             24 as size_t,
                         );
                     }
                 } else if hasaccacl != 0 {
                     memcpy(
-                        resbuff.offset(leng as isize) as *mut ::core::ffi::c_void,
-                        b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_char
-                            as *const ::core::ffi::c_void,
+                        resbuff.as_mut_ptr().add(leng as usize) as *mut ::core::ffi::c_void,
+                        b"system.posix_acl_access\0".as_ptr() as *const ::core::ffi::c_void,
                         24 as size_t,
                     );
                 }
@@ -11314,8 +11277,11 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
                     },
                     resleng,
                 );
-                fuse_reply_buf(req, resbuff, resleng as size_t);
-                free(resbuff as *mut ::core::ffi::c_void);
+                fuse_reply_buf(
+                    req,
+                    resbuff.as_ptr() as *mut ::core::ffi::c_char,
+                    resleng as size_t,
+                );
             } else {
                 oplog_printf(
                     &raw mut ctx,
