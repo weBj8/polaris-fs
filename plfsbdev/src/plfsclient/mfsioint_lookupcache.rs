@@ -9,23 +9,6 @@ unsafe extern "C" {
         __s2: *const ::core::ffi::c_void,
         __n: size_t,
     ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const pthread_mutexattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_init(
-        __cond: *mut pthread_cond_t,
-        __cond_attr: *const pthread_condattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_destroy(__cond: *mut pthread_cond_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_broadcast(__cond: *mut pthread_cond_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_wait(
-        __cond: *mut pthread_cond_t,
-        __mutex: *mut pthread_mutex_t,
-    ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
     unsafe fn fs_path_lookup(
         base_inode: uint32_t,
@@ -42,83 +25,14 @@ unsafe extern "C" {
     ) -> uint8_t;
 }
 pub type size_t = usize;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union __atomic_wide_counter {
-    pub __value64: ::core::ffi::c_ulonglong,
-    pub __value32: C2Rust_Unnamed,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct C2Rust_Unnamed {
-    pub __low: ::core::ffi::c_uint,
-    pub __high: ::core::ffi::c_uint,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_cond_s {
-    pub __wseq: __atomic_wide_counter,
-    pub __g1_start: __atomic_wide_counter,
-    pub __g_size: [::core::ffi::c_uint; 2],
-    pub __g1_orig_size: ::core::ffi::c_uint,
-    pub __wrefs: ::core::ffi::c_uint,
-    pub __g_signals: [::core::ffi::c_uint; 2],
-    pub __unused_initialized_1: ::core::ffi::c_uint,
-    pub __unused_initialized_2: ::core::ffi::c_uint,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutexattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_condattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_cond_t {
-    pub __data: __pthread_cond_s,
-    pub __size: [::core::ffi::c_char; 48],
-    pub __align: ::core::ffi::c_longlong,
-}
 pub type uint8_t = u8;
 pub type uint32_t = u32;
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct _path_lookup_cache {
     pub hash: uint32_t,
     pub refresh_in_progress: uint8_t,
-    pub cond: pthread_cond_t,
+    // C: pthread_cond_t cond (waited on with lcache_lock[hind]).
+    pub cond: std::sync::Condvar,
     pub base_inode: uint32_t,
     pub pleng: uint32_t,
     pub path: [uint8_t; 1024],
@@ -142,49 +56,84 @@ pub const MFS_ERROR_ENAMETOOLONG: ::core::ffi::c_int = 58 as ::core::ffi::c_int;
 pub const ATTR_RECORD_SIZE: ::core::ffi::c_int = 36 as ::core::ffi::c_int;
 pub const LCACHE_HENTRIES: ::core::ffi::c_int = 64 as ::core::ffi::c_int;
 pub const LCACHE_QENTRIES: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
-static mut lcache: [[path_lookup_cache; 8]; 64] = [[path_lookup_cache {
-    hash: 0,
-    refresh_in_progress: 0,
-    cond: pthread_cond_t {
-        __data: __pthread_cond_s {
-            __wseq: __atomic_wide_counter { __value64: 0 },
-            __g1_start: __atomic_wide_counter { __value64: 0 },
-            __g_size: [0; 2],
-            __g1_orig_size: 0,
-            __wrefs: 0,
-            __g_signals: [0; 2],
-            __unused_initialized_1: 0,
-            __unused_initialized_2: 0,
-        },
-    },
-    base_inode: 0,
-    pleng: 0,
-    path: [0; 1024],
-    uid: 0,
-    gidcnt: 0,
-    gidtab: [0; 256],
-    parent: 0,
-    inode: 0,
-    nleng: 0,
-    name: [0; 256],
-    attr: [0; 36],
-    validts: 0.,
-}; 8]; 64];
-static mut lcache_lock: [pthread_mutex_t; 64] = [pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
+static mut lcache: [[path_lookup_cache; 8]; 64] = [const {
+    [const {
+        path_lookup_cache {
+            hash: 0,
+            refresh_in_progress: 0,
+            cond: std::sync::Condvar::new(),
+            base_inode: 0,
+            pleng: 0,
+            path: [0; 1024],
+            uid: 0,
+            gidcnt: 0,
+            gidtab: [0; 256],
+            parent: 0,
+            inode: 0,
+            nleng: 0,
+            name: [0; 256],
+            attr: [0; 36],
+            validts: 0.,
+        }
+    }; 8]
 }; 64];
+// Per-bucket locks. C: pthread_mutex_t lcache_lock[LCACHE_HENTRIES], manually
+// locked/unlocked across complex flow (unlocked around fs_path_lookup;
+// cond_wait releases/reacquires the same bucket mutex). std Mutex is
+// RAII-only, so emulate pthread-style manual lock/unlock by stashing the
+// guard in a thread_local slot together with the bucket index: lock() parks
+// the guard, unlock() drops it (same guard-slot pattern as
+// plfsclient/readdata.rs INODE_LOCK/IND_LOCK_GUARD).
+// INVARIANT: every lock/unlock/wait pair runs on the same thread and no
+// thread ever holds two bucket locks at once (verified against
+// mfsioint_lookupcache.c: lcache_inode_invalidate releases hind before
+// hind+1; lookup/invalidate hold one bucket each); index mismatch panics,
+// catching misuse pthread would UB on. Poisoning is ignored (into_inner)
+// for pthread parity.
+// ponytail: guard-slot emulates pthread_mutex_t; upgrade path is a full RAII
+// restructure of every lock region (large diff, separate wave).
+static LCACHE_LOCK: [std::sync::Mutex<()>; 64] = [const { std::sync::Mutex::new(()) }; 64];
+thread_local! {
+    static LCACHE_LOCK_GUARD: std::cell::RefCell<
+        Option<(usize, std::sync::MutexGuard<'static, ()>)>,
+    > = const { std::cell::RefCell::new(None) };
+}
+fn lcache_bucket_lock(hind: usize) {
+    let guard = LCACHE_LOCK[hind].lock().unwrap_or_else(|e| e.into_inner());
+    LCACHE_LOCK_GUARD.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        assert!(slot.is_none(), "lcache_bucket_lock: guard already held");
+        *slot = Some((hind, guard));
+    });
+}
+fn lcache_bucket_unlock(hind: usize) {
+    let entry = LCACHE_LOCK_GUARD
+        .with(|slot| slot.borrow_mut().take())
+        .expect("lcache_bucket_unlock: no guard held on this thread");
+    assert!(
+        entry.0 == hind,
+        "lcache_bucket_unlock: bucket index mismatch"
+    );
+    drop(entry.1);
+}
+// Caller must hold LCACHE_LOCK[hind]; wait releases and reacquires it,
+// exactly like pthread_cond_wait(&plc->cond, lcache_lock+hind). C waits in
+// a while (refresh_in_progress) predicate loop, so spurious wakeups are
+// already handled there.
+unsafe fn lcache_cond_wait(cond: *const std::sync::Condvar, hind: usize) {
+    unsafe {
+        let entry = LCACHE_LOCK_GUARD
+            .with(|slot| slot.borrow_mut().take())
+            .expect("lcache_cond_wait: no guard held on this thread");
+        assert!(entry.0 == hind, "lcache_cond_wait: bucket index mismatch");
+        // SAFETY: cond is &(*plc).cond inside the static lcache array — it
+        // outlives every wait.
+        let guard = (*cond).wait(entry.1).unwrap_or_else(|e| e.into_inner());
+        LCACHE_LOCK_GUARD.with(|slot| {
+            *slot.borrow_mut() = Some((entry.0, guard));
+        });
+    }
+}
 static mut lcache_retention: ::core::ffi::c_double = 0.;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lcache_path_normalize(
@@ -314,7 +263,7 @@ pub unsafe extern "C" fn lcache_path_lookup(
         }
         hash = lcache_hash(base_inode, rpleng, &raw mut rpath as *mut uint8_t);
         hind = hash.wrapping_rem(LCACHE_HENTRIES as uint32_t);
-        pthread_mutex_lock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_lock(hind as usize);
         minplc = ::core::ptr::null_mut::<path_lookup_cache>();
         qind = 0 as uint32_t;
         while qind < LCACHE_QENTRIES as uint32_t {
@@ -338,16 +287,11 @@ pub unsafe extern "C" fn lcache_path_lookup(
                 ) == 0 as ::core::ffi::c_int
             {
                 while (*plc).refresh_in_progress != 0 {
-                    pthread_cond_wait(
-                        &raw mut (*plc).cond,
-                        (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                    );
+                    lcache_cond_wait(&raw const (*plc).cond, hind as usize);
                 }
                 if (*plc).validts <= ts {
                     (*plc).refresh_in_progress = 1 as uint8_t;
-                    pthread_mutex_unlock(
-                        (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                    );
+                    lcache_bucket_unlock(hind as usize);
                     status = fs_path_lookup(
                         base_inode,
                         rpleng,
@@ -362,15 +306,11 @@ pub unsafe extern "C" fn lcache_path_lookup(
                         &raw mut (*plc).attr as *mut uint8_t,
                     );
                     ts = monotonic_seconds();
-                    pthread_mutex_lock(
-                        (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                    );
+                    lcache_bucket_lock(hind as usize);
                     (*plc).refresh_in_progress = 0 as uint8_t;
-                    pthread_cond_broadcast(&raw mut (*plc).cond);
+                    (*plc).cond.notify_all();
                     if status as ::core::ffi::c_int != MFS_STATUS_OK {
-                        pthread_mutex_unlock(
-                            (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                        );
+                        lcache_bucket_unlock(hind as usize);
                         return status;
                     }
                     (*plc).validts = ts + lcache_retention;
@@ -394,9 +334,7 @@ pub unsafe extern "C" fn lcache_path_lookup(
                     &raw mut (*plc).attr as *mut uint8_t as *const ::core::ffi::c_void,
                     ATTR_RECORD_SIZE as size_t,
                 );
-                pthread_mutex_unlock(
-                    (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                );
+                lcache_bucket_unlock(hind as usize);
                 return MFS_STATUS_OK as uint8_t;
             } else if (*plc).refresh_in_progress as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if minplc.is_null() || (*plc).validts < (*minplc).validts {
@@ -406,9 +344,7 @@ pub unsafe extern "C" fn lcache_path_lookup(
             qind = qind.wrapping_add(1);
         }
         if minplc.is_null() {
-            pthread_mutex_unlock(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-            );
+            lcache_bucket_unlock(hind as usize);
             return fs_path_lookup(
                 base_inode,
                 rpleng,
@@ -440,7 +376,7 @@ pub unsafe extern "C" fn lcache_path_lookup(
             gidtab as *const ::core::ffi::c_void,
             ::core::mem::size_of::<uint32_t>().wrapping_mul(gidcnt as size_t),
         );
-        pthread_mutex_unlock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_unlock(hind as usize);
         status = fs_path_lookup(
             base_inode,
             rpleng,
@@ -455,14 +391,12 @@ pub unsafe extern "C" fn lcache_path_lookup(
             &raw mut (*plc).attr as *mut uint8_t,
         );
         ts = monotonic_seconds();
-        pthread_mutex_lock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_lock(hind as usize);
         (*plc).refresh_in_progress = 0 as uint8_t;
-        pthread_cond_broadcast(&raw mut (*plc).cond);
+        (*plc).cond.notify_all();
         if status as ::core::ffi::c_int != MFS_STATUS_OK {
             (*plc).validts = ts;
-            pthread_mutex_unlock(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-            );
+            lcache_bucket_unlock(hind as usize);
             return status;
         }
         (*plc).validts = ts + lcache_retention;
@@ -485,7 +419,7 @@ pub unsafe extern "C" fn lcache_path_lookup(
             &raw mut (*plc).attr as *mut uint8_t as *const ::core::ffi::c_void,
             ATTR_RECORD_SIZE as size_t,
         );
-        pthread_mutex_unlock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_unlock(hind as usize);
         return MFS_STATUS_OK as uint8_t;
     }
 }
@@ -512,7 +446,7 @@ pub unsafe extern "C" fn lcache_path_invalidate(
         }
         hash = lcache_hash(base_inode, rpleng, &raw mut rpath as *mut uint8_t);
         hind = hash.wrapping_rem(LCACHE_HENTRIES as uint32_t);
-        pthread_mutex_lock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_lock(hind as usize);
         qind = 0 as uint32_t;
         while qind < LCACHE_QENTRIES as uint32_t {
             plc = (&raw mut *(&raw mut lcache as *mut [path_lookup_cache; 8]).offset(hind as isize)
@@ -532,7 +466,7 @@ pub unsafe extern "C" fn lcache_path_invalidate(
             }
             qind = qind.wrapping_add(1);
         }
-        pthread_mutex_unlock((&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize));
+        lcache_bucket_unlock(hind as usize);
     }
 }
 #[unsafe(no_mangle)]
@@ -545,9 +479,7 @@ pub unsafe extern "C" fn lcache_inode_invalidate(mut inode: uint32_t) {
         ts = monotonic_seconds();
         hind = 0 as uint32_t;
         while hind < LCACHE_HENTRIES as uint32_t {
-            pthread_mutex_lock(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-            );
+            lcache_bucket_lock(hind as usize);
             qind = 0 as uint32_t;
             while qind < LCACHE_QENTRIES as uint32_t {
                 plc = (&raw mut *(&raw mut lcache as *mut [path_lookup_cache; 8])
@@ -560,37 +492,15 @@ pub unsafe extern "C" fn lcache_inode_invalidate(mut inode: uint32_t) {
                 }
                 qind = qind.wrapping_add(1);
             }
-            pthread_mutex_unlock(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-            );
+            lcache_bucket_unlock(hind as usize);
             hind = hind.wrapping_add(1);
         }
     }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lcache_term() {
-    unsafe {
-        let mut hind: uint32_t = 0;
-        let mut qind: uint32_t = 0;
-        hind = 0 as uint32_t;
-        while hind < LCACHE_HENTRIES as uint32_t {
-            pthread_mutex_destroy(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-            );
-            qind = 0 as uint32_t;
-            while qind < LCACHE_QENTRIES as uint32_t {
-                pthread_cond_destroy(
-                    &raw mut (*(&raw mut *(&raw mut lcache as *mut [path_lookup_cache; 8])
-                        .offset(hind as isize)
-                        as *mut path_lookup_cache)
-                        .offset(qind as isize))
-                    .cond,
-                );
-                qind = qind.wrapping_add(1);
-            }
-            hind = hind.wrapping_add(1);
-        }
-    }
+    // C: pthread_mutex_destroy/pthread_cond_destroy loops. std Mutex/Condvar
+    // need no destroy; statics live for process lifetime. Nothing to do.
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lcache_init(
@@ -606,29 +516,94 @@ pub unsafe extern "C" fn lcache_init(
             qind = 0 as uint32_t;
             while qind < LCACHE_QENTRIES as uint32_t {
                 lcache[hind as usize][qind as usize].validts = ts;
-                if pthread_cond_init(
-                    &raw mut (*(&raw mut *(&raw mut lcache as *mut [path_lookup_cache; 8])
-                        .offset(hind as isize)
-                        as *mut path_lookup_cache)
-                        .offset(qind as isize))
-                    .cond,
-                    ::core::ptr::null::<pthread_condattr_t>(),
-                ) < 0 as ::core::ffi::c_int
-                {
-                    return -1 as ::core::ffi::c_int;
-                }
+                // C: pthread_cond_init(&lcache[hind][qind].cond) — std
+                // Condvar is const-initialized in the static, never fails.
                 qind = qind.wrapping_add(1);
             }
-            if pthread_mutex_init(
-                (&raw mut lcache_lock as *mut pthread_mutex_t).offset(hind as isize),
-                ::core::ptr::null::<pthread_mutexattr_t>(),
-            ) < 0 as ::core::ffi::c_int
-            {
-                return -1 as ::core::ffi::c_int;
-            }
+            // C: pthread_mutex_init(lcache_lock+hind) — std Mutex is
+            // const-initialized in LCACHE_LOCK, never fails.
             hind = hind.wrapping_add(1);
         }
         lcache_retention = lc_retention;
         return 0 as ::core::ffi::c_int;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Reference tests against mfsioint_lookupcache.c semantics.
+    fn normalize(path: &[u8]) -> (uint8_t, Vec<u8>) {
+        let mut rpath = [0u8; MFS_PATH_MAX as usize];
+        let mut rpleng: uint32_t = 0;
+        let status = unsafe {
+            lcache_path_normalize(
+                path.len() as uint32_t,
+                path.as_ptr(),
+                &raw mut rpleng,
+                rpath.as_mut_ptr(),
+            )
+        };
+        (status, rpath[..rpleng as usize].to_vec())
+    }
+
+    #[test]
+    fn normalize_plain() {
+        assert_eq!(
+            normalize(b"a/b/c\0"),
+            (MFS_STATUS_OK as uint8_t, b"a/b/c".to_vec())
+        );
+    }
+
+    #[test]
+    fn normalize_dot() {
+        // '.' component is dropped (only when followed by '/').
+        assert_eq!(
+            normalize(b"a/./b\0"),
+            (MFS_STATUS_OK as uint8_t, b"a/b".to_vec())
+        );
+    }
+
+    #[test]
+    fn normalize_dotdot() {
+        // "a/b/../c": rleng backs up past "b/" leaving "a/", then "c".
+        assert_eq!(
+            normalize(b"a/b/../c\0"),
+            (MFS_STATUS_OK as uint8_t, b"a/c".to_vec())
+        );
+    }
+
+    #[test]
+    fn normalize_dotdot_above_root() {
+        // '../' with rleng<3 escapes the root -> EINVAL.
+        assert_eq!(normalize(b"../a\0").0, MFS_ERROR_EINVAL as uint8_t);
+        // 'a/../../b': second '..' hits rleng=2 < 3 -> EINVAL.
+        assert_eq!(normalize(b"a/../../b\0").0, MFS_ERROR_EINVAL as uint8_t);
+    }
+
+    #[test]
+    fn normalize_name_too_long() {
+        // Single component of 256 bytes exceeds MFS_NAME_MAX=255.
+        let mut p = vec![b'a'; 256];
+        p.push(0);
+        assert_eq!(normalize(&p).0, MFS_ERROR_ENAMETOOLONG as uint8_t);
+    }
+
+    #[test]
+    fn normalize_path_too_long() {
+        // "ab/" * 400 = 1200 bytes exceeds MFS_PATH_MAX=1024.
+        let mut p = b"ab/".repeat(400);
+        p.push(0);
+        assert_eq!(normalize(&p).0, MFS_ERROR_ENAMETOOLONG as uint8_t);
+    }
+
+    #[test]
+    fn hash_reference() {
+        // C: hash = base_inode; hash = hash*33 + path[i] (u32 wrap).
+        let h = unsafe { lcache_hash(1, 3, b"abc".as_ptr() as *mut uint8_t) };
+        assert_eq!(h, ((1u32.wrapping_mul(33) + 97) * 33 + 98) * 33 + 99);
+        // Wrap parity: base_inode = u32::MAX.
+        let h = unsafe { lcache_hash(u32::MAX, 1, b"\x01".as_ptr() as *mut uint8_t) };
+        assert_eq!(h, u32::MAX.wrapping_mul(33).wrapping_add(1));
     }
 }
