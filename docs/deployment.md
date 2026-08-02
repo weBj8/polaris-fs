@@ -35,7 +35,19 @@ port 9421 beyond a private network.
 The image includes libfuse 3.18.2. Host libfuse version does not affect the
 container.
 
-Latest verified deployment: commit `782bb27`, image tag
+Latest verified deployment: commit `e06d8e9`, image tag
+`e06d8e9cd0c0`, digest
+`sha256:8dc21be5f11b5cb4d840b502a7e6e95108b447c6a2d6b902bbcd6809e62446a7`.
+CI run for `e06d8e9` passed gates, release build, workspace tests, and
+cluster smoke before publishing this image. Production update was
+plfsmount-only; master, metalogger, and GUI were not restarted. The stale
+FUSE mount from the previous container was unmounted on the host before the
+new container could start (same procedure as the `782bb27` deploy). The
+container logs one transient `ENOTCONN` probe at startup while FUSE
+connects, then mounts cleanly. Post-deploy concurrent 4-way read/write
+smoke passed (`DEPLOY_SMOKE_OK`).
+
+Previous verified deployment: commit `782bb27`, image tag
 `782bb278208d`, digest
 `sha256:64ca97aad72cd845b97dc689baf8e599394aaf8f89975e7d58aa69f9249982f9`.
 CI run for `782bb27` (run `30768186487`) passed gates, release build,
