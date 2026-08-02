@@ -20580,6 +20580,7 @@ pub unsafe extern "C" fn mfs_flock_interrupt_spawner(
     plfscommon::lwthread::spawn_min("flock-interrupt", move || mfs_flock_interrupt(data))
         .unwrap_or_else(|_| std::process::abort());
 }
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_flock(
     mut req: fuse_req_t,
     mut ino: fuse_ino_t,
@@ -21333,6 +21334,7 @@ pub unsafe extern "C" fn mfs_plock_interrupt_spawner(
     plfscommon::lwthread::spawn_min("plock-interrupt", move || mfs_plock_interrupt(data))
         .unwrap_or_else(|_| std::process::abort());
 }
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_getlk(
     mut req: fuse_req_t,
     mut ino: fuse_ino_t,
