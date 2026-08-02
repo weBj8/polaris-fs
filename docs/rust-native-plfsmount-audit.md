@@ -193,5 +193,35 @@ annotations:
   cannot recover the count at free time.
 - libfuse/libc/POSIX syscall surface (fuse_*, sockets, sigmask, tcp*).
 - `mfsopts.password`: CString::into_raw intentional leak matching C.
+- `plfscommon::sockets` `univallocstrip`/`univallocstripport`: exported
+  malloc-returning C ABI whose only consumers are plfsmaster daemon modules
+  (not the mount closure).
+- `plfscommon::lwthread` `lwt_thread_create`/`lwt_minthread_create`: exported
+  pthread_create ABI wrappers consumed only by plfschunkserver daemons; the
+  mount closure uses `spawn_min`/std threads exclusively.
 - plfscommon::charts is not in the mount closure (CGI-only); the separate
   plfsbdev NBD daemon keeps its own transpiled copies.
+
+## Intrusive-list typed-collection wave (final structural work)
+
+All remaining intrusive `next`-pointer chains in the mount closure and the
+plfsbdev runtime were converted to typed Rust collections, each reviewed
+1:1 against the C source with an aliasing analysis (owning `Vec<Box<T>>`
+where no raw handle escapes; enumeration-only `Vec<*mut T>` where handles
+escape across the C ABI):
+
+- `mastercomm.rs` (395c1ca): threchash buckets + LIFO free stack,
+  amtime_file buckets (AMTIME_INODES wire order preserved via head-insert),
+  acquired_file buckets + VecDeque LRU with `in_lru` membership flag.
+- `readdata.rs` (0b66358): per-inode rrequest FIFO (live-length positional
+  read-ahead checks), indhash buckets, boxed rlist chain round-tripped
+  through the `vrhead` void* ABI with identical lcnt pairing.
+- `writedata.rs` (a14c52b): cblock LIFO free stack (arena-reverse init
+  parity), per-chunkdata datachain FIFO (send order), per-inode chunks FIFO
+  (flush order), idhash buckets. Guard-slot fcb protocol untouched.
+- `plfsbdev.rs` (d51d1c7): device registry Vec with head-first stop drain.
+
+Final mount-closure scans (commit e5769ca): zero pthread mutex/cond/TLS
+call sites (remaining `pthread_create` is the exported lwthread ABI for
+daemons); libc allocation surface reduced to exactly the boundary ledger
+above; no intrusive `pub next: *mut` fields remain.
