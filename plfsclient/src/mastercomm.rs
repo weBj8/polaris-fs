@@ -57,28 +57,6 @@ unsafe extern "C" {
         __attr: *mut pthread_attr_t,
         __stacksize: size_t,
     ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const pthread_mutexattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_init(
-        __cond: *mut pthread_cond_t,
-        __cond_attr: *const pthread_condattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_destroy(__cond: *mut pthread_cond_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_signal(__cond: *mut pthread_cond_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_wait(
-        __cond: *mut pthread_cond_t,
-        __mutex: *mut pthread_mutex_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_timedwait(
-        __cond: *mut pthread_cond_t,
-        __mutex: *mut pthread_mutex_t,
-        __abstime: *const timespec,
-    ) -> ::core::ffi::c_int;
     unsafe fn pthread_key_create(
         __key: *mut pthread_key_t,
         __destr_function: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>,
@@ -231,82 +209,13 @@ pub struct timespec {
     pub tv_sec: __time_t,
     pub tv_nsec: __syscall_slong_t,
 }
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union __atomic_wide_counter {
-    pub __value64: ::core::ffi::c_ulonglong,
-    pub __value32: C2Rust_Unnamed,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct C2Rust_Unnamed {
-    pub __low: ::core::ffi::c_uint,
-    pub __high: ::core::ffi::c_uint,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_cond_s {
-    pub __wseq: __atomic_wide_counter,
-    pub __g1_start: __atomic_wide_counter,
-    pub __g_size: [::core::ffi::c_uint; 2],
-    pub __g1_orig_size: ::core::ffi::c_uint,
-    pub __wrefs: ::core::ffi::c_uint,
-    pub __g_signals: [::core::ffi::c_uint; 2],
-    pub __unused_initialized_1: ::core::ffi::c_uint,
-    pub __unused_initialized_2: ::core::ffi::c_uint,
-}
 pub type pthread_t = ::core::ffi::c_ulong;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutexattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_condattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
 pub type pthread_key_t = ::core::ffi::c_uint;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union pthread_attr_t {
     pub __size: [::core::ffi::c_char; 56],
     pub __align: ::core::ffi::c_long,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_cond_t {
-    pub __data: __pthread_cond_s,
-    pub __size: [::core::ffi::c_char; 48],
-    pub __align: ::core::ffi::c_longlong,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -335,11 +244,14 @@ pub struct _md5ctx {
     pub buffer: [uint8_t; 64],
 }
 pub type md5ctx = _md5ctx;
-#[derive(Copy, Clone)]
+// std::sync primitives replace pthread_mutex_t/pthread_cond_t: futex-based,
+// no heap resources, initialized in place with ptr::write after malloc in
+// fs_get_my_threc. Copy/Clone derive dropped (Mutex is not Copy); the struct
+// is only ever handled through malloc'd pointers.
 #[repr(C)]
 pub struct _threc {
-    pub mutex: pthread_mutex_t,
-    pub cond: pthread_cond_t,
+    pub lock: std::sync::Mutex<()>,
+    pub cond: std::sync::Condvar,
     pub obuff: *mut uint8_t,
     pub obuffsize: uint32_t,
     pub odataleng: uint32_t,
@@ -712,66 +624,147 @@ static mut rbyt: uint64_t = 0;
 static mut wbyt: uint64_t = 0;
 static mut rpthid: pthread_t = 0;
 static mut npthid: pthread_t = 0;
-static mut reclock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut aflock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut fdlock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut amtimelock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
+// Global locks replacing the C pthread_mutex_t statics fdlock/reclock/
+// aflock/amtimelock. std::sync::Mutex is RAII-only, so emulate pthread-style
+// manual lock/unlock by stashing the guard in a thread_local slot (same
+// pattern as readdata.rs inode_global_lock). Verified against mastercomm.c:
+// no pthread_cond_wait/timedwait pairs with any of these four globals
+// (the only cond waits use threc->lock), and every lock/unlock pair runs on
+// the same thread. Poisoning is ignored (into_inner) for pthread parity.
+// NESTING AUDIT (why four separate slots): fs_sendandreceive/
+// fs_sendandreceive_any hold FD_LOCK while locking/unlocking the per-threc
+// lock; fs_receive_thread holds FD_LOCK then REC_LOCK while walking
+// threchash; fs_nop_thread holds FD_LOCK across fs_send_open_inodes (AF_LOCK)
+// and fs_send_amtime_inodes (AMTIME_LOCK). Lock order is always
+// FD_LOCK < REC_LOCK < threc.lock and FD_LOCK < AF_LOCK / AMTIME_LOCK;
+// AF_LOCK and AMTIME_LOCK never nest with each other or with REC_LOCK.
+// ponytail: guard-slot emulates pthread_mutex_t; upgrade path is a full RAII
+// restructure of every lock region (large diff, separate wave).
+static FD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static AF_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static AMTIME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+thread_local! {
+    static FD_LOCK_GUARD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> =
+        const { std::cell::RefCell::new(None) };
+    static REC_LOCK_GUARD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> =
+        const { std::cell::RefCell::new(None) };
+    static AF_LOCK_GUARD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> =
+        const { std::cell::RefCell::new(None) };
+    static AMTIME_LOCK_GUARD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+macro_rules! global_lock_helpers {
+    ($lock_fn:ident, $unlock_fn:ident, $lock:ident, $slot:ident) => {
+        fn $lock_fn() {
+            let guard = $lock.lock().unwrap_or_else(|e| e.into_inner());
+            $slot.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                assert!(
+                    slot.is_none(),
+                    concat!(stringify!($lock_fn), ": guard already held")
+                );
+                *slot = Some(guard);
+            });
+        }
+        fn $unlock_fn() {
+            let guard = $slot.with(|slot| slot.borrow_mut().take()).expect(concat!(
+                stringify!($unlock_fn),
+                ": no guard held on this thread"
+            ));
+            drop(guard);
+        }
+    };
+}
+global_lock_helpers!(fd_lock, fd_unlock, FD_LOCK, FD_LOCK_GUARD);
+global_lock_helpers!(rec_lock, rec_unlock, REC_LOCK, REC_LOCK_GUARD);
+global_lock_helpers!(af_lock, af_unlock, AF_LOCK, AF_LOCK_GUARD);
+global_lock_helpers!(amtime_lock, amtime_unlock, AMTIME_LOCK, AMTIME_LOCK_GUARD);
+// Per-threc lock: C rec->mutex (pthread_mutex_t) with rec->cond waiting on
+// it. Same guard-slot emulation as the globals, but the slot also carries the
+// mutex address so unlock/wait with a mismatched rec panics (pthread would
+// UB). HOLD-OVERLAP AUDIT: no thread ever holds two threc locks at once —
+// fs_receive_thread/fs_free_threc lock one rec at a time (unlock before
+// moving to the next hash entry), fs_createpacket/fs_sendandreceive*/term
+// each touch a single rec. Single slot suffices. Nests inside FD_LOCK and
+// REC_LOCK at the sites documented above; it is always the innermost lock.
+// SAFETY (guard lifetime): the guard borrows (*rec).lock inside malloc'd
+// threc; transmuted to 'static. Sound because the guard is only dropped via
+// threc_unlock/threc_cond_* on the same thread, and threc is freed only in
+// fs_term (after all threads are joined) or recycled via threcfree under
+// REC_LOCK, which guarantees no holder or waiter survives.
+// Poisoning is ignored (into_inner) for pthread parity.
+thread_local! {
+    static THREC_LOCK_GUARD: std::cell::RefCell<
+        Option<(*const std::sync::Mutex<()>, std::sync::MutexGuard<'static, ()>)>,
+    > = const { std::cell::RefCell::new(None) };
+}
+unsafe fn threc_lock(rec: *mut threc) {
+    unsafe {
+        let guard = (*rec).lock.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: see THREC_LOCK_GUARD invariant above.
+        let guard: std::sync::MutexGuard<'static, ()> = std::mem::transmute(guard);
+        THREC_LOCK_GUARD.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            assert!(slot.is_none(), "threc_lock: guard already held");
+            *slot = Some((&raw const (*rec).lock, guard));
+        });
+    }
+}
+unsafe fn threc_unlock(rec: *mut threc) {
+    unsafe {
+        let entry = THREC_LOCK_GUARD
+            .with(|slot| slot.borrow_mut().take())
+            .expect("threc_unlock: no guard held on this thread");
+        assert!(
+            entry.0 == &raw const (*rec).lock,
+            "threc_unlock: rec pointer mismatch"
+        );
+        drop(entry.1);
+    }
+}
+// Caller must hold rec->lock; wait releases and reacquires it, exactly like
+// pthread_cond_wait(&rec->cond, &rec->lock). C uses while-predicate loops at
+// every site, so spurious wakeups are already handled there.
+unsafe fn threc_cond_wait(rec: *mut threc) {
+    unsafe {
+        let entry = THREC_LOCK_GUARD
+            .with(|slot| slot.borrow_mut().take())
+            .expect("threc_cond_wait: no guard held on this thread");
+        assert!(
+            entry.0 == &raw const (*rec).lock,
+            "threc_cond_wait: rec pointer mismatch"
+        );
+        let guard = (*rec).cond.wait(entry.1).unwrap_or_else(|e| e.into_inner());
+        THREC_LOCK_GUARD.with(|slot| {
+            *slot.borrow_mut() = Some((entry.0, guard));
+        });
+    }
+}
+// Returns true on timeout (C: pthread_cond_timedwait == ETIMEDOUT).
+// Divergence from C: C builds a CLOCK_REALTIME abstime (gettimeofday +
+// remaining usecs); std Condvar::wait_timeout takes a relative Duration of
+// the same length on a monotonic clock — identical timeout, immune to
+// wall-clock jumps (same choice as readdata.rs ind_cond_timedwait).
+unsafe fn threc_cond_timedwait(rec: *mut threc, dur: std::time::Duration) -> bool {
+    unsafe {
+        let entry = THREC_LOCK_GUARD
+            .with(|slot| slot.borrow_mut().take())
+            .expect("threc_cond_timedwait: no guard held on this thread");
+        assert!(
+            entry.0 == &raw const (*rec).lock,
+            "threc_cond_timedwait: rec pointer mismatch"
+        );
+        let (guard, res) = (*rec)
+            .cond
+            .wait_timeout(entry.1, dur)
+            .unwrap_or_else(|e| e.into_inner());
+        THREC_LOCK_GUARD.with(|slot| {
+            *slot.borrow_mut() = Some((entry.0, guard));
+        });
+        res.timed_out()
+    }
+}
 static mut reckey: pthread_key_t = 0;
 static mut mainrec: *mut threc = ::core::ptr::null_mut::<threc>();
 static mut sessionid: uint32_t = 0;
@@ -789,13 +782,13 @@ static mut working_flags: uint8_t = 0 as uint8_t;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_getmasterlocation(mut loc: *mut uint8_t) {
     unsafe {
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         put32bit(&raw mut loc, masterip);
         put16bit(&raw mut loc, masterport);
         put32bit(&raw mut loc, sessionid);
         put32bit(&raw mut loc, masterversion);
         put64bit(&raw mut loc, masterprocessid);
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -807,7 +800,7 @@ pub unsafe extern "C" fn fs_getmasterparams(
     mut mprocid: *mut uint64_t,
 ) {
     unsafe {
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         if !mip.is_null() {
             *mip = masterip;
         }
@@ -823,16 +816,16 @@ pub unsafe extern "C" fn fs_getmasterparams(
         if !mprocid.is_null() {
             *mprocid = masterprocessid;
         }
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
     }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn master_version() -> uint32_t {
     unsafe {
         let mut mver: uint32_t = 0;
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         mver = masterversion;
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
         return mver;
     }
 }
@@ -840,9 +833,9 @@ pub unsafe extern "C" fn master_version() -> uint32_t {
 pub unsafe extern "C" fn master_attrsize() -> uint8_t {
     unsafe {
         let mut asize: uint8_t = 0;
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         asize = attrsize;
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
         return asize;
     }
 }
@@ -850,9 +843,9 @@ pub unsafe extern "C" fn master_attrsize() -> uint8_t {
 pub unsafe extern "C" fn fs_getsrcip() -> uint32_t {
     unsafe {
         let mut sip: uint32_t = 0;
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         sip = srcip;
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
         return sip;
     }
 }
@@ -1014,14 +1007,14 @@ pub unsafe extern "C" fn fs_atime(mut inode: uint32_t) {
     unsafe {
         let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
         amfptr = amtime_hash[amhash as usize];
         while !amfptr.is_null() {
             if (*amfptr).inode == inode {
                 (*amfptr).atime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
                 (*amfptr).atimeage = 0 as uint16_t;
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 return;
             }
             amfptr = (*amfptr).next as *mut amtime_file;
@@ -1034,7 +1027,7 @@ pub unsafe extern "C" fn fs_atime(mut inode: uint32_t) {
         (*amfptr).mtime = 0 as uint64_t;
         (*amfptr).next = amtime_hash[amhash as usize] as *mut _amtime_file;
         amtime_hash[amhash as usize] = amfptr;
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1042,14 +1035,14 @@ pub unsafe extern "C" fn fs_mtime(mut inode: uint32_t) {
     unsafe {
         let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
         amfptr = amtime_hash[amhash as usize];
         while !amfptr.is_null() {
             if (*amfptr).inode == inode {
                 (*amfptr).mtime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
                 (*amfptr).mtimeage = 0 as uint16_t;
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 return;
             }
             amfptr = (*amfptr).next as *mut amtime_file;
@@ -1062,7 +1055,7 @@ pub unsafe extern "C" fn fs_mtime(mut inode: uint32_t) {
         (*amfptr).atime = 0 as uint64_t;
         (*amfptr).next = amtime_hash[amhash as usize] as *mut _amtime_file;
         amtime_hash[amhash as usize] = amfptr;
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1070,19 +1063,19 @@ pub unsafe extern "C" fn fs_no_atime(mut inode: uint32_t) {
     unsafe {
         let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
         amfptr = amtime_hash[amhash as usize];
         while !amfptr.is_null() {
             if (*amfptr).inode == inode {
                 (*amfptr).atimeage = 0 as uint16_t;
                 (*amfptr).atime = 0 as uint64_t;
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 return;
             }
             amfptr = (*amfptr).next as *mut amtime_file;
         }
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1090,19 +1083,19 @@ pub unsafe extern "C" fn fs_no_mtime(mut inode: uint32_t) {
     unsafe {
         let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
         amfptr = amtime_hash[amhash as usize];
         while !amfptr.is_null() {
             if (*amfptr).inode == inode {
                 (*amfptr).mtimeage = 0 as uint16_t;
                 (*amfptr).mtime = 0 as uint64_t;
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 return;
             }
             amfptr = (*amfptr).next as *mut amtime_file;
         }
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1116,7 +1109,7 @@ pub unsafe extern "C" fn fs_fix_amtime(
         let mut amhash: uint32_t = 0;
         let mut ioatime: uint32_t = 0;
         let mut iomtime: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
         amfptr = amtime_hash[amhash as usize];
         while !amfptr.is_null() {
@@ -1129,12 +1122,12 @@ pub unsafe extern "C" fn fs_fix_amtime(
                 if iomtime > *mtime {
                     *mtime = iomtime;
                 }
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 return;
             }
             amfptr = (*amfptr).next as *mut amtime_file;
         }
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1143,9 +1136,9 @@ pub unsafe extern "C" fn fs_amtime_reference_clock(
     mut remotewall: uint64_t,
 ) {
     unsafe {
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         timediffusec = remotewall.wrapping_sub(localmonotonic) as int64_t;
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 unsafe extern "C" fn fs_af_remove_from_lru(mut afptr: *mut acquired_file) {
@@ -1219,7 +1212,7 @@ pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
         afptr = af_hash[afhash as usize];
         while !afptr.is_null() {
@@ -1229,7 +1222,7 @@ pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
                     fs_af_remove_from_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
-                pthread_mutex_unlock(&raw mut aflock);
+                af_unlock();
                 return;
             }
             afptr = (*afptr).next as *mut acquired_file;
@@ -1243,7 +1236,7 @@ pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
         (*afptr).lruprev = ::core::ptr::null_mut::<*mut _acquired_file>();
         (*afptr).next = af_hash[afhash as usize] as *mut _acquired_file;
         af_hash[afhash as usize] = afptr;
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1251,7 +1244,7 @@ pub unsafe extern "C" fn fs_forget_entry(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
         afptr = af_hash[afhash as usize];
         while !afptr.is_null() {
@@ -1263,12 +1256,12 @@ pub unsafe extern "C" fn fs_forget_entry(mut inode: uint32_t) {
                     fs_af_add_to_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
-                pthread_mutex_unlock(&raw mut aflock);
+                af_unlock();
                 return;
             }
             afptr = (*afptr).next as *mut acquired_file;
         }
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1276,7 +1269,7 @@ pub unsafe extern "C" fn fs_isopen(mut inode: uint32_t) -> ::core::ffi::c_int {
     unsafe {
         let mut afhash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
         afptr = af_hash[afhash as usize];
         while !afptr.is_null() {
@@ -1284,16 +1277,16 @@ pub unsafe extern "C" fn fs_isopen(mut inode: uint32_t) -> ::core::ffi::c_int {
                 if (*afptr).dentry as ::core::ffi::c_int != 0
                     || (*afptr).cnt as ::core::ffi::c_int != 0
                 {
-                    pthread_mutex_unlock(&raw mut aflock);
+                    af_unlock();
                     return 1 as ::core::ffi::c_int;
                 } else {
-                    pthread_mutex_unlock(&raw mut aflock);
+                    af_unlock();
                     return 0 as ::core::ffi::c_int;
                 }
             }
             afptr = (*afptr).next as *mut acquired_file;
         }
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
         return 0 as ::core::ffi::c_int;
     }
 }
@@ -1302,7 +1295,7 @@ pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
         afptr = af_hash[afhash as usize];
         while !afptr.is_null() {
@@ -1312,7 +1305,7 @@ pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
                     fs_af_remove_from_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
-                pthread_mutex_unlock(&raw mut aflock);
+                af_unlock();
                 return;
             }
             afptr = (*afptr).next as *mut acquired_file;
@@ -1326,7 +1319,7 @@ pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
         (*afptr).lruprev = ::core::ptr::null_mut::<*mut _acquired_file>();
         (*afptr).next = af_hash[afhash as usize] as *mut _acquired_file;
         af_hash[afhash as usize] = afptr;
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1334,7 +1327,7 @@ pub unsafe extern "C" fn fs_dec_acnt(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
         afptr = af_hash[afhash as usize];
         while !afptr.is_null() {
@@ -1349,12 +1342,12 @@ pub unsafe extern "C" fn fs_dec_acnt(mut inode: uint32_t) {
                     fs_af_add_to_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
-                pthread_mutex_unlock(&raw mut aflock);
+                af_unlock();
                 return;
             }
             afptr = (*afptr).next as *mut acquired_file;
         }
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -1424,7 +1417,7 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
         let mut rec: *mut threc = ::core::ptr::null_mut::<threc>();
         let mut recp: *mut *mut threc = ::core::ptr::null_mut::<*mut threc>();
         let mut rechash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut reclock);
+        rec_lock();
         rechash = (*drec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
         recp = (&raw mut threchash as *mut *mut threc).offset(rechash as isize);
         loop {
@@ -1436,7 +1429,7 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
                 *recp = (*rec).next as *mut threc;
                 (*rec).next = threcfree as *mut _threc;
                 threcfree = rec;
-                pthread_mutex_lock(&raw mut (*rec).mutex);
+                threc_lock(rec);
                 if !(*rec).obuff.is_null() {
                     free((*rec).obuff as *mut ::core::ffi::c_void);
                     (*rec).obuff = ::core::ptr::null_mut::<uint8_t>();
@@ -1447,14 +1440,14 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
                     (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
                     (*rec).ibuffsize = 0 as uint32_t;
                 }
-                pthread_mutex_unlock(&raw mut (*rec).mutex);
-                pthread_mutex_unlock(&raw mut reclock);
+                threc_unlock(rec);
+                rec_unlock();
                 return;
             } else {
                 recp = &raw mut (*rec).next as *mut *mut threc;
             }
         }
-        pthread_mutex_unlock(&raw mut reclock);
+        rec_unlock();
         mfs_log(
             MFSLOG_SYSLOG,
             MFSLOG_WARNING,
@@ -1471,7 +1464,7 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
         if !rec.is_null() {
             return rec;
         }
-        pthread_mutex_lock(&raw mut reclock);
+        rec_lock();
         if !threcfree.is_null() {
             rec = threcfree;
             threcfree = (*rec).next as *mut threc;
@@ -1479,14 +1472,8 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
             rec = malloc(::core::mem::size_of::<threc>()) as *mut threc;
             threcnextid = threcnextid.wrapping_add(1);
             (*rec).packetid = threcnextid as uint32_t;
-            pthread_mutex_init(
-                &raw mut (*rec).mutex,
-                ::core::ptr::null::<pthread_mutexattr_t>(),
-            );
-            pthread_cond_init(
-                &raw mut (*rec).cond,
-                ::core::ptr::null::<pthread_condattr_t>(),
-            );
+            std::ptr::write(&raw mut (*rec).lock, std::sync::Mutex::new(()));
+            std::ptr::write(&raw mut (*rec).cond, std::sync::Condvar::new());
         }
         rechash = (*rec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
         (*rec).next = threchash[rechash as usize] as *mut _threc;
@@ -1502,7 +1489,7 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
         (*rec).rcvd = 0 as uint8_t;
         (*rec).receiving = 0 as uint8_t;
         (*rec).rcvd_cmd = 0 as uint32_t;
-        pthread_mutex_unlock(&raw mut reclock);
+        rec_unlock();
         pthread_setspecific(reckey, rec as *const ::core::ffi::c_void);
         return rec;
     }
@@ -1513,16 +1500,16 @@ pub unsafe extern "C" fn fs_get_threc_by_id(mut packetid: uint32_t) -> *mut thre
         let mut rec: *mut threc = ::core::ptr::null_mut::<threc>();
         let mut rechash: uint32_t = 0;
         rechash = packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
-        pthread_mutex_lock(&raw mut reclock);
+        rec_lock();
         rec = threchash[rechash as usize];
         while !rec.is_null() {
             if (*rec).packetid == packetid {
-                pthread_mutex_unlock(&raw mut reclock);
+                rec_unlock();
                 return rec;
             }
             rec = (*rec).next as *mut threc;
         }
-        pthread_mutex_unlock(&raw mut reclock);
+        rec_unlock();
         mfs_log(
             MFSLOG_SYSLOG,
             MFSLOG_WARNING,
@@ -1767,7 +1754,7 @@ pub unsafe extern "C" fn fs_createpacket(
     unsafe {
         let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut hdrsize: uint32_t = size.wrapping_add(4 as uint32_t);
-        pthread_mutex_lock(&raw mut (*rec).mutex);
+        threc_lock(rec);
         fs_output_buffer_init(rec, size.wrapping_add(12 as uint32_t));
         if (*rec).obuff.is_null() {
             return ::core::ptr::null_mut::<uint8_t>();
@@ -1777,7 +1764,7 @@ pub unsafe extern "C" fn fs_createpacket(
         put32bit(&raw mut ptr, hdrsize);
         put32bit(&raw mut ptr, (*rec).packetid);
         (*rec).odataleng = size.wrapping_add(12 as uint32_t);
-        pthread_mutex_unlock(&raw mut (*rec).mutex);
+        threc_unlock(rec);
         return ptr;
     }
 }
@@ -1808,13 +1795,13 @@ pub unsafe extern "C" fn fs_sendandreceive(
         }
         cnt = 1 as uint32_t;
         while cnt <= maxretries {
-            pthread_mutex_lock(&raw mut fdlock);
+            fd_lock();
             if sessionlost == 1 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 return ::core::ptr::null::<uint8_t>();
             }
             if fd == -1 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                     cnt.wrapping_sub(1 as uint32_t)
                         .wrapping_mul(300000 as uint32_t)
@@ -1832,7 +1819,7 @@ pub unsafe extern "C" fn fs_sendandreceive(
                 }
                 portable_usleep(usecto);
             } else {
-                pthread_mutex_lock(&raw mut (*rec).mutex);
+                threc_lock(rec);
                 if tcptowrite(
                     fd,
                     (*rec).obuff as *const ::core::ffi::c_void,
@@ -1852,8 +1839,8 @@ pub unsafe extern "C" fn fs_sendandreceive(
                         _,
                         { ::core::intrinsics::AtomicOrdering::SeqCst },
                     >(&raw mut disconnect, 1 as ::core::ffi::c_int);
-                    pthread_mutex_unlock(&raw mut (*rec).mutex);
-                    pthread_mutex_unlock(&raw mut fdlock);
+                    threc_unlock(rec);
+                    fd_unlock();
                     usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                         cnt.wrapping_sub(1 as uint32_t)
                             .wrapping_mul(300000 as uint32_t)
@@ -1873,57 +1860,38 @@ pub unsafe extern "C" fn fs_sendandreceive(
                 } else {
                     (*rec).rcvd = 0 as uint8_t;
                     (*rec).sent = 1 as uint8_t;
-                    pthread_mutex_unlock(&raw mut (*rec).mutex);
+                    threc_unlock(rec);
                     master_stats_add(
                         MASTER_BYTESSENT as ::core::ffi::c_int as uint8_t,
                         (*rec).odataleng as uint64_t,
                     );
                     master_stats_inc(MASTER_PACKETSSENT as ::core::ffi::c_int as uint8_t);
                     lastwrite = monotonic_seconds();
-                    pthread_mutex_unlock(&raw mut fdlock);
-                    pthread_mutex_lock(&raw mut (*rec).mutex);
+                    fd_unlock();
+                    threc_lock(rec);
                     while (*rec).rcvd as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                         if usectimeout > 0 as uint64_t {
-                            let mut ts: timespec = timespec {
-                                tv_sec: 0,
-                                tv_nsec: 0,
-                            };
-                            let mut tv: timeval = timeval {
-                                tv_sec: 0,
-                                tv_usec: 0,
-                            };
                             period = monotonic_useconds().wrapping_sub(start);
                             if period >= usectimeout {
-                                pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                threc_unlock(rec);
                                 return ::core::ptr::null::<uint8_t>();
                             }
                             period = usectimeout.wrapping_sub(period);
-                            gettimeofday(&raw mut tv, NULL);
-                            usecto = tv.tv_sec as uint64_t;
-                            usecto = usecto.wrapping_mul(1000000 as uint64_t);
-                            usecto = usecto.wrapping_add(tv.tv_usec as uint64_t);
-                            usecto = usecto.wrapping_add(period);
-                            ts.tv_sec = usecto.wrapping_div(1000000 as uint64_t) as __time_t;
-                            ts.tv_nsec = usecto
-                                .wrapping_rem(1000000 as uint64_t)
-                                .wrapping_mul(1000 as uint64_t)
-                                as __syscall_slong_t;
-                            if pthread_cond_timedwait(
-                                &raw mut (*rec).cond,
-                                &raw mut (*rec).mutex,
-                                &raw mut ts,
-                            ) == ETIMEDOUT
-                            {
-                                pthread_mutex_unlock(&raw mut (*rec).mutex);
+                            // C builds a CLOCK_REALTIME abstime (gettimeofday +
+                            // period) here; a relative Duration of the same
+                            // length is the identical timeout (see
+                            // threc_cond_timedwait).
+                            if threc_cond_timedwait(rec, std::time::Duration::from_micros(period)) {
+                                threc_unlock(rec);
                                 return ::core::ptr::null::<uint8_t>();
                             }
                         } else {
-                            pthread_cond_wait(&raw mut (*rec).cond, &raw mut (*rec).mutex);
+                            threc_cond_wait(rec);
                         }
                     }
                     *answer_leng = (*rec).idataleng;
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                        threc_unlock(rec);
                         usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                             cnt.wrapping_sub(1 as uint32_t)
                                 .wrapping_mul(300000 as uint32_t)
@@ -1944,12 +1912,12 @@ pub unsafe extern "C" fn fs_sendandreceive(
                         if (*rec).rcvd_cmd == ANTOAN_UNKNOWN_COMMAND as uint32_t
                             || (*rec).rcvd_cmd == ANTOAN_BAD_COMMAND_SIZE as uint32_t
                         {
-                            pthread_mutex_unlock(&raw mut (*rec).mutex);
+                            threc_unlock(rec);
                             *answer_leng = 1 as uint32_t;
                             return &raw mut notsup;
                         }
                         if (*rec).rcvd_cmd != expected_cmd {
-                            pthread_mutex_unlock(&raw mut (*rec).mutex);
+                            threc_unlock(rec);
                             fs_disconnect();
                             usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                                 cnt.wrapping_sub(1 as uint32_t)
@@ -1968,7 +1936,7 @@ pub unsafe extern "C" fn fs_sendandreceive(
                             }
                             portable_usleep(usecto);
                         } else {
-                            pthread_mutex_unlock(&raw mut (*rec).mutex);
+                            threc_unlock(rec);
                             return (*rec).ibuff;
                         }
                     }
@@ -1996,13 +1964,13 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
         }
         cnt = 1 as uint32_t;
         while cnt <= maxretries {
-            pthread_mutex_lock(&raw mut fdlock);
+            fd_lock();
             if sessionlost == 1 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 return ::core::ptr::null::<uint8_t>();
             }
             if fd == -1 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                     cnt.wrapping_sub(1 as uint32_t)
                         .wrapping_mul(300000 as uint32_t)
@@ -2020,7 +1988,7 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                 }
                 portable_usleep(usecto);
             } else {
-                pthread_mutex_lock(&raw mut (*rec).mutex);
+                threc_lock(rec);
                 if tcptowrite(
                     fd,
                     (*rec).obuff as *const ::core::ffi::c_void,
@@ -2040,8 +2008,8 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                         _,
                         { ::core::intrinsics::AtomicOrdering::SeqCst },
                     >(&raw mut disconnect, 1 as ::core::ffi::c_int);
-                    pthread_mutex_unlock(&raw mut (*rec).mutex);
-                    pthread_mutex_unlock(&raw mut fdlock);
+                    threc_unlock(rec);
+                    fd_unlock();
                     usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                         cnt.wrapping_sub(1 as uint32_t)
                             .wrapping_mul(300000 as uint32_t)
@@ -2061,57 +2029,38 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                 } else {
                     (*rec).rcvd = 0 as uint8_t;
                     (*rec).sent = 1 as uint8_t;
-                    pthread_mutex_unlock(&raw mut (*rec).mutex);
+                    threc_unlock(rec);
                     master_stats_add(
                         MASTER_BYTESSENT as ::core::ffi::c_int as uint8_t,
                         (*rec).odataleng as uint64_t,
                     );
                     master_stats_inc(MASTER_PACKETSSENT as ::core::ffi::c_int as uint8_t);
                     lastwrite = monotonic_seconds();
-                    pthread_mutex_unlock(&raw mut fdlock);
-                    pthread_mutex_lock(&raw mut (*rec).mutex);
+                    fd_unlock();
+                    threc_lock(rec);
                     while (*rec).rcvd as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                         if usectimeout > 0 as uint64_t {
-                            let mut ts: timespec = timespec {
-                                tv_sec: 0,
-                                tv_nsec: 0,
-                            };
-                            let mut tv: timeval = timeval {
-                                tv_sec: 0,
-                                tv_usec: 0,
-                            };
                             period = monotonic_useconds().wrapping_sub(start);
                             if period >= usectimeout {
-                                pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                threc_unlock(rec);
                                 return ::core::ptr::null::<uint8_t>();
                             }
                             period = usectimeout.wrapping_sub(period);
-                            gettimeofday(&raw mut tv, NULL);
-                            usecto = tv.tv_sec as uint64_t;
-                            usecto = usecto.wrapping_mul(1000000 as uint64_t);
-                            usecto = usecto.wrapping_add(tv.tv_usec as uint64_t);
-                            usecto = usecto.wrapping_add(period);
-                            ts.tv_sec = usecto.wrapping_div(1000000 as uint64_t) as __time_t;
-                            ts.tv_nsec = usecto
-                                .wrapping_rem(1000000 as uint64_t)
-                                .wrapping_mul(1000 as uint64_t)
-                                as __syscall_slong_t;
-                            if pthread_cond_timedwait(
-                                &raw mut (*rec).cond,
-                                &raw mut (*rec).mutex,
-                                &raw mut ts,
-                            ) == ETIMEDOUT
-                            {
-                                pthread_mutex_unlock(&raw mut (*rec).mutex);
+                            // C builds a CLOCK_REALTIME abstime (gettimeofday +
+                            // period) here; a relative Duration of the same
+                            // length is the identical timeout (see
+                            // threc_cond_timedwait).
+                            if threc_cond_timedwait(rec, std::time::Duration::from_micros(period)) {
+                                threc_unlock(rec);
                                 return ::core::ptr::null::<uint8_t>();
                             }
                         } else {
-                            pthread_cond_wait(&raw mut (*rec).cond, &raw mut (*rec).mutex);
+                            threc_cond_wait(rec);
                         }
                     }
                     *answer_leng = (*rec).idataleng;
                     if (*rec).status as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                        threc_unlock(rec);
                         usecto = (1000 as uint32_t).wrapping_add(if cnt < 30 as uint32_t {
                             cnt.wrapping_sub(1 as uint32_t)
                                 .wrapping_mul(300000 as uint32_t)
@@ -2130,7 +2079,7 @@ pub unsafe extern "C" fn fs_sendandreceive_any(
                         portable_usleep(usecto);
                     } else {
                         *received_cmd = (*rec).rcvd_cmd;
-                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                        threc_unlock(rec);
                         return (*rec).ibuff;
                     }
                 }
@@ -3897,7 +3846,7 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
         let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amfpptr: *mut *mut amtime_file = ::core::ptr::null_mut::<*mut amtime_file>();
         let mut amhash: uint32_t = 0;
-        pthread_mutex_lock(&raw mut amtimelock);
+        amtime_lock();
         if masterversion
             >= (3 as ::core::ffi::c_int * 0x10000 as ::core::ffi::c_int
                 + 0 as ::core::ffi::c_int * 0x100 as ::core::ffi::c_int
@@ -3970,7 +3919,7 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
                     }
                     amhash = amhash.wrapping_add(1);
                 }
-                pthread_mutex_unlock(&raw mut amtimelock);
+                amtime_unlock();
                 if tcptowrite(
                     fd,
                     inodespacket as *const ::core::ffi::c_void,
@@ -4020,7 +3969,7 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
             }
             amhash = amhash.wrapping_add(1);
         }
-        pthread_mutex_unlock(&raw mut amtimelock);
+        amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
@@ -4033,7 +3982,7 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
         let mut hash: uint32_t = 0;
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         let mut afpptr: *mut *mut acquired_file = ::core::ptr::null_mut::<*mut acquired_file>();
-        pthread_mutex_lock(&raw mut aflock);
+        af_lock();
         heap_cleanup();
         hash = 0 as uint32_t;
         while hash < ACQFILES_HASH_SIZE as uint32_t {
@@ -4089,7 +4038,7 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
             put32bit(&raw mut ptr, heap_pop());
             i = i.wrapping_add(1);
         }
-        pthread_mutex_unlock(&raw mut aflock);
+        af_unlock();
         i = inodes
             .wrapping_mul(4 as uint32_t)
             .wrapping_add(8 as uint32_t);
@@ -4299,7 +4248,7 @@ pub unsafe extern "C" fn fs_nop_thread(_arg: *mut ::core::ffi::c_void) -> *mut :
         let mut now: ::core::ffi::c_int = 0;
         let mut inodeswritecnt: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
         loop {
-            pthread_mutex_lock(&raw mut fdlock);
+            fd_lock();
             if fterm as ::core::ffi::c_int == 2 as ::core::ffi::c_int
                 && donotsendsustainedinodes == 0 as ::core::ffi::c_int
             {
@@ -4311,7 +4260,7 @@ pub unsafe extern "C" fn fs_nop_thread(_arg: *mut ::core::ffi::c_void) -> *mut :
                     tcpclose(fd);
                     fd = -1 as ::core::ffi::c_int;
                 }
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 return NULL;
             }
             if ::core::intrinsics::atomic_or::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
@@ -4404,7 +4353,7 @@ pub unsafe extern "C" fn fs_nop_thread(_arg: *mut ::core::ffi::c_void) -> *mut :
                 fs_send_amtime_inodes();
                 fs_send_working_flags();
             }
-            pthread_mutex_unlock(&raw mut fdlock);
+            fd_unlock();
             portable_sleep(1 as uint64_t);
         }
     }
@@ -4427,10 +4376,10 @@ pub unsafe extern "C" fn fs_receive_thread(
         let mut rechash: uint32_t = 0;
         let mut r: int32_t = 0;
         loop {
-            pthread_mutex_lock(&raw mut fdlock);
+            fd_lock();
             if fterm != 0 {
                 fterm = 2 as uint8_t;
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 return NULL;
             }
             if ::core::intrinsics::atomic_and::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
@@ -4441,23 +4390,23 @@ pub unsafe extern "C" fn fs_receive_thread(
                 crate::chunksdatacache::cleanup();
                 tcpclose(fd);
                 fd = -1 as ::core::ffi::c_int;
-                pthread_mutex_lock(&raw mut reclock);
+                rec_lock();
                 rechash = 0 as uint32_t;
                 while rechash < THRECHASHSIZE as uint32_t {
                     rec = threchash[rechash as usize];
                     while !rec.is_null() {
-                        pthread_mutex_lock(&raw mut (*rec).mutex);
+                        threc_lock(rec);
                         if (*rec).sent != 0 {
                             (*rec).status = 1 as uint8_t;
                             (*rec).rcvd = 1 as uint8_t;
-                            pthread_cond_signal(&raw mut (*rec).cond);
+                            (*rec).cond.notify_one();
                         }
-                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                        threc_unlock(rec);
                         rec = (*rec).next as *mut threc;
                     }
                     rechash = rechash.wrapping_add(1);
                 }
-                pthread_mutex_unlock(&raw mut reclock);
+                rec_unlock();
             }
             if fd == -1 as ::core::ffi::c_int && sessionid != 0 as uint32_t {
                 fs_reconnect(connect_args.minversion);
@@ -4478,10 +4427,10 @@ pub unsafe extern "C" fn fs_receive_thread(
                 }
             }
             if fd == -1 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 portable_sleep(2 as uint64_t);
             } else {
-                pthread_mutex_unlock(&raw mut fdlock);
+                fd_unlock();
                 r = tcptoread(
                     fd,
                     &raw mut hdr as *mut uint8_t as *mut ::core::ffi::c_void,
@@ -4701,16 +4650,16 @@ pub unsafe extern "C" fn fs_receive_thread(
                                             tv_usec: 0,
                                         };
                                         usec = monotonic_useconds();
-                                        pthread_mutex_lock(&raw mut fdlock);
+                                        fd_lock();
                                         if usec >= lastsyncsend {
                                             usecping = usec.wrapping_sub(lastsyncsend);
-                                            pthread_mutex_unlock(&raw mut fdlock);
+                                            fd_unlock();
                                             master_stats_set(
                                                 MASTER_PING as ::core::ffi::c_int as uint8_t,
                                                 usecping,
                                             );
                                         } else {
-                                            pthread_mutex_unlock(&raw mut fdlock);
+                                            fd_unlock();
                                             mfs_log(
                                                 MFSLOG_SYSLOG,
                                                 MFSLOG_WARNING,
@@ -4802,18 +4751,18 @@ pub unsafe extern "C" fn fs_receive_thread(
                             );
                             fs_disconnect();
                         } else {
-                            pthread_mutex_lock(&raw mut (*rec).mutex);
+                            threc_lock(rec);
                             if (*rec).receiving != 0 {
-                                pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                threc_unlock(rec);
                                 fs_disconnect();
                             } else {
                                 fs_input_buffer_init(rec, size);
                                 if (*rec).ibuff.is_null() {
-                                    pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                    threc_unlock(rec);
                                     fs_disconnect();
                                 } else {
                                     (*rec).receiving = 1 as uint8_t;
-                                    pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                    threc_unlock(rec);
                                     rcvd = 0 as uint32_t;
                                     while size.wrapping_sub(rcvd) > 0 as uint32_t {
                                         toread = size.wrapping_sub(rcvd);
@@ -4858,20 +4807,20 @@ pub unsafe extern "C" fn fs_receive_thread(
                                         }
                                     }
                                     if size.wrapping_sub(rcvd) > 0 as uint32_t {
-                                        pthread_mutex_lock(&raw mut (*rec).mutex);
+                                        threc_lock(rec);
                                         (*rec).receiving = 0 as uint8_t;
-                                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                        threc_unlock(rec);
                                         fs_disconnect();
                                     } else {
-                                        pthread_mutex_lock(&raw mut (*rec).mutex);
+                                        threc_lock(rec);
                                         (*rec).sent = 0 as uint8_t;
                                         (*rec).status = 0 as uint8_t;
                                         (*rec).idataleng = size;
                                         (*rec).rcvd_cmd = cmd;
                                         (*rec).receiving = 0 as uint8_t;
                                         (*rec).rcvd = 1 as uint8_t;
-                                        pthread_cond_signal(&raw mut (*rec).cond);
-                                        pthread_mutex_unlock(&raw mut (*rec).mutex);
+                                        (*rec).cond.notify_one();
+                                        threc_unlock(rec);
                                     }
                                 }
                             }
@@ -5071,394 +5020,6 @@ pub unsafe extern "C" fn fs_init_threads(mut retries: uint32_t, mut timeout: uin
                     _mfs_errorstring_ret,
                     *__errno_location(),
                     _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-            pthread_mutex_init(&raw mut reclock, ::core::ptr::null::<pthread_mutexattr_t>());
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2627 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&reclock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int =
-            pthread_mutex_init(&raw mut fdlock, ::core::ptr::null::<pthread_mutexattr_t>());
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2628 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&fdlock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_2: ::core::ffi::c_int =
-            pthread_mutex_init(&raw mut aflock, ::core::ptr::null::<pthread_mutexattr_t>());
-        if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_5: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_5,
-                );
-            } else if _mfs_assert_ret_2 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_6: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_6,
-                );
-            } else {
-                let mut _mfs_errorstring_err_2: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_2: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_2);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2629 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&aflock,NULL)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_2,
-                    _mfs_errorstring_ret_2,
-                    *__errno_location(),
-                    _mfs_errorstring_err_2,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_3: ::core::ffi::c_int = pthread_mutex_init(
-            &raw mut amtimelock,
-            ::core::ptr::null::<pthread_mutexattr_t>(),
-        );
-        if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_3 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-            } else if _mfs_assert_ret_3 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_8: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-            } else {
-                let mut _mfs_errorstring_err_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_3: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2630 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&amtimelock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
                 );
             }
             abort();
@@ -5983,193 +5544,9 @@ pub unsafe extern "C" fn fs_term() {
         let mut amfn: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut af: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         let mut afn: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut fdlock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2650 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
-        }
+        fd_lock();
         fterm = 1 as uint8_t;
-        let mut _mfs_assert_ret_0: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut fdlock);
-        if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_1,
-                );
-            } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_2,
-                );
-            } else {
-                let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_0);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2652 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_0,
-                    _mfs_errorstring_ret_0,
-                    *__errno_location(),
-                    _mfs_errorstring_err_0,
-                );
-            }
-            abort();
-        }
+        fd_unlock();
         let mut _mfs_assert_ret_1: ::core::ffi::c_int =
             pthread_join(npthid, ::core::ptr::null_mut::<*mut ::core::ffi::c_void>());
         if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
@@ -6360,383 +5737,8 @@ pub unsafe extern "C" fn fs_term() {
             }
             abort();
         }
-        let mut _mfs_assert_ret_3: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut amtimelock);
-        if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_3 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-            } else if _mfs_assert_ret_3 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_8: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-            } else {
-                let mut _mfs_errorstring_err_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_3: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&amtimelock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_4: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut aflock);
-        if _mfs_assert_ret_4 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_4 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_9: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_9,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_9,
-                );
-            } else if _mfs_assert_ret_4 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_10: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_4);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_10,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_10,
-                );
-            } else {
-                let mut _mfs_errorstring_err_4: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_4: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_4);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_err_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2659 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&aflock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_err_4,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_5: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut fdlock);
-        if _mfs_assert_ret_5 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_5 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_11: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_11,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_11,
-                );
-            } else if _mfs_assert_ret_5 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_12: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_5);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_12,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_12,
-                );
-            } else {
-                let mut _mfs_errorstring_err_5: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_5: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_5);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_err_5,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2660 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&fdlock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_err_5,
-                );
-            }
-            abort();
-        }
         fs_free_threc(mainrec as *mut ::core::ffi::c_void);
-        let mut _mfs_assert_ret_6: ::core::ffi::c_int = pthread_mutex_lock(&raw mut reclock);
-        if _mfs_assert_ret_6 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_6 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_13: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_13,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_13,
-                );
-            } else if _mfs_assert_ret_6 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_14: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_6);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_14,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_14,
-                );
-            } else {
-                let mut _mfs_errorstring_err_6: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_6: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_6);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_err_6,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2662 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_err_6,
-                );
-            }
-            abort();
-        }
+        rec_lock();
         rechash = 0 as uint32_t;
         while rechash < THRECHASHSIZE as uint32_t {
             rec = threchash[rechash as usize];
@@ -6755,8 +5757,6 @@ pub unsafe extern "C" fn fs_term() {
                 if !(*rec).ibuff.is_null() {
                     free((*rec).ibuff as *mut ::core::ffi::c_void);
                 }
-                pthread_mutex_destroy(&raw mut (*rec).mutex);
-                pthread_cond_destroy(&raw mut (*rec).cond);
                 free(rec as *mut ::core::ffi::c_void);
                 rec = recn;
             }
@@ -6771,199 +5771,10 @@ pub unsafe extern "C" fn fs_term() {
             if !(*rec).ibuff.is_null() {
                 free((*rec).ibuff as *mut ::core::ffi::c_void);
             }
-            pthread_mutex_destroy(&raw mut (*rec).mutex);
-            pthread_cond_destroy(&raw mut (*rec).cond);
             free(rec as *mut ::core::ffi::c_void);
             rec = recn;
         }
-        let mut _mfs_assert_ret_7: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut reclock);
-        if _mfs_assert_ret_7 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_7 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_15: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_15,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_15,
-                );
-            } else if _mfs_assert_ret_7 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_16: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_7);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_16,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_16,
-                );
-            } else {
-                let mut _mfs_errorstring_err_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_7: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_7);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_err_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2690 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_err_7,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_8: ::core::ffi::c_int = pthread_mutex_destroy(&raw mut reclock);
-        if _mfs_assert_ret_8 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_8 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_17: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_17,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_17,
-                );
-            } else if _mfs_assert_ret_8 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_18: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_8);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_18,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_18,
-                );
-            } else {
-                let mut _mfs_errorstring_err_8: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_8: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_8);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_err_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mastercomm.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2691 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&reclock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_err_8,
-                );
-            }
-            abort();
-        }
+        rec_unlock();
         let mut _mfs_assert_ret_9: ::core::ffi::c_int = pthread_key_delete(reckey);
         if _mfs_assert_ret_9 != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret_9 < 0 as ::core::ffi::c_int
@@ -8913,9 +7724,9 @@ pub unsafe extern "C" fn fs_create(
         } else {
             put32bit(&raw mut wptr, 0xffffffff as uint32_t);
         }
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         donotsendsustainedinodes = 1 as ::core::ffi::c_int;
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
         rptr = fs_sendandreceive(rec, MATOCL_FUSE_CREATE as uint32_t, &raw mut i);
         if rptr.is_null() {
             ret = MFS_ERROR_IO as uint8_t;
@@ -8935,9 +7746,9 @@ pub unsafe extern "C" fn fs_create(
             fs_disconnect();
             ret = MFS_ERROR_IO as uint8_t;
         }
-        pthread_mutex_lock(&raw mut fdlock);
+        fd_lock();
         donotsendsustainedinodes = 0 as ::core::ffi::c_int;
-        pthread_mutex_unlock(&raw mut fdlock);
+        fd_unlock();
         return ret;
     }
 }
