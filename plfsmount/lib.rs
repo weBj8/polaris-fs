@@ -53,7 +53,6 @@ pub mod src {
     } // mod fuse_client
     #[path = "plfscommon"]
     pub mod mfscommon {
-        pub mod pcqueue;
         pub mod strerr;
     } // mod mfscommon
 } // mod src

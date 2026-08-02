@@ -1,6 +1,7 @@
 pub enum _IO_wide_data {}
 pub enum _IO_codecvt {}
 pub enum _IO_marker {}
+use crate::pcqueue::{OwnedJob, QueueSlot};
 use ::c2rust_bitfields;
 unsafe extern "C" {
     static mut stderr: *mut FILE;
@@ -121,23 +122,6 @@ unsafe extern "C" {
     unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
     unsafe fn mycrc32(crc: uint32_t, block: *const ::core::ffi::c_void, leng: uint32_t)
     -> uint32_t;
-    unsafe fn queue_new(size: uint32_t) -> *mut ::core::ffi::c_void;
-    unsafe fn queue_delete(que: *mut ::core::ffi::c_void);
-    unsafe fn queue_close(que: *mut ::core::ffi::c_void);
-    unsafe fn queue_put(
-        que: *mut ::core::ffi::c_void,
-        id: uint32_t,
-        op: uint32_t,
-        data: *mut uint8_t,
-        leng: uint32_t,
-    );
-    unsafe fn queue_get(
-        que: *mut ::core::ffi::c_void,
-        id: *mut uint32_t,
-        op: *mut uint32_t,
-        data: *mut *mut uint8_t,
-        leng: *mut uint32_t,
-    );
     unsafe fn univmakestrip(strip: *mut ::core::ffi::c_char, ip: uint32_t);
     unsafe fn tcpsocket() -> ::core::ffi::c_int;
     unsafe fn tcpnonblock(sock: ::core::ffi::c_int) -> ::core::ffi::c_int;
@@ -802,7 +786,22 @@ static mut worker_term_cond: pthread_cond_t = pthread_cond_t {
     },
 };
 static mut worker_thattr: pthread_attr_t = pthread_attr_t { __size: [0; 56] };
-static mut jqueue: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
+static JQUEUE: QueueSlot<OwnedJob<rrequest>> = QueueSlot::new();
+
+unsafe fn read_queue_put(rreq: *mut rrequest) {
+    // SAFETY: every enqueue receives one live malloc allocation. Queue owns it
+    // until dequeue; on closed/missing queue it is freed here, matching C where
+    // an unbounded queue always enqueued and queue_delete freed leftovers.
+    let job = unsafe { OwnedJob::from_raw(rreq) };
+    if let Some(queue) = JQUEUE.get() {
+        if let Err(job) = queue.put(job) {
+            drop(job);
+        }
+    } else {
+        drop(job);
+    }
+}
+
 #[inline]
 unsafe extern "C" fn read_increase_total_bytes(mut v: uint32_t) {
     unsafe {
@@ -824,28 +823,14 @@ pub unsafe extern "C" fn read_get_total_bytes() -> uint64_t {
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn read_enqueue(mut rreq: *mut rrequest) {
-    unsafe {
-        queue_put(
-            jqueue,
-            0 as uint32_t,
-            0 as uint32_t,
-            rreq as *mut uint8_t,
-            0 as uint32_t,
-        );
-    }
+pub unsafe extern "C" fn read_enqueue(rreq: *mut rrequest) {
+    // SAFETY: caller transfers one live request to queue protocol.
+    unsafe { read_queue_put(rreq) };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn read_delayrun_enqueue(mut udata: *mut ::core::ffi::c_void) {
-    unsafe {
-        queue_put(
-            jqueue,
-            0 as uint32_t,
-            0 as uint32_t,
-            udata as *mut uint8_t,
-            0 as uint32_t,
-        );
-    }
+pub unsafe extern "C" fn read_delayrun_enqueue(udata: *mut ::core::ffi::c_void) {
+    // SAFETY: delayrun invokes callback once with request supplied below.
+    unsafe { read_queue_put(udata.cast()) };
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn read_delayed_enqueue(mut rreq: *mut rrequest, mut usecs: uint32_t) {
@@ -857,13 +842,8 @@ pub unsafe extern "C" fn read_delayed_enqueue(mut rreq: *mut rrequest, mut usecs
                 usecs as uint64_t,
             );
         } else {
-            queue_put(
-                jqueue,
-                0 as uint32_t,
-                0 as uint32_t,
-                rreq as *mut uint8_t,
-                0 as uint32_t,
-            );
+            // SAFETY: caller transfers one live request directly to queue protocol.
+            read_queue_put(rreq);
         };
     }
 }
@@ -1988,10 +1968,7 @@ pub unsafe extern "C" fn read_worker(
     mut arg: *mut ::core::ffi::c_void,
 ) -> *mut ::core::ffi::c_void {
     unsafe {
-        let mut z1: uint32_t = 0;
-        let mut z2: uint32_t = 0;
-        let mut z3: uint32_t = 0;
-        let mut data: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        let mut data: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         let mut datasrc: [data_source; 8] = [data_source {
             fd: 0,
             startpos: 0,
@@ -2417,7 +2394,10 @@ pub unsafe extern "C" fn read_worker(
                 }
             }
             firsttime = 0 as uint8_t;
-            queue_get(jqueue, &raw mut z1, &raw mut z2, &raw mut data, &raw mut z3);
+            data = JQUEUE
+                .get()
+                .and_then(|queue| queue.get())
+                .map_or(::core::ptr::null_mut(), OwnedJob::into_raw);
             let mut _mfs_assert_ret_2: ::core::ffi::c_int =
                 pthread_mutex_lock(&raw mut workers_lock);
             if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
@@ -2738,7 +2718,7 @@ pub unsafe extern "C" fn read_worker(
                 }
                 abort();
             }
-            rreq = data as *mut rrequest;
+            rreq = data;
             ind = (*rreq).ind as *mut inodedata;
             let mut _mfs_assert_ret_5: ::core::ffi::c_int =
                 pthread_mutex_lock(&raw mut (*ind).lock);
@@ -12243,7 +12223,7 @@ pub unsafe extern "C" fn read_data_init(
             *indhash.offset(i as isize) = ::core::ptr::null_mut::<inodedata>();
             i = i.wrapping_add(1);
         }
-        jqueue = queue_new(0 as uint32_t);
+        JQUEUE.init();
         let mut _mfs_assert_ret_4: ::core::ffi::c_int = pthread_attr_init(&raw mut worker_thattr);
         if _mfs_assert_ret_4 != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret_4 < 0 as ::core::ffi::c_int
@@ -12642,7 +12622,7 @@ pub unsafe extern "C" fn read_data_term() {
         let mut i: uint32_t = 0;
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         let mut indn: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        queue_close(jqueue);
+        JQUEUE.close();
         let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut workers_lock);
         if _mfs_assert_ret != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret < 0 as ::core::ffi::c_int
@@ -12933,7 +12913,7 @@ pub unsafe extern "C" fn read_data_term() {
             }
             abort();
         }
-        queue_delete(jqueue);
+        JQUEUE.delete();
         let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_lock(&raw mut inode_lock);
         if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int

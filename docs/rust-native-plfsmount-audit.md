@@ -62,7 +62,7 @@ Rust-native migration.
 ## Current wave evidence
 
 Typed direct Rust APIs now cover `plfsclient::inoleng`, `stats`, `csdb`,
-`chunksdatacache`, `chunkrwlock`, and `extrapackets`, plus mount
+`chunksdatacache`, `chunkrwlock`, `extrapackets`, and `pcqueue`, plus mount
 `dirattrcache`, `dirbuf`, `fdcache`, and stats/params file state. Mount callers
 no longer declare or call the old `dcache_*`, `dirbuf_*`, `fdcache_*`,
 `inoleng_*`, or `stats_term` internal ABI symbols. Directory cache blobs are
@@ -76,8 +76,8 @@ checked `Arc<FileInfo>` registry with Rust state guards and open waiters.
 
 Verification for this wave:
 
-- `cargo test --release -p plfsclient`: 12 passed;
-- `cargo test --release -p plfsmount --lib`: 96 passed after dirbuf/finfo/groups/ACL waves;
+- `cargo test --release -p plfsclient`: 16 passed;
+- `cargo test --release -p plfsmount --lib`: 91 passed after moving pcqueue tests to plfsclient;
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
@@ -97,9 +97,10 @@ readdir replies, waits for an active fetch, and rejects stale handles. It also
 fixes the supplementary-group leak and validates a nonempty master response
 pointer before copying at the FFI boundary.
 
-Residual mount work is explicit: `pcqueue` plus some FUSE metadata handles
-retain boundary-shaped ownership, and readdata/writedata remain shared raw
-backends. Supplementary groups now use `Arc<[u32]>` ownership from the cache
+Residual mount work is explicit: some FUSE metadata handles retain boundary-
+shaped ownership, and readdata/writedata remain shared raw backends. Their job
+queues now use typed Rust ownership directly; worker pthread state remains for a
+later wave. Supplementary groups now use `Arc<[u32]>` ownership from the cache
 through every `mfs_fuse` caller; only immediate backend FFI borrows remain.
 The finfo registry/state is now typed Rust ownership; its `ReadDataHandle` and
 `WriteDataHandle` are narrow RAII adapters whose Drop methods call the existing

@@ -25,6 +25,7 @@ pub mod extrapackets;
 pub mod heapsorter;
 pub mod inoleng;
 pub mod mastercomm;
+pub mod pcqueue;
 pub mod readdata;
 pub mod stats;
 pub mod truncate;
