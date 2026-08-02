@@ -10,8 +10,6 @@ unsafe extern "C" {
         ...
     ) -> ::core::ffi::c_int;
     unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
@@ -1031,9 +1029,59 @@ unsafe extern "C" fn mfs_attr_to_size(mut attr: *const uint8_t) -> uint64_t {
         return get64bit(&raw mut ptr);
     }
 }
-static mut fdtab: *mut file_info = ::core::ptr::null_mut::<file_info>();
+// C fdtab/fdtabusemask were malloc/realloc/free'd raw arrays; now owned by
+// Rust Vecs. Elements are MaybeUninit because fresh slots become valid only
+// after mfs_fi_init (memset + ptr::write of Mutex/Condvar/Option fields),
+// exactly like C's malloc-then-init protocol. Vec growth realloc-moves live
+// entries identically to C realloc (see FDTAB-GROWTH INTERLEAVING below).
+// Accessors hand out the same raw base pointers the C code used; raw
+// *mut file_info handles from mfs_get_fi are held across fi_lock regions
+// without fdtablock, so growth moving entries is a documented C-identical
+// hazard. fdtabsize stays a separate counter (C parity; == FDTAB.len()).
+static mut FDTAB: Vec<std::mem::MaybeUninit<file_info>> = Vec::new();
 static mut fdtabsize: uint32_t = 0;
-static mut fdtabusemask: *mut uint32_t = ::core::ptr::null_mut::<uint32_t>();
+static mut FDTABUSEMASK: Vec<uint32_t> = Vec::new();
+#[inline]
+fn fdtab() -> *mut file_info {
+    unsafe { (*(&raw mut FDTAB)).as_mut_ptr() as *mut file_info }
+}
+#[inline]
+fn fdtabusemask() -> *mut uint32_t {
+    unsafe { (*(&raw mut FDTABUSEMASK)).as_mut_ptr() }
+}
+
+// Buffered-dir data (C fileinfo->dbuff malloc/realloc/free): now owned by
+// Rust slices, leaked while live, reclaimed via Box::from_raw. Allocated
+// length always equals fileinfo->dbuffsize at free/grow time, so the length
+// is recoverable from the tracked field. C memcpy-fills every byte of a
+// fresh malloc / realloc tail before any read, so zero-init is a safe
+// superset of C's uninitialized tail.
+unsafe fn dbuff_alloc(size: usize) -> *mut uint8_t {
+    Box::leak(vec![0u8; size].into_boxed_slice()).as_mut_ptr()
+}
+unsafe fn dbuff_free(ptr: *mut uint8_t, size: usize) {
+    unsafe {
+        if !ptr.is_null() {
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, size)));
+        }
+    }
+}
+// C realloc(dbuff, newsize) + free(tmpdbuff) on failure: returns null with
+// the old buffer already freed on OOM, so the caller's OUTOFMEMORY path
+// matches C exactly.
+unsafe fn dbuff_grow(ptr: *mut uint8_t, oldsize: usize, newsize: usize) -> *mut uint8_t {
+    unsafe {
+        let mut v = Vec::from_raw_parts(ptr, oldsize, oldsize);
+        if v.try_reserve_exact(newsize - oldsize).is_err() {
+            drop(v); // C free(tmpdbuff)
+            return ::core::ptr::null_mut::<uint8_t>();
+        }
+        v.resize(newsize, 0);
+        let p = v.as_mut_ptr();
+        std::mem::forget(v);
+        p
+    }
+}
 // Global fdtab lock: C fdtablock (pthread_mutex_t, PTHREAD_MUTEX_INITIALIZER).
 // std::sync::Mutex is RAII-only, so emulate pthread-style manual lock/unlock
 // by stashing the guard in a thread_local slot: fdtab_lock() parks the guard,
@@ -1158,16 +1206,15 @@ unsafe extern "C" fn mfs_fi_term(mut fileinfo: *mut file_info) {
 }
 unsafe extern "C" fn mfs_resize_fd() {
     unsafe {
-        let mut newfdtab: *mut file_info = ::core::ptr::null_mut::<file_info>();
-        let mut newfdtabusemask: *mut uint32_t = ::core::ptr::null_mut::<uint32_t>();
-        let mut newfdtabsize: uint32_t = 0;
         let mut i: uint32_t = 0;
-        newfdtabsize = fdtabsize.wrapping_mul(2 as uint32_t);
-        newfdtab = realloc(
-            fdtab as *mut ::core::ffi::c_void,
-            ::core::mem::size_of::<file_info>().wrapping_mul(newfdtabsize as size_t),
-        ) as *mut file_info;
-        if newfdtab.is_null() {
+        let newfdtabsize: uint32_t = fdtabsize.wrapping_mul(2 as uint32_t);
+        // C realloc(fdtab, newfdtabsize): Vec growth realloc-moves live
+        // entries the same way; fresh slots get mfs_fi_init like C.
+        let fdtab_v = &mut *(&raw mut FDTAB);
+        if fdtab_v
+            .try_reserve_exact(newfdtabsize.wrapping_sub(fdtabsize) as usize)
+            .is_err()
+        {
             fprintf(
                 stderr,
                 b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
@@ -1184,40 +1231,14 @@ unsafe extern "C" fn mfs_resize_fd() {
                 b"newfdtab\0".as_ptr() as *const ::core::ffi::c_char,
             );
             abort();
-        } else if newfdtab
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut file_info
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr() as *const ::core::ffi::c_char,
-                423 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"newfdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr() as *const ::core::ffi::c_char,
-                423 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"newfdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
         }
-        newfdtabusemask = realloc(
-            fdtabusemask as *mut ::core::ffi::c_void,
-            ::core::mem::size_of::<uint32_t>().wrapping_mul(
-                newfdtabsize
-                    .wrapping_add(31 as uint32_t)
-                    .wrapping_div(32 as uint32_t) as size_t,
-            ),
-        ) as *mut uint32_t;
-        if newfdtabusemask.is_null() {
+        // C realloc(fdtabusemask, ...): resize zero-fills new words like the
+        // C memset did (old len == old word count, so only new words zero).
+        let newwords = newfdtabsize
+            .wrapping_add(31 as uint32_t)
+            .wrapping_div(32 as uint32_t) as usize;
+        let mask = &mut *(&raw mut FDTABUSEMASK);
+        if mask.try_reserve_exact(newwords - mask.len()).is_err() {
             fprintf(
                 stderr,
                 b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
@@ -1234,57 +1255,21 @@ unsafe extern "C" fn mfs_resize_fd() {
                 b"newfdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
             );
             abort();
-        } else if newfdtabusemask
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut uint32_t
-        {
-            let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr() as *const ::core::ffi::c_char,
-                425 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"newfdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr() as *const ::core::ffi::c_char,
-                425 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"newfdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            abort();
         }
-        fdtab = newfdtab;
-        fdtabusemask = newfdtabusemask;
+        let base = fdtab_v.as_mut_ptr() as *mut file_info;
+        fdtab_v.set_len(newfdtabsize as usize);
         i = fdtabsize;
         while i < newfdtabsize {
-            mfs_fi_init(fdtab.offset(i as isize));
+            mfs_fi_init(base.offset(i as isize));
             i = i.wrapping_add(1);
         }
+        mask.resize(newwords, 0);
         i = fdtabsize
             .wrapping_add(31 as uint32_t)
             .wrapping_div(32 as uint32_t);
-        memset(
-            fdtabusemask.offset(i as isize) as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<uint32_t>().wrapping_mul(
-                newfdtabsize
-                    .wrapping_add(31 as uint32_t)
-                    .wrapping_div(32 as uint32_t)
-                    .wrapping_sub(i) as size_t,
-            ),
-        );
         if fdtabsize & 0x1f as uint32_t != 0 as uint32_t {
-            *fdtabusemask.offset(i.wrapping_sub(1 as uint32_t) as isize) = (*fdtabusemask
-                .offset(i.wrapping_sub(1 as uint32_t) as isize)
-                as ::core::ffi::c_uint
-                & 0xffffffff as ::core::ffi::c_uint
-                    >> (0x20 as uint32_t).wrapping_sub(fdtabsize & 0x1f as uint32_t))
+            mask[i.wrapping_sub(1 as uint32_t) as usize] &= (0xffffffff as ::core::ffi::c_uint
+                >> (0x20 as uint32_t).wrapping_sub(fdtabsize & 0x1f as uint32_t))
                 as uint32_t;
         }
         fdtabsize = newfdtabsize;
@@ -1301,9 +1286,9 @@ unsafe extern "C" fn mfs_next_fd() -> ::core::ffi::c_int {
             .wrapping_add(31 as uint32_t)
             .wrapping_div(32 as uint32_t)
         {
-            if *fdtabusemask.offset(i as isize) != 0xffffffff as uint32_t {
+            if *fdtabusemask().offset(i as isize) != 0xffffffff as uint32_t {
                 fd = i.wrapping_mul(32 as uint32_t) as ::core::ffi::c_int;
-                m = *fdtabusemask.offset(i as isize);
+                m = *fdtabusemask().offset(i as isize);
                 while m & 1 as uint32_t != 0 {
                     fd += 1;
                     m >>= 1 as ::core::ffi::c_int;
@@ -1311,7 +1296,7 @@ unsafe extern "C" fn mfs_next_fd() -> ::core::ffi::c_int {
                 while (fd as uint32_t) >= fdtabsize {
                     mfs_resize_fd();
                 }
-                *fdtabusemask.offset((fd >> 5 as ::core::ffi::c_int) as isize) |=
+                *fdtabusemask().offset((fd >> 5 as ::core::ffi::c_int) as isize) |=
                     ((1 as ::core::ffi::c_int) << (fd & 0x1f as ::core::ffi::c_int)) as uint32_t;
                 fdtab_unlock();
                 return fd;
@@ -1320,7 +1305,7 @@ unsafe extern "C" fn mfs_next_fd() -> ::core::ffi::c_int {
         }
         fd = fdtabsize as ::core::ffi::c_int;
         mfs_resize_fd();
-        *fdtabusemask.offset((fd >> 5 as ::core::ffi::c_int) as isize) |=
+        *fdtabusemask().offset((fd >> 5 as ::core::ffi::c_int) as isize) |=
             ((1 as ::core::ffi::c_int) << (fd & 0x1f as ::core::ffi::c_int)) as uint32_t;
         fdtab_unlock();
         return fd;
@@ -1334,7 +1319,7 @@ unsafe extern "C" fn mfs_free_fd(mut fd: ::core::ffi::c_int) {
         if fd >= 0 as ::core::ffi::c_int && (fd as uint32_t) < fdtabsize {
             i = (fd >> 5 as ::core::ffi::c_int) as uint32_t;
             m = ((1 as ::core::ffi::c_int) << (fd & 0x1f as ::core::ffi::c_int)) as uint32_t;
-            *fdtabusemask.offset(i as isize) &= !m;
+            *fdtabusemask().offset(i as isize) &= !m;
         }
         fdtab_unlock();
     }
@@ -1347,9 +1332,9 @@ unsafe extern "C" fn mfs_get_fi(mut fd: ::core::ffi::c_int) -> *mut file_info {
         if fd >= 0 as ::core::ffi::c_int && (fd as uint32_t) < fdtabsize {
             i = (fd >> 5 as ::core::ffi::c_int) as uint32_t;
             m = ((1 as ::core::ffi::c_int) << (fd & 0x1f as ::core::ffi::c_int)) as uint32_t;
-            if *fdtabusemask.offset(i as isize) & m != 0 {
+            if *fdtabusemask().offset(i as isize) & m != 0 {
                 fdtab_unlock();
-                return fdtab.offset(fd as isize);
+                return fdtab().offset(fd as isize);
             }
         }
         fdtab_unlock();
@@ -4107,7 +4092,6 @@ pub unsafe extern "C" fn mfs_int_readdir(
 ) -> uint8_t {
     unsafe {
         let mut fileinfo: *mut file_info = ::core::ptr::null_mut::<file_info>();
-        let mut tmpdbuff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut dbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
@@ -4139,9 +4123,7 @@ pub unsafe extern "C" fn mfs_int_readdir(
         {
             (*fileinfo).reading = 1 as uint8_t;
             fi_unlock(fileinfo);
-            if !(*fileinfo).dbuff.is_null() {
-                free((*fileinfo).dbuff as *mut ::core::ffi::c_void);
-            }
+            dbuff_free((*fileinfo).dbuff, (*fileinfo).dbuffsize as usize);
             (*fileinfo).dbuff = ::core::ptr::null_mut::<uint8_t>();
             (*fileinfo).dbuffsize = 0 as uint64_t;
             edgeid = 0 as uint64_t;
@@ -4161,16 +4143,13 @@ pub unsafe extern "C" fn mfs_int_readdir(
                 if status as ::core::ffi::c_int == MFS_STATUS_OK {
                     newsize = (*fileinfo).dbuffsize.wrapping_add(dsize as uint64_t);
                     if (*fileinfo).dbuff.is_null() {
-                        (*fileinfo).dbuff = malloc(dsize as size_t) as *mut uint8_t;
+                        (*fileinfo).dbuff = dbuff_alloc(dsize as usize);
                     } else {
-                        tmpdbuff = (*fileinfo).dbuff;
-                        (*fileinfo).dbuff = realloc(
-                            (*fileinfo).dbuff as *mut ::core::ffi::c_void,
-                            newsize as size_t,
-                        ) as *mut uint8_t;
-                        if (*fileinfo).dbuff.is_null() {
-                            free(tmpdbuff as *mut ::core::ffi::c_void);
-                        }
+                        (*fileinfo).dbuff = dbuff_grow(
+                            (*fileinfo).dbuff,
+                            (*fileinfo).dbuffsize as usize,
+                            newsize as usize,
+                        );
                     }
                     if (*fileinfo).dbuff.is_null() {
                         (*fileinfo).dbuffsize = 0 as uint64_t;
@@ -4186,9 +4165,7 @@ pub unsafe extern "C" fn mfs_int_readdir(
                         (*fileinfo).dbuffsize = newsize;
                     }
                 } else {
-                    if !(*fileinfo).dbuff.is_null() {
-                        free((*fileinfo).dbuff as *mut ::core::ffi::c_void);
-                    }
+                    dbuff_free((*fileinfo).dbuff, (*fileinfo).dbuffsize as usize);
                     (*fileinfo).dbuff = ::core::ptr::null_mut::<uint8_t>();
                     (*fileinfo).dbuffsize = 0 as uint64_t;
                     edgeid = 0x7fffffffffffffff as ::core::ffi::c_ulong as uint64_t;
@@ -4254,7 +4231,6 @@ pub unsafe extern "C" fn mfs_int_readdirplus(
 ) -> uint8_t {
     unsafe {
         let mut fileinfo: *mut file_info = ::core::ptr::null_mut::<file_info>();
-        let mut tmpdbuff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut dbuff: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut ptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut eptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
@@ -4288,9 +4264,7 @@ pub unsafe extern "C" fn mfs_int_readdirplus(
         {
             (*fileinfo).reading = 1 as uint8_t;
             fi_unlock(fileinfo);
-            if !(*fileinfo).dbuff.is_null() {
-                free((*fileinfo).dbuff as *mut ::core::ffi::c_void);
-            }
+            dbuff_free((*fileinfo).dbuff, (*fileinfo).dbuffsize as usize);
             (*fileinfo).dbuff = ::core::ptr::null_mut::<uint8_t>();
             (*fileinfo).dbuffsize = 0 as uint64_t;
             edgeid = 0 as uint64_t;
@@ -4310,16 +4284,13 @@ pub unsafe extern "C" fn mfs_int_readdirplus(
                 if status as ::core::ffi::c_int == MFS_STATUS_OK {
                     newsize = (*fileinfo).dbuffsize.wrapping_add(dsize as uint64_t);
                     if (*fileinfo).dbuff.is_null() {
-                        (*fileinfo).dbuff = malloc(dsize as size_t) as *mut uint8_t;
+                        (*fileinfo).dbuff = dbuff_alloc(dsize as usize);
                     } else {
-                        tmpdbuff = (*fileinfo).dbuff;
-                        (*fileinfo).dbuff = realloc(
-                            (*fileinfo).dbuff as *mut ::core::ffi::c_void,
-                            newsize as size_t,
-                        ) as *mut uint8_t;
-                        if (*fileinfo).dbuff.is_null() {
-                            free(tmpdbuff as *mut ::core::ffi::c_void);
-                        }
+                        (*fileinfo).dbuff = dbuff_grow(
+                            (*fileinfo).dbuff,
+                            (*fileinfo).dbuffsize as usize,
+                            newsize as usize,
+                        );
                     }
                     if (*fileinfo).dbuff.is_null() {
                         (*fileinfo).dbuffsize = 0 as uint64_t;
@@ -4335,9 +4306,7 @@ pub unsafe extern "C" fn mfs_int_readdirplus(
                         (*fileinfo).dbuffsize = newsize;
                     }
                 } else {
-                    if !(*fileinfo).dbuff.is_null() {
-                        free((*fileinfo).dbuff as *mut ::core::ffi::c_void);
-                    }
+                    dbuff_free((*fileinfo).dbuff, (*fileinfo).dbuffsize as usize);
                     (*fileinfo).dbuff = ::core::ptr::null_mut::<uint8_t>();
                     (*fileinfo).dbuffsize = 0 as uint64_t;
                     edgeid = 0x7fffffffffffffff as ::core::ffi::c_ulong as uint64_t;
@@ -4457,13 +4426,14 @@ pub unsafe extern "C" fn mfs_int_closedir(mut dirdes: ::core::ffi::c_int) -> uin
         }
         (*fileinfo).mode = MFS_IO_FORBIDDEN as ::core::ffi::c_int as uint8_t;
         fi_unlock(fileinfo);
-        if !(*fileinfo).dbuff.is_null() {
-            free((*fileinfo).dbuff as *mut ::core::ffi::c_void);
-        }
+        dbuff_free((*fileinfo).dbuff, (*fileinfo).dbuffsize as usize);
         mfs_free_fd(dirdes);
         return MFS_STATUS_OK as uint8_t;
     }
 }
+// ponytail: libc malloc kept here and in mfs_int_get_config_file — the free
+// site is not in this crate (exported C ABI; no in-tree caller), so the
+// allocation cannot be reclaimed as a Box without knowing the consumer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_int_get_config_str(
     mut option_name: *const ::core::ffi::c_char,
@@ -4716,62 +4686,35 @@ pub unsafe extern "C" fn mfs_int_init(
                 (*mcfg).error_on_lost_chunk as uint8_t,
                 (*mcfg).error_on_no_space as uint8_t,
             );
-            fdtab =
-                malloc(::core::mem::size_of::<file_info>().wrapping_mul(FDTABSIZE_INIT as size_t))
-                    as *mut file_info;
+            // C malloc(FDTABSIZE_INIT) for both tables; now Vec-owned.
+            // Fresh slots are init'd via mfs_fi_init below, as in C.
+            let fdtab_v = &mut *(&raw mut FDTAB);
+            if fdtab_v.try_reserve_exact(FDTABSIZE_INIT as usize).is_err() {
+                fprintf(
+                    stderr,
+                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                mfs_log(
+                    MFSLOG_SYSLOG,
+                    MFSLOG_ERR,
+                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                abort();
+            }
+            fdtab_v.set_len(FDTABSIZE_INIT as usize);
             fdtabsize = FDTABSIZE_INIT as uint32_t;
-            fdtabusemask = malloc(::core::mem::size_of::<uint32_t>().wrapping_mul(
-                ((FDTABSIZE_INIT + 31 as ::core::ffi::c_int) / 32 as ::core::ffi::c_int) as size_t,
-            )) as *mut uint32_t;
-            if fdtab.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if fdtab
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut file_info
-            {
-                let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2481 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtab\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_1,
-                );
-                abort();
-            }
-            if fdtabusemask.is_null() {
+            let maskwords =
+                ((FDTABSIZE_INIT + 31 as ::core::ffi::c_int) / 32 as ::core::ffi::c_int) as usize;
+            let mask = &mut *(&raw mut FDTABUSEMASK);
+            if mask.try_reserve_exact(maskwords).is_err() {
                 fprintf(
                     stderr,
                     b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
@@ -4790,48 +4733,13 @@ pub unsafe extern "C" fn mfs_int_init(
                     b"fdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
                 );
                 abort();
-            } else if fdtabusemask
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint32_t
-            {
-                let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2482 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_2,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsioint.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2482 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"fdtabusemask\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_2,
-                );
-                abort();
             }
+            mask.resize(maskwords, 0);
             i = 0 as uint32_t;
             while i < fdtabsize {
-                mfs_fi_init(fdtab.offset(i as isize));
+                mfs_fi_init(fdtab().offset(i as isize));
                 i = i.wrapping_add(1);
             }
-            memset(
-                fdtabusemask as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<uint32_t>().wrapping_mul(
-                    ((FDTABSIZE_INIT + 31 as ::core::ffi::c_int) / 32 as ::core::ffi::c_int)
-                        as size_t,
-                ),
-            );
             if (*mcfg).mkdir_copy_sgid < 0 as ::core::ffi::c_int {
                 mkdir_copy_sgid = 1 as ::core::ffi::c_int;
             } else {
@@ -4853,11 +4761,14 @@ pub unsafe extern "C" fn mfs_int_term() {
         i = 0 as uint32_t;
         while i < fdtabsize {
             mfs_int_close(i as ::core::ffi::c_int);
-            mfs_fi_term(fdtab.offset(i as isize));
+            mfs_fi_term(fdtab().offset(i as isize));
             i = i.wrapping_add(1);
         }
-        free(fdtabusemask as *mut ::core::ffi::c_void);
-        free(fdtab as *mut ::core::ffi::c_void);
+        // C free(fdtabusemask)/free(fdtab): drop the owning Vecs.
+        // MaybeUninit skips per-element drop; std Mutex/Condvar hold no
+        // heap (futex), so nothing is lost vs C free.
+        *(&raw mut FDTABUSEMASK) = Vec::new();
+        *(&raw mut FDTAB) = Vec::new();
         fdtab_lock();
         fdtab_unlock();
         // C pthread_mutex_destroy(&fdtablock): static FDTAB_LOCK needs no destroy.

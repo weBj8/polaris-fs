@@ -42,7 +42,7 @@ wrapping_ops	plfsmaster	ge	4068
 wrapping_ops	plfschunkserver	ge	1316
 wrapping_ops	plfsmetalogger	ge	151
 wrapping_ops	plfsmount	ge	369
-wrapping_ops	plfsbdev	ge	216
+wrapping_ops	plfsbdev	ge	207
 wrapping_ops	plfsgui	ge	149
 wrapping_ops	plfsnetdump	ge	68
 wrapping_ops	plfscommon	ge	832
