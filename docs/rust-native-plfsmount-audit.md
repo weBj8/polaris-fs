@@ -117,10 +117,16 @@ ranges scratch storage is a thread-local owned `Vec`. Supplementary groups now u
 through every `mfs_fuse` caller; only immediate backend FFI borrows remain.
 The finfo registry/state is now typed Rust ownership; its `ReadDataHandle` and
 `WriteDataHandle` are narrow RAII adapters whose Drop methods call the existing
-backend end functions. Remaining backend raw state: malloc-owned
-rrequest/inodedata/chunkdata/cblock structures and free lists, and the
-callback-facing raw APIs. This does not claim shared
-IO migration complete until those receive their own safe-core migration.
+backend end functions. Remaining mount-reachable raw state is narrow:
+malloc-owned structures are gone from readdata/writedata/mastercomm (all
+structs and buffers are `Box`/arena/thread-local owned; raw links remain only
+inside intrusive lists whose endpoints are owned), the sole surviving libc
+allocation pair is the iovec array behind the fixed 3-arg `read_data_free_buff`
+ABI (count not recoverable at free time), and the callback-facing raw FUSE APIs
+stay at the libfuse boundary. The separate bdev data path (NBD daemon, not
+reachable from plfsmount runtime) keeps its own transpiled copies for later
+waves. Shared IO safe-core migration of structure internals (turning the
+intrusive lists into typed collections) is the remaining deep work.
 
 ## Completed thread wave
 

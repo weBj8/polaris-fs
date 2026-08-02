@@ -53,9 +53,6 @@ unsafe extern "C" {
         __endptr: *mut *mut ::core::ffi::c_char,
         __base: ::core::ffi::c_int,
     ) -> ::core::ffi::c_ulong;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn time(__timer: *mut time_t) -> time_t;
     unsafe fn mfs_log(
         mode: ::core::ffi::c_int,

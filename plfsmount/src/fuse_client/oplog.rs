@@ -11,8 +11,6 @@ unsafe extern "C" {
         __format: *const ::core::ffi::c_char,
         __arg: ::core::ffi::VaList,
     ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
         __src: *const ::core::ffi::c_void,

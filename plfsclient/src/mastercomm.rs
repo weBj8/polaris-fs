@@ -98,11 +98,6 @@ unsafe extern "C" {
     unsafe fn md5_final(digest: *mut uint8_t, ctx: *mut md5ctx);
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
     unsafe fn monotonic_useconds() -> uint64_t;
-    unsafe fn heap_cleanup();
-    unsafe fn heap_push(element: uint32_t);
-    unsafe fn heap_pop() -> uint32_t;
-    unsafe fn heap_elements() -> uint32_t;
-    unsafe fn heap_term();
     unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
@@ -3927,7 +3922,7 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
         let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         let mut afpptr: *mut *mut acquired_file = ::core::ptr::null_mut::<*mut acquired_file>();
         af_lock();
-        heap_cleanup();
+        crate::heapsorter::heap_cleanup();
         hash = 0 as uint32_t;
         while hash < ACQFILES_HASH_SIZE as uint32_t {
             afpptr = (&raw mut af_hash as *mut *mut acquired_file).offset(hash as isize);
@@ -3951,11 +3946,11 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
                     }
                 }
                 afpptr = &raw mut (*afptr).next as *mut *mut acquired_file;
-                heap_push((*afptr).inode);
+                crate::heapsorter::heap_push((*afptr).inode);
             }
             hash = hash.wrapping_add(1);
         }
-        inodes = heap_elements();
+        inodes = crate::heapsorter::heap_elements();
         // C: inodespacket = malloc(inodes*4+8). Box<[u8]> leaked as raw ptr;
         // header + every entry written before the send below.
         inodespacket = Box::into_raw(
@@ -3986,7 +3981,7 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
         put32bit(&raw mut ptr, inodes.wrapping_mul(4 as uint32_t));
         i = 0 as uint32_t;
         while i < inodes {
-            put32bit(&raw mut ptr, heap_pop());
+            put32bit(&raw mut ptr, crate::heapsorter::heap_pop());
             i = i.wrapping_add(1);
         }
         af_unlock();
@@ -5064,7 +5059,7 @@ pub unsafe extern "C" fn fs_term() {
                 connect_args.passworddigest as *mut [uint8_t; 16],
             ));
         }
-        heap_term();
+        crate::heapsorter::heap_term();
         crate::extrapackets::term();
     }
 }
