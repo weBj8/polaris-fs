@@ -206,6 +206,27 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 - SRC: `.github/workflows/release.yml`; CI run
   `30742916264`; `docs/rust-native-plfsmount-audit.md` current-wave evidence.
 
+### VC-12 — plfsmount + plfsbdev ownership migration completion
+
+- FACT: the rust-native ownership migration of `plfsmount` and its
+  runtime-reachable `plfscommon`/`plfsclient` closure is complete through
+  commit `e5769ca` (and `d51d1c7`/`e06d8e9` for plfsbdev): pthread
+  mutex/cond/TLS/thread protocols replaced by std sync with guard-slot
+  emulation; libc allocation surface reduced to the annotated boundary
+  ledger (libfuse mfsopts protocol, processname bootstrap, password leak
+  parity, daemon-consumed exports); all intrusive `next`-pointer chains
+  converted to typed collections with per-list aliasing analysis and
+  independent 1:1 C review.
+- FACT: production runs image `e06d8e9cd0c0` (digest
+  `sha256:8dc21be5f11b5cb4d840b502a7e6e95108b447c6a2d6b902bbcd6809e62446a7`),
+  deployed plfsmount-only after green CI; post-deploy concurrent read/write
+  smoke passed.
+- SRC: `docs/rust-native-plfsmount-audit.md` (wave log, boundary ledger,
+  final scans); `docs/deployment.md`; commits `395c1ca`, `0b66358`,
+  `a14c52b`, `d51d1c7`, `e5769ca`.
+- GATE: workspace tests (plfsclient 17, plfsmount 95+2, plfsbdev 16),
+  release build, smoke, gates all green at `e06d8e9`.
+
 ---
 
 ## IOU ledger
