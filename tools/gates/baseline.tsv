@@ -37,7 +37,7 @@ unsafe_no_safety	plfscommon	le	171
 migration_iou	workspace	le	1
 unsafe_sites	plfsclient	le	562
 unsafe_no_safety	plfsclient	le	562
-wrapping_ops	plfsclient	ge	723
+wrapping_ops	plfsclient	ge	721
 wrapping_ops	plfsmaster	ge	4068
 wrapping_ops	plfschunkserver	ge	1316
 wrapping_ops	plfsmetalogger	ge	151
