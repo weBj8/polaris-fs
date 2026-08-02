@@ -73,11 +73,15 @@ cursor state, and cache handles are owned behind Rust `Mutex`/`Condvar` state.
 `fdcache::acquire` returns an owned `FdEntry`, `.stats/.params` handles use
 `Arc<Mutex<Sinfo>>` with `Vec<u8>` buffers, and file handles use a generation-
 checked `Arc<FileInfo>` registry with Rust state guards and open waiters.
+Meta-FUSE directory and trash-path handles are opaque `u64` tokens resolving
+to `Arc<DirBuf>`/`Arc<PathBuf>` in never-reissued registries; release removes
+the token while in-flight readdir/read/write calls hold strong refs, and stale
+tokens fail with `EBADF` instead of dereferencing freed memory.
 
 Verification for this wave:
 
 - `cargo test --release -p plfsclient`: 16 passed;
-- `cargo test --release -p plfsmount --lib`: 91 passed after moving pcqueue tests to plfsclient;
+- `cargo test --release -p plfsmount --lib`: 95 passed after the meta-FUSE handle registry wave;
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
@@ -97,8 +101,8 @@ readdir replies, waits for an active fetch, and rejects stale handles. It also
 fixes the supplementary-group leak and validates a nonempty master response
 pointer before copying at the FFI boundary.
 
-Residual mount work is explicit: some FUSE metadata handles retain boundary-
-shaped ownership, and readdata/writedata remain shared raw backends. Their job
+Residual mount work is explicit: readdata/writedata remain shared raw
+backends. Their job
 queues now use typed Rust ownership directly; worker pthread state remains for a
 later wave. Supplementary groups now use `Arc<[u32]>` ownership from the cache
 through every `mfs_fuse` caller; only immediate backend FFI borrows remain.

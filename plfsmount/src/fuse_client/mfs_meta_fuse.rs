@@ -917,10 +917,120 @@ pub mod imp {
 }
 
 // ---------------------------------------------------------------------------
+// Handle registry: typed ownership for open meta dir/path handles.
+//
+// Handles are opaque, never-reissued `u64` tokens stored in fi->fh. Registry
+// lookups clone an `Arc`, so release cannot recycle storage beneath an
+// in-flight readdir/read/write racing on another FUSE thread. Token 0 is the
+// "no handle" sentinel (masterinfo and failed-open paths), so the counter
+// starts at 1.
+// ---------------------------------------------------------------------------
+
+#[deny(unsafe_code)]
+mod handles {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    pub struct DirState {
+        pub data: Vec<u8>,
+        pub wasread: bool,
+    }
+
+    pub struct DirBuf {
+        pub state: Mutex<DirState>,
+    }
+
+    pub struct PathState {
+        pub data: Vec<u8>,
+        pub changed: bool,
+    }
+
+    pub struct PathBuf {
+        pub state: Mutex<PathState>,
+    }
+
+    struct RegistryState<T> {
+        active: HashMap<u64, Arc<T>>,
+        next: u64,
+    }
+
+    struct Registry<T> {
+        state: Mutex<RegistryState<T>>,
+    }
+
+    impl<T> Default for Registry<T> {
+        fn default() -> Self {
+            Self {
+                state: Mutex::new(RegistryState {
+                    active: HashMap::new(),
+                    next: 1,
+                }),
+            }
+        }
+    }
+
+    impl<T> Registry<T> {
+        fn insert(&self, value: Arc<T>) -> u64 {
+            let mut state = self.state.lock().unwrap();
+            let token = state.next;
+            state.next = token
+                .checked_add(1)
+                .expect("meta handle token space exhausted");
+            state.active.insert(token, value);
+            token
+        }
+
+        fn get(&self, token: u64) -> Option<Arc<T>> {
+            self.state.lock().unwrap().active.get(&token).cloned()
+        }
+
+        fn remove(&self, token: u64) -> Option<Arc<T>> {
+            self.state.lock().unwrap().active.remove(&token)
+        }
+    }
+
+    static DIRS: OnceLock<Registry<DirBuf>> = OnceLock::new();
+    static PATHS: OnceLock<Registry<PathBuf>> = OnceLock::new();
+
+    fn dirs() -> &'static Registry<DirBuf> {
+        DIRS.get_or_init(Registry::default)
+    }
+
+    fn paths() -> &'static Registry<PathBuf> {
+        PATHS.get_or_init(Registry::default)
+    }
+
+    pub fn insert_dir(dir: Arc<DirBuf>) -> u64 {
+        dirs().insert(dir)
+    }
+
+    pub fn get_dir(token: u64) -> Option<Arc<DirBuf>> {
+        dirs().get(token)
+    }
+
+    pub fn remove_dir(token: u64) -> Option<Arc<DirBuf>> {
+        dirs().remove(token)
+    }
+
+    pub fn insert_path(path: Arc<PathBuf>) -> u64 {
+        paths().insert(path)
+    }
+
+    pub fn get_path(token: u64) -> Option<Arc<PathBuf>> {
+        paths().get(token)
+    }
+
+    pub fn remove_path(token: u64) -> Option<Arc<PathBuf>> {
+        paths().remove(token)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Boundary: FUSE ops (fuse_reply_* / fs_* master calls).
 // ---------------------------------------------------------------------------
 
 use imp::Lookup;
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 pub const PKGVERSION: ::core::ffi::c_int = 4 * 1000000 + 59 * 1000 + 4; // VERSMAJ/MID/MIN (transpiled value, frozen)
@@ -1166,12 +1276,6 @@ pub unsafe extern "C" fn mfs_meta_rename(
     }
 }
 
-struct DirBuf {
-    data: Vec<u8>,
-    wasread: bool,
-    lock: StdMutex<()>,
-}
-
 /// build the directory content blob for `ino` (dirbuf_meta_fill);
 /// returns None on master-error (C left b->p NULL/size 0)
 unsafe fn dirbuf_meta_fill(ino: uint32_t) -> Option<Vec<u8>> {
@@ -1253,16 +1357,17 @@ pub unsafe extern "C" fn mfs_meta_opendir(
             || inode == imp::META_SUSTAINED_INODE
             || (imp::META_SUBTRASH_INODE_MIN..=imp::META_SUBTRASH_INODE_MAX).contains(&inode)
         {
-            let dirinfo = Box::new(DirBuf {
-                data: Vec::new(),
-                wasread: false,
-                lock: StdMutex::new(()),
+            let dirinfo = Arc::new(handles::DirBuf {
+                state: StdMutex::new(handles::DirState {
+                    data: Vec::new(),
+                    wasread: false,
+                }),
             });
-            let raw = Box::into_raw(dirinfo);
-            (*fi).fh = raw as ::core::ffi::c_ulong;
+            let token = handles::insert_dir(dirinfo);
+            (*fi).fh = token;
             if fuse_reply_open(req, fi) == -ENOENT {
                 (*fi).fh = 0;
-                drop(Box::from_raw(raw));
+                drop(handles::remove_dir(token));
             }
         } else {
             fuse_reply_err(req, ENOTDIR);
@@ -1283,14 +1388,17 @@ pub unsafe extern "C" fn mfs_meta_readdir(
             fuse_reply_err(req, EINVAL);
             return;
         }
-        // SAFETY: fh from mfs_meta_opendir.
-        let dirinfo = &mut *((*fi).fh as *mut DirBuf);
-        let _g = dirinfo.lock.lock().unwrap();
-        if !dirinfo.wasread || off == 0 {
-            dirinfo.data = dirbuf_meta_fill(ino as uint32_t).unwrap_or_default();
+        let Some(dirinfo) = handles::get_dir((*fi).fh) else {
+            // Stale token (kernel contract violation): fail safely, no UAF.
+            fuse_reply_err(req, EBADF);
+            return;
+        };
+        let mut state = dirinfo.state.lock().unwrap();
+        if !state.wasread || off == 0 {
+            state.data = dirbuf_meta_fill(ino as uint32_t).unwrap_or_default();
         }
-        dirinfo.wasread = true;
-        if off as usize >= dirinfo.data.len() {
+        state.wasread = true;
+        if off as usize >= state.data.len() {
             fuse_reply_buf(req, ::core::ptr::null(), 0);
             return;
         }
@@ -1298,7 +1406,7 @@ pub unsafe extern "C" fn mfs_meta_readdir(
         let mut buffer = vec![0u8; size];
         let mut opos: size_t = 0;
         let mut off = off as usize;
-        let data = &dirinfo.data;
+        let data = &state.data;
         let mut pos = off;
         while pos < data.len() {
             let nleng = data[pos] as usize;
@@ -1347,25 +1455,16 @@ pub unsafe extern "C" fn mfs_meta_releasedir(
     fi: *mut fuse_file_info,
 ) {
     unsafe {
-        let raw = (*fi).fh as *mut DirBuf;
-        if !raw.is_null() {
-            // Match C teardown: wait for any in-flight readdir before drop.
-            {
-                let dirinfo = &*raw;
-                let _g = dirinfo.lock.lock().unwrap();
+        let token = (*fi).fh;
+        if token != 0 {
+            if let Some(dirinfo) = handles::remove_dir(token) {
+                // Match C teardown: wait for any in-flight readdir before drop.
+                let _g = dirinfo.state.lock().unwrap();
             }
-            // SAFETY: fh from mfs_meta_opendir, released exactly once.
-            drop(Box::from_raw(raw));
             (*fi).fh = 0;
         }
         fuse_reply_err(req, 0);
     }
-}
-
-struct PathBuf {
-    data: Vec<u8>,
-    changed: bool,
-    lock: StdMutex<()>,
 }
 
 #[unsafe(no_mangle)]
@@ -1394,17 +1493,18 @@ pub unsafe extern "C" fn mfs_meta_open(req: fuse_req_t, ino: fuse_ino_t, fi: *mu
         let mut data = Vec::with_capacity(plen + 1);
         data.extend_from_slice(::core::slice::from_raw_parts(path, plen));
         data.push(b'\n');
-        let pathinfo = Box::new(PathBuf {
-            data,
-            changed: false,
-            lock: StdMutex::new(()),
+        let pathinfo = Arc::new(handles::PathBuf {
+            state: StdMutex::new(handles::PathState {
+                data,
+                changed: false,
+            }),
         });
         (*fi).set_direct_io(1);
-        let raw = Box::into_raw(pathinfo);
-        (*fi).fh = raw as ::core::ffi::c_ulong;
+        let token = handles::insert_path(pathinfo);
+        (*fi).fh = token;
         if fuse_reply_open(req, fi) == -ENOENT {
             (*fi).fh = 0;
-            drop(Box::from_raw(raw));
+            drop(handles::remove_path(token));
         }
     }
 }
@@ -1421,17 +1521,20 @@ pub unsafe extern "C" fn mfs_meta_release(
             fuse_reply_err(req, 0);
             return;
         }
-        let raw = (*fi).fh as *mut PathBuf;
-        if raw.is_null() {
+        let token = (*fi).fh;
+        if token == 0 {
             fuse_reply_err(req, EBADF);
             return;
         }
-        // SAFETY: fh from mfs_meta_open, released exactly once.
-        let pathinfo = Box::from_raw(raw);
+        let Some(pathinfo) = handles::remove_path(token) else {
+            // Stale token (kernel contract violation): fail safely, no UAF.
+            fuse_reply_err(req, EBADF);
+            return;
+        };
         {
-            let _g = pathinfo.lock.lock().unwrap();
-            let mut data = pathinfo.data.clone();
-            if pathinfo.changed {
+            let state = pathinfo.state.lock().unwrap();
+            let mut data = state.data.clone();
+            if state.changed {
                 if data.last() == Some(&b'\n') {
                     *data.last_mut().unwrap() = 0;
                 } else {
@@ -1481,22 +1584,25 @@ pub unsafe extern "C" fn mfs_meta_read(
             fuse_reply_err(req, EBADF);
             return;
         }
-        // SAFETY: fh from mfs_meta_open.
-        let pathinfo = &mut *((*fi).fh as *mut PathBuf);
-        let _g = pathinfo.lock.lock().unwrap();
+        let Some(pathinfo) = handles::get_path((*fi).fh) else {
+            // Stale token (kernel contract violation): fail safely, no UAF.
+            fuse_reply_err(req, EBADF);
+            return;
+        };
+        let state = pathinfo.state.lock().unwrap();
         if off < 0 {
-            drop(_g);
+            drop(state);
             fuse_reply_err(req, EINVAL);
             return;
         }
-        match imp::slice_range(off as u64, size as u64, pathinfo.data.len() as u64) {
+        match imp::slice_range(off as u64, size as u64, state.data.len() as u64) {
             None => {
                 fuse_reply_buf(req, ::core::ptr::null(), 0);
             }
             Some((start, len)) => {
                 fuse_reply_buf(
                     req,
-                    pathinfo.data.as_ptr().add(start as usize) as *const ::core::ffi::c_char,
+                    state.data.as_ptr().add(start as usize) as *const ::core::ffi::c_char,
                     len as size_t,
                 );
             }
@@ -1527,23 +1633,27 @@ pub unsafe extern "C" fn mfs_meta_write(
             fuse_reply_err(req, EINVAL);
             return;
         }
-        // SAFETY: fh from mfs_meta_open; buf valid for size bytes.
-        let pathinfo = &mut *((*fi).fh as *mut PathBuf);
-        let _g = pathinfo.lock.lock().unwrap();
-        if !pathinfo.changed {
-            pathinfo.data.clear();
+        let Some(pathinfo) = handles::get_path((*fi).fh) else {
+            // Stale token (kernel contract violation): fail safely, no UAF.
+            fuse_reply_err(req, EBADF);
+            return;
+        };
+        let mut state = pathinfo.state.lock().unwrap();
+        if !state.changed {
+            state.data.clear();
         }
         let end = off as usize + size;
-        if end > pathinfo.data.len() {
-            pathinfo.data.resize(end, 0);
+        if end > state.data.len() {
+            state.data.resize(end, 0);
         }
+        // SAFETY: buf valid for size bytes; destination resized above.
         ::core::ptr::copy_nonoverlapping(
             buf as *const uint8_t,
-            pathinfo.data.as_mut_ptr().add(off as usize),
+            state.data.as_mut_ptr().add(off as usize),
             size,
         );
-        pathinfo.changed = true;
-        drop(_g);
+        state.changed = true;
+        drop(state);
         fuse_reply_write(req, size);
     }
 }
@@ -1843,5 +1953,88 @@ mod tests {
         assert_eq!(slice_range(22, 10, 22), None);
         assert_eq!(slice_range(0, 22, 22), Some((0, 22)));
         let _ = format!(""); // keep format import
+    }
+
+    mod handles_tests {
+        use super::super::handles;
+        use std::sync::{Arc, Mutex};
+
+        fn dirbuf() -> Arc<handles::DirBuf> {
+            Arc::new(handles::DirBuf {
+                state: Mutex::new(handles::DirState {
+                    data: Vec::new(),
+                    wasread: false,
+                }),
+            })
+        }
+
+        fn pathbuf() -> Arc<handles::PathBuf> {
+            Arc::new(handles::PathBuf {
+                state: Mutex::new(handles::PathState {
+                    data: Vec::new(),
+                    changed: false,
+                }),
+            })
+        }
+
+        #[test]
+        fn tokens_unique_and_never_reused() {
+            let first = handles::insert_dir(dirbuf());
+            let second = handles::insert_dir(dirbuf());
+            assert_ne!(first, second);
+            assert!(handles::remove_dir(first).is_some());
+            let third = handles::insert_dir(dirbuf());
+            assert_ne!(first, third);
+            assert_ne!(second, third);
+            assert!(handles::remove_dir(second).is_some());
+            assert!(handles::remove_dir(third).is_some());
+
+            let p1 = handles::insert_path(pathbuf());
+            let p2 = handles::insert_path(pathbuf());
+            assert_ne!(p1, p2);
+            assert!(handles::remove_path(p1).is_some());
+            assert!(handles::remove_path(p2).is_some());
+        }
+
+        #[test]
+        fn token_zero_is_never_valid() {
+            assert!(handles::get_dir(0).is_none());
+            assert!(handles::get_path(0).is_none());
+            assert!(handles::remove_dir(0).is_none());
+            assert!(handles::remove_path(0).is_none());
+        }
+
+        #[test]
+        fn get_after_remove_fails_and_arc_survives() {
+            let token = handles::insert_dir(dirbuf());
+            let held = handles::get_dir(token).unwrap();
+            assert!(handles::remove_dir(token).is_some());
+            assert!(handles::get_dir(token).is_none());
+            assert!(handles::remove_dir(token).is_none());
+            // in-flight Arc still usable after removal
+            assert!(!held.state.lock().unwrap().wasread);
+
+            let token = handles::insert_path(pathbuf());
+            let held = handles::get_path(token).unwrap();
+            assert!(handles::remove_path(token).is_some());
+            assert!(handles::get_path(token).is_none());
+            assert!(!held.state.lock().unwrap().changed);
+        }
+
+        #[test]
+        fn release_frees_storage() {
+            let dir = dirbuf();
+            let weak = Arc::downgrade(&dir);
+            let token = handles::insert_dir(dir);
+            assert!(weak.upgrade().is_some());
+            assert!(handles::remove_dir(token).is_some());
+            assert!(weak.upgrade().is_none());
+
+            let path = pathbuf();
+            let weak = Arc::downgrade(&path);
+            let token = handles::insert_path(path);
+            assert!(handles::remove_path(token).is_some());
+            assert!(weak.upgrade().is_none());
+        }
     }
 }
