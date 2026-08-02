@@ -71,7 +71,6 @@ unsafe extern "C" {
         __s1: *const ::core::ffi::c_char,
         __s2: *const ::core::ffi::c_char,
     ) -> ::core::ffi::c_int;
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
     unsafe fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
     unsafe fn strerror(__errnum: ::core::ffi::c_int) -> *mut ::core::ffi::c_char;
     unsafe fn strsep(
@@ -515,6 +514,23 @@ pub struct _bdlist {
     pub next: *mut _bdlist,
 }
 pub type bdlist = _bdlist;
+/// C strdup: copy a borrowed C string into a CString-owned raw pointer.
+/// The result must be released with [`cdrop`] (never libc free).
+unsafe fn cstrdup(s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char {
+    unsafe {
+        std::ffi::CString::new(std::ffi::CStr::from_ptr(s).to_bytes())
+            .expect("cstrdup source has no interior NUL")
+            .into_raw()
+    }
+}
+/// C free for pointers from [`cstrdup`] / CString::into_raw. Null is a no-op.
+unsafe fn cdrop(p: *mut ::core::ffi::c_char) {
+    unsafe {
+        if !p.is_null() {
+            drop(std::ffi::CString::from_raw(p));
+        }
+    }
+}
 #[inline]
 unsafe extern "C" fn putchar(mut __c: ::core::ffi::c_int) -> ::core::ffi::c_int {
     unsafe {
@@ -1024,6 +1040,11 @@ pub unsafe extern "C" fn receive_thread(
             if magic != NBD_REQUEST_MAGIC as uint32_t {
                 cmd = NBD_CMD_DISC as ::core::ffi::c_int as uint32_t;
             }
+            // ponytail: libc malloc kept — nbdrequest is variable-size
+            // (malloc(36+length) for READ/WRITE); squeue's MallocPtr Drop
+            // frees it with libc::free, so a Box conversion is not possible
+            // without changing MallocPtr's contract. send_thread's free(r)
+            // matches.
             if cmd == NBD_CMD_WRITE as ::core::ffi::c_int as uint32_t
                 || cmd == NBD_CMD_READ as ::core::ffi::c_int as uint32_t
             {
@@ -1693,180 +1714,31 @@ pub unsafe extern "C" fn linkname_generate(
     mut filename: *const ::core::ffi::c_char,
 ) -> *mut ::core::ffi::c_char {
     unsafe {
-        let mut mhl: uint32_t = 0;
-        let mut mpl: uint32_t = 0;
-        let mut fnl: uint32_t = 0;
-        let mut l: uint32_t = 0;
-        let mut i: uint32_t = 0;
-        let mut ln: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        // C: malloc(len+NBD_LINK_PREFIX_LENG+1) + charconv loop + NUL; now a
+        // Vec<CString>-built string. charconv never emits NUL, so the content
+        // is interior-NUL-free; the 255-char cap truncates the Vec directly.
+        let mut v: Vec<u8> = Vec::new();
+        v.extend_from_slice(b"/dev/mfs/");
         if !linkname.is_null() {
-            fnl = strlen(linkname) as uint32_t;
-            ln = malloc(
-                fnl.wrapping_add(NBD_LINK_PREFIX_LENG as uint32_t)
-                    .wrapping_add(1 as uint32_t) as size_t,
-            ) as *mut ::core::ffi::c_char;
-            if ln.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if ln
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut ::core::ffi::c_char
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    658 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-            memcpy(
-                ln as *mut ::core::ffi::c_void,
-                NBD_LINK_PREFIX.as_ptr() as *const ::core::ffi::c_void,
-                NBD_LINK_PREFIX_LENG as size_t,
-            );
-            l = 9 as uint32_t;
-            i = 0 as uint32_t;
-            while i < fnl {
-                let c2rust_fresh0 = l;
-                l = l.wrapping_add(1);
-                *ln.offset(c2rust_fresh0 as isize) = charconv(*linkname.offset(i as isize));
-                i = i.wrapping_add(1);
-            }
-            free(linkname as *mut ::core::ffi::c_void);
+            let ln = std::ffi::CStr::from_ptr(linkname).to_bytes();
+            v.extend(ln.iter().map(|&c| charconv(c as ::core::ffi::c_char) as u8));
+            // C: free(linkname) — old buffer is CString-owned.
+            cdrop(linkname);
         } else {
-            mhl = strlen(masterhost) as uint32_t;
-            mpl = strlen(masterport) as uint32_t;
-            fnl = strlen(filename) as uint32_t;
-            ln = malloc(
-                mhl.wrapping_add(mpl)
-                    .wrapping_add(fnl)
-                    .wrapping_add(3 as uint32_t)
-                    .wrapping_add(1 as uint32_t)
-                    .wrapping_add(NBD_LINK_PREFIX_LENG as uint32_t) as size_t,
-            ) as *mut ::core::ffi::c_char;
-            if ln.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    672 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    672 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if ln
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut ::core::ffi::c_char
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    672 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    672 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ln\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
-            memcpy(
-                ln as *mut ::core::ffi::c_void,
-                NBD_LINK_PREFIX.as_ptr() as *const ::core::ffi::c_void,
-                NBD_LINK_PREFIX_LENG as size_t,
-            );
-            l = 9 as uint32_t;
-            i = 0 as uint32_t;
-            while i < mhl {
-                let c2rust_fresh1 = l;
-                l = l.wrapping_add(1);
-                *ln.offset(c2rust_fresh1 as isize) = charconv(*masterhost.offset(i as isize));
-                i = i.wrapping_add(1);
-            }
-            let c2rust_fresh2 = l;
-            l = l.wrapping_add(1);
-            *ln.offset(c2rust_fresh2 as isize) = '_' as ::core::ffi::c_char;
-            i = 0 as uint32_t;
-            while i < mpl {
-                let c2rust_fresh3 = l;
-                l = l.wrapping_add(1);
-                *ln.offset(c2rust_fresh3 as isize) = charconv(*masterport.offset(i as isize));
-                i = i.wrapping_add(1);
-            }
-            let c2rust_fresh4 = l;
-            l = l.wrapping_add(1);
-            *ln.offset(c2rust_fresh4 as isize) = '_' as ::core::ffi::c_char;
-            i = 0 as uint32_t;
-            while i < fnl {
-                let c2rust_fresh5 = l;
-                l = l.wrapping_add(1);
-                *ln.offset(c2rust_fresh5 as isize) = charconv(*filename.offset(i as isize));
-                i = i.wrapping_add(1);
-            }
+            let mh = std::ffi::CStr::from_ptr(masterhost).to_bytes();
+            let mp = std::ffi::CStr::from_ptr(masterport).to_bytes();
+            let f = std::ffi::CStr::from_ptr(filename).to_bytes();
+            v.extend(mh.iter().map(|&c| charconv(c as ::core::ffi::c_char) as u8));
+            v.push(b'_');
+            v.extend(mp.iter().map(|&c| charconv(c as ::core::ffi::c_char) as u8));
+            v.push(b'_');
+            v.extend(f.iter().map(|&c| charconv(c as ::core::ffi::c_char) as u8));
         }
-        let c2rust_fresh6 = l;
-        l = l.wrapping_add(1);
-        *ln.offset(c2rust_fresh6 as isize) = '\0' as ::core::ffi::c_char;
-        if l > (256 as ::core::ffi::c_int + NBD_LINK_PREFIX_LENG) as uint32_t {
-            *ln.offset((256 as ::core::ffi::c_int + NBD_LINK_PREFIX_LENG) as isize) =
-                '\0' as ::core::ffi::c_char;
-        }
-        return ln;
+        // C: ln[256+NBD_LINK_PREFIX_LENG]='\0' when longer — cap name at 255.
+        v.truncate(256 + NBD_LINK_PREFIX_LENG as usize);
+        return std::ffi::CString::new(v)
+            .expect("charconv output has no interior NUL")
+            .into_raw();
     }
 }
 #[unsafe(no_mangle)]
@@ -1898,7 +1770,7 @@ pub unsafe extern "C" fn find_free_nbddevice() -> *mut ::core::ffi::c_char {
                     return ::core::ptr::null_mut::<::core::ffi::c_char>();
                 }
                 if size == 0 as uint64_t {
-                    return strdup(&raw mut devicename as *mut ::core::ffi::c_char);
+                    return cstrdup(&raw mut devicename as *mut ::core::ffi::c_char);
                 }
             }
             i = i.wrapping_add(1);
@@ -1928,60 +1800,17 @@ pub unsafe extern "C" fn nbd_packet_to_str(
     mut pleng: uint32_t,
 ) -> *mut ::core::ffi::c_char {
     unsafe {
-        let mut r: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
         if pleng == 0 as uint32_t {
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        r = malloc(pleng.wrapping_add(1 as uint32_t) as size_t) as *mut ::core::ffi::c_char;
-        if r.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                753 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"r\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                753 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"r\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if r
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut ::core::ffi::c_char
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                753 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"r\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                753 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"r\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        memcpy(
-            r as *mut ::core::ffi::c_void,
-            pstr as *const ::core::ffi::c_void,
-            pleng as size_t,
-        );
-        *r.offset(pleng as isize) = 0 as ::core::ffi::c_char;
-        return r;
+        // C: malloc(pleng+1) + memcpy + trailing NUL. Every consumer treats
+        // the result as a C string, so truncate at the first interior NUL
+        // (C string semantics identical) and own it with CString.
+        let bytes = std::slice::from_raw_parts(pstr, pleng as usize);
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        return std::ffi::CString::new(&bytes[..end])
+            .expect("sliced before first NUL")
+            .into_raw();
     }
 }
 #[unsafe(no_mangle)]
@@ -2306,16 +2135,13 @@ pub unsafe extern "C" fn nbd_stop(mut nbdcp: *mut nbdcommon) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nbd_free(mut nbdcp: *mut nbdcommon) {
     unsafe {
-        if !(*nbdcp).linkname.is_null() {
-            free((*nbdcp).linkname as *mut ::core::ffi::c_void);
-        }
-        if !(*nbdcp).nbddevice.is_null() {
-            free((*nbdcp).nbddevice as *mut ::core::ffi::c_void);
-        }
-        if !(*nbdcp).mfsfile.is_null() {
-            free((*nbdcp).mfsfile as *mut ::core::ffi::c_void);
-        }
-        free(nbdcp as *mut ::core::ffi::c_void);
+        // All three string fields are CString-owned (nbd_packet_to_str,
+        // linkname_generate, find_free_nbddevice).
+        cdrop((*nbdcp).linkname);
+        cdrop((*nbdcp).nbddevice);
+        cdrop((*nbdcp).mfsfile);
+        // nbdcommon is Box-owned (nbd_auto_maps / nbd_handle_add_device).
+        drop(Box::from_raw(nbdcp));
     }
 }
 unsafe extern "C" fn nbd_match(
@@ -2389,6 +2215,9 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
             return 0 as uint8_t;
         }
         lbsize = 10000 as size_t;
+        // ponytail: libc getline buffer kept — __getdelim reallocs it
+        // internally, so ownership stays libc (freed with libc free); the
+        // parser mutates it in place via strsep.
         lbuff = malloc(lbsize) as *mut ::core::ffi::c_char;
         while getline(&raw mut lbuff, &raw mut lbsize, cfd) != -1 as __ssize_t {
             ptr = lbuff;
@@ -2562,112 +2391,25 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                     }
                 }
             }
-            bdl = malloc(::core::mem::size_of::<bdlist>()) as *mut bdlist;
-            if bdl.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1079 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1079 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if bdl
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut bdlist
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1079 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1079 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-            (*bdl).nbdcp = malloc(::core::mem::size_of::<nbdcommon>()) as *mut nbdcommon;
-            if (*bdl).nbdcp.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1081 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1081 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*bdl).nbdcp
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut nbdcommon
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1081 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1081 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
-            // Rust JoinHandle slot (replaces pthread_t): init before any
-            // nbd_stop path can take() it; malloc leaves it uninit otherwise.
-            std::ptr::write(&raw mut (*(*bdl).nbdcp).ctrl_thread, None);
-            (*(*bdl).nbdcp).mfsfile = nbd_packet_to_str(path, pleng as uint32_t);
-            (*(*bdl).nbdcp).nbddevice = nbd_packet_to_str(device, dleng as uint32_t);
-            (*(*bdl).nbdcp).linkname = nbd_packet_to_str(name, nleng as uint32_t);
-            (*(*bdl).nbdcp).fsize = size;
-            (*(*bdl).nbdcp).bsize = bsize;
-            (*(*bdl).nbdcp).flags = flags;
+            // C: malloc(bdlist) + malloc(nbdcommon); now Box-owned pairs
+            // (nbd_free / list unlink drop them with Box::from_raw).
+            bdl = Box::into_raw(Box::new(bdlist {
+                nbdcp: Box::into_raw(Box::new(nbdcommon {
+                    linkname: nbd_packet_to_str(name, nleng as uint32_t),
+                    nbddevice: nbd_packet_to_str(device, dleng as uint32_t),
+                    mfsfile: nbd_packet_to_str(path, pleng as uint32_t),
+                    fsize: size,
+                    bsize,
+                    flags,
+                    sp: [0; 2],
+                    mfsfd: 0,
+                    nbdfd: 0,
+                    ctrl_thread: None,
+                    active: 0,
+                    aqueue: ::core::ptr::null_mut(),
+                })),
+                next: ::core::ptr::null_mut(),
+            }));
             (*(*bdl).nbdcp).linkname = linkname_generate(
                 (*(*bdl).nbdcp).linkname,
                 mcfg.masterhost,
@@ -2680,7 +2422,7 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                     b"link exists\n\0".as_ptr() as *const ::core::ffi::c_char,
                 );
                 nbd_free((*bdl).nbdcp);
-                free(bdl as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(bdl));
                 free(lbuff as *mut ::core::ffi::c_void);
                 fclose(cfd);
                 return 0 as uint8_t;
@@ -2694,7 +2436,7 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                     &raw mut ans as *mut ::core::ffi::c_char,
                 );
                 nbd_free((*bdl).nbdcp);
-                free(bdl as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(bdl));
                 free(lbuff as *mut ::core::ffi::c_void);
                 fclose(cfd);
                 return 0 as uint8_t;
@@ -2870,112 +2612,25 @@ pub unsafe extern "C" fn nbd_handle_add_device(
             ) as uint32_t;
             status = MFSNBD_ERROR as ::core::ffi::c_int as uint8_t;
         } else {
-            bdl = malloc(::core::mem::size_of::<bdlist>()) as *mut bdlist;
-            if bdl.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1201 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1201 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if bdl
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut bdlist
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1201 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1201 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-            (*bdl).nbdcp = malloc(::core::mem::size_of::<nbdcommon>()) as *mut nbdcommon;
-            if (*bdl).nbdcp.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1203 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1203 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*bdl).nbdcp
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut nbdcommon
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1203 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1203 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"bdl->nbdcp\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
-            }
-            // Rust JoinHandle slot (replaces pthread_t): init before any
-            // nbd_stop path can take() it; malloc leaves it uninit otherwise.
-            std::ptr::write(&raw mut (*(*bdl).nbdcp).ctrl_thread, None);
-            (*(*bdl).nbdcp).mfsfile = nbd_packet_to_str(path, pleng as uint32_t);
-            (*(*bdl).nbdcp).nbddevice = nbd_packet_to_str(device, dleng as uint32_t);
-            (*(*bdl).nbdcp).linkname = nbd_packet_to_str(name, nleng as uint32_t);
-            (*(*bdl).nbdcp).fsize = size;
-            (*(*bdl).nbdcp).bsize = bsize;
-            (*(*bdl).nbdcp).flags = flags;
+            // C: malloc(bdlist) + malloc(nbdcommon); now Box-owned pairs
+            // (nbd_free / list unlink drop them with Box::from_raw).
+            bdl = Box::into_raw(Box::new(bdlist {
+                nbdcp: Box::into_raw(Box::new(nbdcommon {
+                    linkname: nbd_packet_to_str(name, nleng as uint32_t),
+                    nbddevice: nbd_packet_to_str(device, dleng as uint32_t),
+                    mfsfile: nbd_packet_to_str(path, pleng as uint32_t),
+                    fsize: size,
+                    bsize,
+                    flags,
+                    sp: [0; 2],
+                    mfsfd: 0,
+                    nbdfd: 0,
+                    ctrl_thread: None,
+                    active: 0,
+                    aqueue: ::core::ptr::null_mut(),
+                })),
+                next: ::core::ptr::null_mut(),
+            }));
             (*(*bdl).nbdcp).linkname = linkname_generate(
                 (*(*bdl).nbdcp).linkname,
                 mcfg.masterhost,
@@ -2991,7 +2646,7 @@ pub unsafe extern "C" fn nbd_handle_add_device(
                 ) as uint32_t;
                 status = MFSNBD_ERROR as ::core::ffi::c_int as uint8_t;
                 nbd_free((*bdl).nbdcp);
-                free(bdl as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(bdl));
             } else if nbd_start(
                 (*bdl).nbdcp,
                 (&raw mut ans as *mut uint8_t).offset(10 as ::core::ffi::c_int as isize)
@@ -3005,7 +2660,7 @@ pub unsafe extern "C" fn nbd_handle_add_device(
                 ) as uint32_t;
                 status = MFSNBD_ERROR as ::core::ffi::c_int as uint8_t;
                 nbd_free((*bdl).nbdcp);
-                free(bdl as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(bdl));
             } else {
                 nbd_force_partition_reread((*bdl).nbdcp);
                 msglen = snprintf(
@@ -3158,7 +2813,7 @@ pub unsafe extern "C" fn nbd_handle_remove_device(
                 nbd_stop((*bdl).nbdcp);
                 nbd_free((*bdl).nbdcp);
                 *bdlp = (*bdl).next as *mut bdlist;
-                free(bdl as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(bdl));
                 found = 1 as uint8_t;
             } else {
                 bdlp = &raw mut (*bdl).next as *mut *mut bdlist;
@@ -3208,68 +2863,20 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
         let mut dleng: uint32_t = 0;
         let mut nleng: uint32_t = 0;
         static mut bdl: *mut bdlist = ::core::ptr::null_mut::<bdlist>();
-        let mut ans: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         if leng != 0 as uint32_t {
-            ans = malloc(8 as size_t) as *mut uint8_t;
-            if ans.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1321 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1321 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if ans
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut uint8_t
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1321 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    1321 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
-            wptr = ans;
+            // C: malloc(8) + free(ans); now Vec-owned reply buffer.
+            let mut ans: Vec<u8> = vec![0; 8];
+            wptr = ans.as_mut_ptr();
             put32bit(&raw mut wptr, MFSNBD_LIST as ::core::ffi::c_int as uint32_t);
             put32bit(&raw mut wptr, 0 as uint32_t);
             unixtowrite(
                 sock,
-                ans as *const ::core::ffi::c_void,
+                ans.as_ptr() as *const ::core::ffi::c_void,
                 8 as uint32_t,
                 1000 as uint32_t,
                 1000 as uint32_t,
             );
-            free(ans as *mut ::core::ffi::c_void);
             return;
         }
         dcnt = 0 as uint8_t;
@@ -3301,50 +2908,9 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
             dcnt = dcnt.wrapping_add(1);
             bdl = (*bdl).next as *mut bdlist;
         }
-        ans = malloc((8 as uint32_t).wrapping_add(dsize) as size_t) as *mut uint8_t;
-        if ans.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1348 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1348 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if ans
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut uint8_t
-        {
-            let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1348 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr() as *const ::core::ffi::c_char,
-                1348 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ans\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            abort();
-        }
-        wptr = ans;
+        // C: malloc(8+dsize) + free(ans); now Vec-owned reply buffer.
+        let mut ans: Vec<u8> = vec![0; (8 as uint32_t).wrapping_add(dsize) as usize];
+        wptr = ans.as_mut_ptr();
         put32bit(&raw mut wptr, MFSNBD_LIST as ::core::ffi::c_int as uint32_t);
         put32bit(&raw mut wptr, dsize);
         put8bit(&raw mut wptr, dcnt);
@@ -3397,12 +2963,11 @@ pub unsafe extern "C" fn nbd_handle_list_devices(
         }
         unixtowrite(
             sock,
-            ans as *const ::core::ffi::c_void,
+            ans.as_ptr() as *const ::core::ffi::c_void,
             (8 as uint32_t).wrapping_add(dsize),
             1000 as uint32_t,
             1000 as uint32_t,
         );
-        free(ans as *mut ::core::ffi::c_void);
     }
 }
 #[unsafe(no_mangle)]
@@ -3661,8 +3226,9 @@ pub unsafe extern "C" fn nbd_handle_request(mut sock: ::core::ffi::c_int) {
         let mut leng: uint32_t = 0;
         let mut hdr: [uint8_t; 8] = [0; 8];
         let mut buff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        // C: malloc'd packet buffer; now Vec-owned (buff borrows it).
+        let mut buffv: Vec<u8> = Vec::new();
         let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        buff = ::core::ptr::null_mut::<uint8_t>();
         '_err: {
             if unixtoread(
                 sock,
@@ -3677,10 +3243,8 @@ pub unsafe extern "C" fn nbd_handle_request(mut sock: ::core::ffi::c_int) {
                 leng = get32bit(&raw mut rptr);
                 if leng <= 100000 as uint32_t {
                     if leng > 0 as uint32_t {
-                        buff = malloc(leng as size_t) as *mut uint8_t;
-                        if buff.is_null() {
-                            break '_err;
-                        }
+                        buffv = vec![0; leng as usize];
+                        buff = buffv.as_mut_ptr();
                     } else {
                         buff = ::core::ptr::null_mut::<uint8_t>();
                     }
@@ -3717,9 +3281,6 @@ pub unsafe extern "C" fn nbd_handle_request(mut sock: ::core::ffi::c_int) {
                 }
             }
         }
-        if !buff.is_null() {
-            free(buff as *mut ::core::ffi::c_void);
-        }
     }
 }
 #[unsafe(no_mangle)]
@@ -3736,7 +3297,7 @@ pub unsafe extern "C" fn nbd_stop_all_devices() {
             nbd_stop((*bdl).nbdcp);
             nbd_free((*bdl).nbdcp);
             *bdlp = (*bdl).next as *mut bdlist;
-            free(bdl as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(bdl));
         }
     }
 }
@@ -3749,7 +3310,6 @@ pub unsafe extern "C" fn password_read(
         let mut passwordbuff: *mut ::core::ffi::c_char =
             ::core::ptr::null_mut::<::core::ffi::c_char>();
         let mut pbsize: size_t = 0;
-        let mut i: ::core::ffi::c_int = 0;
         fd = fopen(filename, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
         if fd.is_null() {
             fprintf(
@@ -3761,6 +3321,9 @@ pub unsafe extern "C" fn password_read(
         }
         passwordbuff = ::core::ptr::null_mut::<::core::ffi::c_char>();
         pbsize = 0 as size_t;
+        // ponytail: libc getline kept — __getdelim reallocs the buffer
+        // internally, so its ownership stays libc (freed with libc free
+        // below); the returned string is copied into CString ownership.
         if getline(&raw mut passwordbuff, &raw mut pbsize, fd) == -1 as __ssize_t {
             fprintf(
                 stderr,
@@ -3774,29 +3337,28 @@ pub unsafe extern "C" fn password_read(
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
         fclose(fd);
-        i = strlen(passwordbuff) as ::core::ffi::c_int;
-        while i > 0 as ::core::ffi::c_int {
-            i -= 1;
-            if !(*passwordbuff.offset(i as isize) as ::core::ffi::c_int
-                == '\n' as ::core::ffi::c_int
-                || *passwordbuff.offset(i as isize) as ::core::ffi::c_int
-                    == '\r' as ::core::ffi::c_int)
-            {
-                break;
-            }
-            *passwordbuff.offset(i as isize) = 0 as ::core::ffi::c_char;
+        // C: strlen, then strip trailing \n/\r. C quirk (frozen): the
+        // strip loop breaks at index 0, so a password of exactly ONE
+        // non-newline char is also rejected as "empty" (i==0).
+        let bytes = std::ffi::CStr::from_ptr(passwordbuff).to_bytes();
+        let mut end = bytes.len();
+        while end > 0 && (bytes[end - 1] == b'\n' || bytes[end - 1] == b'\r') {
+            end -= 1;
         }
-        if i == 0 as ::core::ffi::c_int {
+        let trimmed = bytes[..end].to_vec();
+        free(passwordbuff as *mut ::core::ffi::c_void);
+        if end <= 1 {
             fprintf(
                 stderr,
                 b"first line in password file (%s) is empty\n\0".as_ptr()
                     as *const ::core::ffi::c_char,
                 filename,
             );
-            free(passwordbuff as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        return passwordbuff;
+        return std::ffi::CString::new(trimmed)
+            .expect("CStr source has no interior NUL")
+            .into_raw();
     }
 }
 #[unsafe(no_mangle)]
@@ -3809,41 +3371,41 @@ pub unsafe extern "C" fn parse_option(
             == 0 as ::core::ffi::c_int
         {
             if !mcfg.masterport.is_null() {
-                free(mcfg.masterhost as *mut ::core::ffi::c_void);
+                cdrop(mcfg.masterhost);
             }
-            mcfg.masterhost = strdup(ovalue);
+            mcfg.masterhost = cstrdup(ovalue);
         } else if strcmp(oname, b"mfsport\0".as_ptr() as *const ::core::ffi::c_char)
             == 0 as ::core::ffi::c_int
         {
             if !mcfg.masterport.is_null() {
-                free(mcfg.masterport as *mut ::core::ffi::c_void);
+                cdrop(mcfg.masterport);
             }
-            mcfg.masterport = strdup(ovalue);
+            mcfg.masterport = cstrdup(ovalue);
         } else if strcmp(oname, b"mfsbind\0".as_ptr() as *const ::core::ffi::c_char)
             == 0 as ::core::ffi::c_int
         {
             if !mcfg.masterbind.is_null() {
-                free(mcfg.masterbind as *mut ::core::ffi::c_void);
+                cdrop(mcfg.masterbind);
             }
-            mcfg.masterbind = strdup(ovalue);
+            mcfg.masterbind = cstrdup(ovalue);
         } else if strcmp(
             oname,
             b"mfspassword\0".as_ptr() as *const ::core::ffi::c_char,
         ) == 0 as ::core::ffi::c_int
         {
             if !mcfg.masterpassword.is_null() {
-                free(mcfg.masterpassword as *mut ::core::ffi::c_void);
+                cdrop(mcfg.masterpassword);
             }
-            mcfg.masterpassword = strdup(ovalue);
+            mcfg.masterpassword = cstrdup(ovalue);
         } else if strcmp(
             oname,
             b"mfssubfolder\0".as_ptr() as *const ::core::ffi::c_char,
         ) == 0 as ::core::ffi::c_int
         {
             if !mcfg.masterpath.is_null() {
-                free(mcfg.masterpath as *mut ::core::ffi::c_void);
+                cdrop(mcfg.masterpath);
             }
-            mcfg.masterpath = strdup(ovalue);
+            mcfg.masterpath = cstrdup(ovalue);
         } else if strcmp(
             oname,
             b"mfsioretries\0".as_ptr() as *const ::core::ffi::c_char,
@@ -3946,9 +3508,9 @@ pub unsafe extern "C" fn parse_option(
         ) == 0 as ::core::ffi::c_int
         {
             if !mcfg.preferedlabels.is_null() {
-                free(mcfg.preferedlabels as *mut ::core::ffi::c_void);
+                cdrop(mcfg.preferedlabels);
             }
-            mcfg.preferedlabels = strdup(ovalue);
+            mcfg.preferedlabels = cstrdup(ovalue);
         } else if strcmp(
             oname,
             b"mfsnbdtimeout\0".as_ptr() as *const ::core::ffi::c_char,
@@ -3983,7 +3545,16 @@ pub unsafe extern "C" fn parse_options(
         let mut ovalue: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
         let mut onend: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
         let mut ovend: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        ostrcopy = strdup(optstring);
+        // C: strdup(optstring). The buffer is mutated in place (strsep
+        // delimiters and *onend/*ovend NUL writes), so CString is unfit
+        // (from_raw would recompute a shorter capacity). Box<[u8]> keeps
+        // the exact layout at the free sites below.
+        let mut obuf = std::ffi::CStr::from_ptr(optstring).to_bytes().to_vec();
+        obuf.push(0);
+        let obuf_len = obuf.len();
+        let mut obox = obuf.into_boxed_slice();
+        ostrcopy = obox.as_mut_ptr() as *mut ::core::ffi::c_char;
+        std::mem::forget(obox);
         osptr = ostrcopy;
         loop {
             option = strsep(
@@ -4042,7 +3613,10 @@ pub unsafe extern "C" fn parse_options(
                     b"option malformed: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
                     option,
                 );
-                free(ostrcopy as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    ostrcopy as *mut uint8_t,
+                    obuf_len,
+                )));
                 return -1 as ::core::ffi::c_int;
             }
             if oname == onend {
@@ -4051,11 +3625,17 @@ pub unsafe extern "C" fn parse_options(
             *onend = 0 as ::core::ffi::c_char;
             *ovend = 0 as ::core::ffi::c_char;
             if parse_option(oname, ovalue) < 0 as ::core::ffi::c_int {
-                free(ostrcopy as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    ostrcopy as *mut uint8_t,
+                    obuf_len,
+                )));
                 return -1 as ::core::ffi::c_int;
             }
         }
-        free(ostrcopy as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            ostrcopy as *mut uint8_t,
+            obuf_len,
+        )));
         return 0 as ::core::ffi::c_int;
     }
 }
@@ -4208,6 +3788,25 @@ pub unsafe extern "C" fn nbd_start_daemon(
         argc -= 1;
         argv = argv.offset(1);
         mfs_set_defaults(&raw mut mcfg);
+        // mfs_set_defaults (mfsio.rs) strdup's the defaults with libc;
+        // take them over into CString ownership so every mcfg string field
+        // in this module pairs cstrdup/cdrop (old buffer freed with libc
+        // free, matching its strdup).
+        for slot in [
+            &raw mut mcfg.masterhost,
+            &raw mut mcfg.masterport,
+            &raw mut mcfg.masterpath,
+            &raw mut mcfg.mountpoint,
+            &raw mut mcfg.logident,
+        ] {
+            let slot = slot as *mut *mut ::core::ffi::c_char;
+            let old = *slot;
+            if !old.is_null() {
+                let copy = cstrdup(old);
+                free(old as *mut ::core::ffi::c_void);
+                *slot = copy;
+            }
+        }
         passfile = ::core::ptr::null_mut::<::core::ffi::c_char>();
         lsockname = ::core::ptr::null_mut::<::core::ffi::c_char>();
         initfname = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -4225,51 +3824,51 @@ pub unsafe extern "C" fn nbd_start_daemon(
             match ch {
                 72 => {
                     if !mcfg.masterhost.is_null() {
-                        free(mcfg.masterhost as *mut ::core::ffi::c_void);
+                        cdrop(mcfg.masterhost);
                     }
-                    mcfg.masterhost = strdup(optarg);
+                    mcfg.masterhost = cstrdup(optarg);
                 }
                 80 => {
                     if !mcfg.masterport.is_null() {
-                        free(mcfg.masterport as *mut ::core::ffi::c_void);
+                        cdrop(mcfg.masterport);
                     }
-                    mcfg.masterport = strdup(optarg);
+                    mcfg.masterport = cstrdup(optarg);
                 }
                 66 => {
                     if !mcfg.masterbind.is_null() {
-                        free(mcfg.masterbind as *mut ::core::ffi::c_void);
+                        cdrop(mcfg.masterbind);
                     }
-                    mcfg.masterbind = strdup(optarg);
+                    mcfg.masterbind = cstrdup(optarg);
                 }
                 83 => {
                     if !mcfg.masterpath.is_null() {
-                        free(mcfg.masterpath as *mut ::core::ffi::c_void);
+                        cdrop(mcfg.masterpath);
                     }
-                    mcfg.masterpath = strdup(optarg);
+                    mcfg.masterpath = cstrdup(optarg);
                 }
                 112 => {
                     if !mcfg.masterpassword.is_null() {
-                        free(mcfg.masterpassword as *mut ::core::ffi::c_void);
+                        cdrop(mcfg.masterpassword);
                     }
-                    mcfg.masterpassword = strdup(optarg);
+                    mcfg.masterpassword = cstrdup(optarg);
                 }
                 120 => {
                     if !passfile.is_null() {
-                        free(passfile as *mut ::core::ffi::c_void);
+                        cdrop(passfile);
                     }
-                    passfile = strdup(optarg);
+                    passfile = cstrdup(optarg);
                 }
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                 }
                 105 => {
                     if !initfname.is_null() {
-                        free(initfname as *mut ::core::ffi::c_void);
+                        cdrop(initfname);
                     }
-                    initfname = strdup(optarg);
+                    initfname = cstrdup(optarg);
                 }
                 111 => {
                     if parse_options(optarg) < 0 as ::core::ffi::c_int {
@@ -4377,16 +3976,16 @@ pub unsafe extern "C" fn nbd_start_daemon(
         }
         processname_init(argc_back, argv_back as *mut *mut ::core::ffi::c_char);
         if !mcfg.logident.is_null() {
-            free(mcfg.logident as *mut ::core::ffi::c_void);
+            cdrop(mcfg.logident);
         }
-        mcfg.logident = strdup(b"mfsblockdev\0".as_ptr() as *const ::core::ffi::c_char);
+        mcfg.logident = cstrdup(b"mfsblockdev\0".as_ptr() as *const ::core::ffi::c_char);
         mcfg.logdaemon = 1 as ::core::ffi::c_int;
         if !mcfg.mountpoint.is_null() {
-            free(mcfg.mountpoint as *mut ::core::ffi::c_void);
+            cdrop(mcfg.mountpoint);
         }
-        mcfg.mountpoint = strdup(b"[NBD]\0".as_ptr() as *const ::core::ffi::c_char);
+        mcfg.mountpoint = cstrdup(b"[NBD]\0".as_ptr() as *const ::core::ffi::c_char);
         if lsockname.is_null() {
-            lsockname = strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+            lsockname = cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
             mkdir(NBD_LINK_PREFIX.as_ptr(), 0o777 as __mode_t);
         }
         lsock = unixsocket();
@@ -4410,7 +4009,7 @@ pub unsafe extern "C" fn nbd_start_daemon(
                     lsockname,
                     strerror(*__errno_location()),
                 );
-                free(lsockname as *mut ::core::ffi::c_void);
+                cdrop(lsockname);
                 return 1 as ::core::ffi::c_int;
             }
         }
@@ -4437,7 +4036,7 @@ pub unsafe extern "C" fn nbd_start_daemon(
             );
             close(lsock);
             unlink(lsockname);
-            free(lsockname as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
             return 1 as ::core::ffi::c_int;
         }
         workers_set = workers_init(
@@ -4552,7 +4151,7 @@ pub unsafe extern "C" fn nbd_start_daemon(
             b"socket file '%s' removed\0".as_ptr() as *const ::core::ffi::c_char,
             lsockname,
         );
-        free(lsockname as *mut ::core::ffi::c_void);
+        cdrop(lsockname);
         return 0 as ::core::ffi::c_int;
     }
 }
@@ -4615,9 +4214,9 @@ pub unsafe extern "C" fn nbd_stop_daemon(
             match ch {
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                 }
                 104 | _ => {
                     usage(appname);
@@ -4626,7 +4225,7 @@ pub unsafe extern "C" fn nbd_stop_daemon(
             }
         }
         if lsockname.is_null() {
-            lsockname = strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+            lsockname = cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
         }
         csock = unixsocket();
         '_err: {
@@ -4754,7 +4353,7 @@ pub unsafe extern "C" fn nbd_stop_daemon(
             close(csock);
         }
         if !lsockname.is_null() {
-            free(lsockname as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
         }
         return res;
     }
@@ -4767,6 +4366,8 @@ pub unsafe extern "C" fn nbd_add_mapping(
 ) -> ::core::ffi::c_int {
     unsafe {
         let mut buff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        // C: malloc'd packet buffer; now Vec-owned (buff borrows it).
+        let mut buffv: Vec<u8> = Vec::new();
         let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut filename: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -4812,25 +4413,25 @@ pub unsafe extern "C" fn nbd_add_mapping(
             match ch {
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                 }
                 102 => {
                     if !filename.is_null() {
-                        free(filename as *mut ::core::ffi::c_void);
+                        cdrop(filename);
                     }
-                    filename = strdup(optarg);
+                    filename = cstrdup(optarg);
                 }
                 100 => {
                     if !device.is_null() {
-                        free(device as *mut ::core::ffi::c_void);
+                        cdrop(device);
                     }
-                    device = strdup(optarg);
+                    device = cstrdup(optarg);
                 }
                 110 => {
                     if !linkname.is_null() {
-                        free(linkname as *mut ::core::ffi::c_void);
+                        cdrop(linkname);
                     }
                     if strlen(optarg) > NBD_LINK_PREFIX_LENG as size_t
                         && memcmp(
@@ -4839,9 +4440,9 @@ pub unsafe extern "C" fn nbd_add_mapping(
                             NBD_LINK_PREFIX_LENG as size_t,
                         ) == 0 as ::core::ffi::c_int
                     {
-                        linkname = strdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
+                        linkname = cstrdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
                     } else {
-                        linkname = strdup(optarg);
+                        linkname = cstrdup(optarg);
                     }
                 }
                 115 => {
@@ -4890,7 +4491,7 @@ pub unsafe extern "C" fn nbd_add_mapping(
             } else {
                 if lsockname.is_null() {
                     lsockname =
-                        strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+                        cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
                 }
                 csock = unixsocket();
                 if unixtoconnect(csock, lsockname, 1000 as uint32_t) < 0 as ::core::ffi::c_int {
@@ -4939,59 +4540,8 @@ pub unsafe extern "C" fn nbd_add_mapping(
                             .wrapping_add(pleng)
                             .wrapping_add(dleng)
                             .wrapping_add(nleng);
-                        buff =
-                            malloc((8 as uint32_t).wrapping_add(dsize) as size_t) as *mut uint8_t;
-                        if buff.is_null() {
-                            fprintf(
-                                stderr,
-                                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2238 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2238 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            abort();
-                        } else if buff
-                            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                -1 as ::core::ffi::c_int as usize,
-                            ) as *mut uint8_t
-                        {
-                            let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2238 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2238 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring,
-                            );
-                            abort();
-                        }
+                        buffv = vec![0; (8 as uint32_t).wrapping_add(dsize) as size_t];
+                        buff = buffv.as_mut_ptr();
                         wptr = buff;
                         put32bit(&raw mut wptr, MFSNBD_ADD as ::core::ffi::c_int as uint32_t);
                         put32bit(&raw mut wptr, dsize);
@@ -5081,61 +4631,8 @@ pub unsafe extern "C" fn nbd_add_mapping(
                                         lsockname,
                                     );
                                 } else {
-                                    free(buff as *mut ::core::ffi::c_void);
-                                    buff = malloc(leng as size_t) as *mut uint8_t;
-                                    if buff.is_null() {
-                                        fprintf(
-                                            stderr,
-                                            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            2288 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        );
-                                        mfs_log(
-                                            MFSLOG_SYSLOG,
-                                            MFSLOG_ERR,
-                                            b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            2288 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        );
-                                        abort();
-                                    } else if buff
-                                        == ::core::ptr::with_exposed_provenance_mut::<
-                                            ::core::ffi::c_void,
-                                        >(
-                                            -1 as ::core::ffi::c_int as usize
-                                        ) as *mut uint8_t
-                                    {
-                                        let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                                            strerr(*__errno_location());
-                                        mfs_log(
-                                            MFSLOG_SYSLOG,
-                                            MFSLOG_ERR,
-                                            b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            2288 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                            _mfs_errorstring_0,
-                                        );
-                                        fprintf(
-                                            stderr,
-                                            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                                as *const ::core::ffi::c_char,
-                                            2288 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                            _mfs_errorstring_0,
-                                        );
-                                        abort();
-                                    }
+                                    buffv = vec![0; leng as size_t];
+                                    buff = buffv.as_mut_ptr();
                                     if unixtoread(
                                         csock,
                                         buff as *mut ::core::ffi::c_void,
@@ -5191,22 +4688,19 @@ pub unsafe extern "C" fn nbd_add_mapping(
             close(csock);
         }
         if !lsockname.is_null() {
-            free(lsockname as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
         }
         if !filename.is_null() {
-            free(filename as *mut ::core::ffi::c_void);
+            cdrop(filename);
         }
         if !device.is_null() {
-            free(device as *mut ::core::ffi::c_void);
+            cdrop(device);
         }
         if !linkname.is_null() {
-            free(linkname as *mut ::core::ffi::c_void);
+            cdrop(linkname);
         }
         if !answer.is_null() {
-            free(answer as *mut ::core::ffi::c_void);
-        }
-        if !buff.is_null() {
-            free(buff as *mut ::core::ffi::c_void);
+            cdrop(answer);
         }
         return res;
     }
@@ -5219,6 +4713,8 @@ pub unsafe extern "C" fn nbd_remove_mapping(
 ) -> ::core::ffi::c_int {
     unsafe {
         let mut buff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        // C: malloc'd packet buffer; now Vec-owned (buff borrows it).
+        let mut buffv: Vec<u8> = Vec::new();
         let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut filename: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -5258,25 +4754,25 @@ pub unsafe extern "C" fn nbd_remove_mapping(
             match ch {
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                 }
                 102 => {
                     if !filename.is_null() {
-                        free(filename as *mut ::core::ffi::c_void);
+                        cdrop(filename);
                     }
-                    filename = strdup(optarg);
+                    filename = cstrdup(optarg);
                 }
                 100 => {
                     if !device.is_null() {
-                        free(device as *mut ::core::ffi::c_void);
+                        cdrop(device);
                     }
-                    device = strdup(optarg);
+                    device = cstrdup(optarg);
                 }
                 110 => {
                     if !linkname.is_null() {
-                        free(linkname as *mut ::core::ffi::c_void);
+                        cdrop(linkname);
                     }
                     if strlen(optarg) > NBD_LINK_PREFIX_LENG as size_t
                         && memcmp(
@@ -5285,9 +4781,9 @@ pub unsafe extern "C" fn nbd_remove_mapping(
                             NBD_LINK_PREFIX_LENG as size_t,
                         ) == 0 as ::core::ffi::c_int
                     {
-                        linkname = strdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
+                        linkname = cstrdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
                     } else {
-                        linkname = strdup(optarg);
+                        linkname = cstrdup(optarg);
                     }
                 }
                 104 | _ => {
@@ -5305,7 +4801,7 @@ pub unsafe extern "C" fn nbd_remove_mapping(
             } else {
                 if lsockname.is_null() {
                     lsockname =
-                        strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+                        cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
                 }
                 csock = unixsocket();
                 if unixtoconnect(csock, lsockname, 1000 as uint32_t) < 0 as ::core::ffi::c_int {
@@ -5358,58 +4854,8 @@ pub unsafe extern "C" fn nbd_remove_mapping(
                         .wrapping_add(pleng)
                         .wrapping_add(dleng)
                         .wrapping_add(nleng);
-                    buff = malloc((8 as uint32_t).wrapping_add(dsize) as size_t) as *mut uint8_t;
-                    if buff.is_null() {
-                        fprintf(
-                            stderr,
-                            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2441 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2441 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        abort();
-                    } else if buff
-                        == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                            -1 as ::core::ffi::c_int as usize,
-                        ) as *mut uint8_t
-                    {
-                        let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2441 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2441 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        abort();
-                    }
+                    buffv = vec![0; (8 as uint32_t).wrapping_add(dsize) as size_t];
+                    buff = buffv.as_mut_ptr();
                     wptr = buff;
                     put32bit(
                         &raw mut wptr,
@@ -5501,59 +4947,8 @@ pub unsafe extern "C" fn nbd_remove_mapping(
                                     lsockname,
                                 );
                             } else {
-                                free(buff as *mut ::core::ffi::c_void);
-                                buff = malloc(leng as size_t) as *mut uint8_t;
-                                if buff.is_null() {
-                                    fprintf(
-                                        stderr,
-                                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2490 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                    );
-                                    mfs_log(
-                                        MFSLOG_SYSLOG,
-                                        MFSLOG_ERR,
-                                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2490 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                    );
-                                    abort();
-                                } else if buff
-                                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                        -1 as ::core::ffi::c_int as usize,
-                                    ) as *mut uint8_t
-                                {
-                                    let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                                        strerr(*__errno_location());
-                                    mfs_log(
-                                        MFSLOG_SYSLOG,
-                                        MFSLOG_ERR,
-                                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2490 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        _mfs_errorstring_0,
-                                    );
-                                    fprintf(
-                                        stderr,
-                                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2490 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        _mfs_errorstring_0,
-                                    );
-                                    abort();
-                                }
+                                buffv = vec![0; leng as size_t];
+                                buff = buffv.as_mut_ptr();
                                 if unixtoread(
                                     csock,
                                     buff as *mut ::core::ffi::c_void,
@@ -5606,22 +5001,19 @@ pub unsafe extern "C" fn nbd_remove_mapping(
             close(csock);
         }
         if !lsockname.is_null() {
-            free(lsockname as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
         }
         if !filename.is_null() {
-            free(filename as *mut ::core::ffi::c_void);
+            cdrop(filename);
         }
         if !device.is_null() {
-            free(device as *mut ::core::ffi::c_void);
+            cdrop(device);
         }
         if !linkname.is_null() {
-            free(linkname as *mut ::core::ffi::c_void);
+            cdrop(linkname);
         }
         if !answer.is_null() {
-            free(answer as *mut ::core::ffi::c_void);
-        }
-        if !buff.is_null() {
-            free(buff as *mut ::core::ffi::c_void);
+            cdrop(answer);
         }
         return res;
     }
@@ -5634,6 +5026,8 @@ pub unsafe extern "C" fn nbd_resize_bdev(
 ) -> ::core::ffi::c_int {
     unsafe {
         let mut buff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        // C: malloc'd packet buffer; now Vec-owned (buff borrows it).
+        let mut buffv: Vec<u8> = Vec::new();
         let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut filename: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -5675,25 +5069,25 @@ pub unsafe extern "C" fn nbd_resize_bdev(
             match ch {
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                 }
                 102 => {
                     if !filename.is_null() {
-                        free(filename as *mut ::core::ffi::c_void);
+                        cdrop(filename);
                     }
-                    filename = strdup(optarg);
+                    filename = cstrdup(optarg);
                 }
                 100 => {
                     if !device.is_null() {
-                        free(device as *mut ::core::ffi::c_void);
+                        cdrop(device);
                     }
-                    device = strdup(optarg);
+                    device = cstrdup(optarg);
                 }
                 110 => {
                     if !linkname.is_null() {
-                        free(linkname as *mut ::core::ffi::c_void);
+                        cdrop(linkname);
                     }
                     if strlen(optarg) > NBD_LINK_PREFIX_LENG as size_t
                         && memcmp(
@@ -5702,9 +5096,9 @@ pub unsafe extern "C" fn nbd_resize_bdev(
                             NBD_LINK_PREFIX_LENG as size_t,
                         ) == 0 as ::core::ffi::c_int
                     {
-                        linkname = strdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
+                        linkname = cstrdup(optarg.offset(NBD_LINK_PREFIX_LENG as isize));
                     } else {
-                        linkname = strdup(optarg);
+                        linkname = cstrdup(optarg);
                     }
                 }
                 115 => {
@@ -5728,7 +5122,7 @@ pub unsafe extern "C" fn nbd_resize_bdev(
             } else {
                 if lsockname.is_null() {
                     lsockname =
-                        strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+                        cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
                 }
                 csock = unixsocket();
                 if unixtoconnect(csock, lsockname, 1000 as uint32_t) < 0 as ::core::ffi::c_int {
@@ -5781,58 +5175,8 @@ pub unsafe extern "C" fn nbd_resize_bdev(
                         .wrapping_add(pleng)
                         .wrapping_add(dleng)
                         .wrapping_add(nleng);
-                    buff = malloc((8 as uint32_t).wrapping_add(dsize) as size_t) as *mut uint8_t;
-                    if buff.is_null() {
-                        fprintf(
-                            stderr,
-                            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2648 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2648 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        abort();
-                    } else if buff
-                        == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                            -1 as ::core::ffi::c_int as usize,
-                        ) as *mut uint8_t
-                    {
-                        let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2648 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            2648 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        abort();
-                    }
+                    buffv = vec![0; (8 as uint32_t).wrapping_add(dsize) as size_t];
+                    buff = buffv.as_mut_ptr();
                     wptr = buff;
                     put32bit(
                         &raw mut wptr,
@@ -5925,59 +5269,8 @@ pub unsafe extern "C" fn nbd_resize_bdev(
                                     lsockname,
                                 );
                             } else {
-                                free(buff as *mut ::core::ffi::c_void);
-                                buff = malloc(leng as size_t) as *mut uint8_t;
-                                if buff.is_null() {
-                                    fprintf(
-                                        stderr,
-                                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                    );
-                                    mfs_log(
-                                        MFSLOG_SYSLOG,
-                                        MFSLOG_ERR,
-                                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                    );
-                                    abort();
-                                } else if buff
-                                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                        -1 as ::core::ffi::c_int as usize,
-                                    ) as *mut uint8_t
-                                {
-                                    let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                                        strerr(*__errno_location());
-                                    mfs_log(
-                                        MFSLOG_SYSLOG,
-                                        MFSLOG_ERR,
-                                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        _mfs_errorstring_0,
-                                    );
-                                    fprintf(
-                                        stderr,
-                                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                            as *const ::core::ffi::c_char,
-                                        2698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                        _mfs_errorstring_0,
-                                    );
-                                    abort();
-                                }
+                                buffv = vec![0; leng as size_t];
+                                buff = buffv.as_mut_ptr();
                                 if unixtoread(
                                     csock,
                                     buff as *mut ::core::ffi::c_void,
@@ -6030,22 +5323,19 @@ pub unsafe extern "C" fn nbd_resize_bdev(
             close(csock);
         }
         if !lsockname.is_null() {
-            free(lsockname as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
         }
         if !filename.is_null() {
-            free(filename as *mut ::core::ffi::c_void);
+            cdrop(filename);
         }
         if !device.is_null() {
-            free(device as *mut ::core::ffi::c_void);
+            cdrop(device);
         }
         if !linkname.is_null() {
-            free(linkname as *mut ::core::ffi::c_void);
+            cdrop(linkname);
         }
         if !answer.is_null() {
-            free(answer as *mut ::core::ffi::c_void);
-        }
-        if !buff.is_null() {
-            free(buff as *mut ::core::ffi::c_void);
+            cdrop(answer);
         }
         return res;
     }
@@ -6059,6 +5349,8 @@ pub unsafe extern "C" fn nbd_list_mappings(
     unsafe {
         let mut cbuff: [uint8_t; 8] = [0; 8];
         let mut buff: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
+        // C: malloc'd packet buffer; now Vec-owned (buff borrows it).
+        let mut buffv: Vec<u8> = Vec::new();
         let mut wptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut rptr: *const uint8_t = ::core::ptr::null::<uint8_t>();
         let mut dcnt: uint8_t = 0;
@@ -6104,9 +5396,9 @@ pub unsafe extern "C" fn nbd_list_mappings(
             match ch {
                 108 => {
                     if !lsockname.is_null() {
-                        free(lsockname as *mut ::core::ffi::c_void);
+                        cdrop(lsockname);
                     }
-                    lsockname = strdup(optarg);
+                    lsockname = cstrdup(optarg);
                     lsockcustom = 1 as uint8_t;
                 }
                 116 => {
@@ -6160,7 +5452,7 @@ pub unsafe extern "C" fn nbd_list_mappings(
             }
         }
         if lsockname.is_null() {
-            lsockname = strdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
+            lsockname = cstrdup(b"/dev/mfs/nbdsock\0".as_ptr() as *const ::core::ffi::c_char);
         }
         csock = unixsocket();
         if unixtoconnect(csock, lsockname, 1000 as uint32_t) < 0 as ::core::ffi::c_int {
@@ -6221,58 +5513,8 @@ pub unsafe extern "C" fn nbd_list_mappings(
                             lsockname,
                         );
                     } else {
-                        buff = malloc(leng as size_t) as *mut uint8_t;
-                        if buff.is_null() {
-                            fprintf(
-                                stderr,
-                                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2842 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2842 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            abort();
-                        } else if buff
-                            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                -1 as ::core::ffi::c_int as usize,
-                            ) as *mut uint8_t
-                        {
-                            let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2842 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/mfsbdev.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2842 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"buff\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring,
-                            );
-                            abort();
-                        }
+                        buffv = vec![0; leng as size_t];
+                        buff = buffv.as_mut_ptr();
                         if unixtoread(
                             csock,
                             buff as *mut ::core::ffi::c_void,
@@ -6525,13 +5767,13 @@ pub unsafe extern "C" fn nbd_list_mappings(
                                     );
                                 }
                                 if !path.is_null() {
-                                    free(path as *mut ::core::ffi::c_void);
+                                    cdrop(path);
                                 }
                                 if !device.is_null() {
-                                    free(device as *mut ::core::ffi::c_void);
+                                    cdrop(device);
                                 }
                                 if !linkname.is_null() {
-                                    free(linkname as *mut ::core::ffi::c_void);
+                                    cdrop(linkname);
                                 }
                                 dcnt = dcnt.wrapping_sub(1);
                             }
@@ -6545,10 +5787,7 @@ pub unsafe extern "C" fn nbd_list_mappings(
             close(csock);
         }
         if !lsockname.is_null() {
-            free(lsockname as *mut ::core::ffi::c_void);
-        }
-        if !buff.is_null() {
-            free(buff as *mut ::core::ffi::c_void);
+            cdrop(lsockname);
         }
         return res;
     }
@@ -6560,7 +5799,7 @@ unsafe fn main_0(
     unsafe {
         let mut appname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
         let mut res: ::core::ffi::c_int = 0;
-        appname = strdup(*argv.offset(0 as isize));
+        appname = cstrdup(*argv.offset(0 as isize));
         strerr_init();
         if argc < 2 as ::core::ffi::c_int {
             usage(appname);
@@ -6645,7 +5884,7 @@ unsafe fn main_0(
             usage(appname);
             res = 1 as ::core::ffi::c_int;
         }
-        free(appname as *mut ::core::ffi::c_void);
+        cdrop(appname);
         return res;
     }
 }
