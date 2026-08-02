@@ -143,5 +143,23 @@ use pthread start-routine or pthread join protocols internally. `mfs_fuse` has
 no remaining pthread mutex/condition or pthread TLS protocol; ACL scratch data
 uses Rust thread-local ownership. readdata/writedata/mastercomm no longer use
 pthread mutexes, condition variables, thread-spawn/join, or pthread-key TLS;
-malloc-owned backend structures and the separate bdev data path remain for
-later waves.
+their structs and buffers are Box/arena/thread-local owned, and the only
+surviving libc allocation in the mount closure is the ABI-bound iovec pair.
+
+## External boundary ledger (mount runtime closure)
+
+Verified libc/libfuse ownership protocols intentionally kept, with in-code
+annotations:
+
+- `plfsmount.rs` mfsopts five string fields (masterhost, masterport, bindhost,
+  proxyhost, subfolder): libfuse `fuse_opt_parse` writes `%s` templates into
+  struct offsets and free+strdup's them on repeated options (verified against
+  libfuse3 disassembly; a CString conversion reproduced a double-free).
+- `plfscommon::processname` environ copy: process bootstrap (annotated
+  boundary, AGENTS.md pattern).
+- `plfsclient::readdata` iovec array: fixed 3-arg `read_data_free_buff` ABI
+  cannot recover the count at free time.
+- libfuse/libc/POSIX syscall surface (fuse_*, sockets, sigmask, tcp*).
+- `mfsopts.password`: CString::into_raw intentional leak matching C.
+- plfscommon::charts is not in the mount closure (CGI-only); the separate
+  plfsbdev NBD daemon keeps its own transpiled copies.
