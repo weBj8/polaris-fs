@@ -14,6 +14,7 @@ pub enum _IO_marker {}
 extern crate c2rust_bitfields;
 #[allow(unused_imports)]
 use ::plfsbdev;
+use ::plfsbdev::src::mfscommon::squeue::{MallocPtr, SQueue};
 unsafe extern "C" {
     static mut stdout: *mut FILE;
     static mut stderr: *mut FILE;
@@ -173,10 +174,6 @@ unsafe extern "C" {
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
         arg: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    unsafe fn squeue_new(length: uint32_t) -> *mut ::core::ffi::c_void;
-    unsafe fn squeue_delete(que: *mut ::core::ffi::c_void);
-    unsafe fn squeue_put(que: *mut ::core::ffi::c_void, element: *mut ::core::ffi::c_void);
-    unsafe fn squeue_get(que: *mut ::core::ffi::c_void, element: *mut *mut ::core::ffi::c_void);
     unsafe fn workers_init(
         maxworkers: uint32_t,
         sustainworkers: uint32_t,
@@ -502,7 +499,7 @@ pub struct nbdcommon {
     pub nbdfd: ::core::ffi::c_int,
     pub ctrl_thread: pthread_t,
     pub active: ::core::ffi::c_int,
-    pub aqueue: *mut ::core::ffi::c_void,
+    pub aqueue: *mut SQueue<MallocPtr<nbdrequest>>,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -971,7 +968,8 @@ pub unsafe extern "C" fn nbd_worker_fn(mut data: *mut ::core::ffi::c_void, _work
                 (*r).status = 0 as uint32_t;
             }
         }
-        squeue_put((*nbdcp).aqueue, r as *mut ::core::ffi::c_void);
+        // aqueue is unbounded (created with max 0), so put never fails.
+        let _ = (*(*nbdcp).aqueue).put(MallocPtr::from_raw(r));
     }
 }
 #[unsafe(no_mangle)]
@@ -1129,7 +1127,10 @@ pub unsafe extern "C" fn send_thread(
         wptr = &raw mut commbuff as *mut uint8_t;
         put32bit(&raw mut wptr, NBD_REPLY_MAGIC as uint32_t);
         loop {
-            squeue_get((*nbdcp).aqueue, &raw mut data);
+            data = (*(*nbdcp).aqueue)
+                .get()
+                .map_or(::core::ptr::null_mut(), MallocPtr::into_raw)
+                as *mut ::core::ffi::c_void;
             if data.is_null() {
                 mfs_log(
                     MFSLOG_SYSLOG,
@@ -2173,7 +2174,7 @@ pub unsafe extern "C" fn nbd_start(
                                     as *const ::core::ffi::c_char,
                             );
                         } else if nbd_open_device(nbdcp, errmsg) >= 0 as ::core::ffi::c_int {
-                            (*nbdcp).aqueue = squeue_new(0 as uint32_t);
+                            (*nbdcp).aqueue = Box::into_raw(Box::new(SQueue::new(0 as uint32_t)));
                             if (*nbdcp).aqueue.is_null() {
                                 mfs_log(
                                     MFSLOG_SYSLOG,
@@ -2216,7 +2217,7 @@ pub unsafe extern "C" fn nbd_start(
                                             as *const ::core::ffi::c_char,
                                         strerror(*__errno_location()),
                                     );
-                                    squeue_delete((*nbdcp).aqueue);
+                                    drop(Box::from_raw((*nbdcp).aqueue));
                                 } else {
                                     err = mkdir(NBD_LINK_PREFIX.as_ptr(), 0o777 as __mode_t);
                                     err = unlink((*nbdcp).linkname);
@@ -2279,7 +2280,7 @@ pub unsafe extern "C" fn nbd_stop(mut nbdcp: *mut nbdcommon) {
             (*nbdcp).ctrl_thread,
             ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
         );
-        squeue_delete((*nbdcp).aqueue);
+        drop(Box::from_raw((*nbdcp).aqueue));
         mfs_flock((*nbdcp).mfsfd, LOCK_UN);
         mfs_close((*nbdcp).mfsfd);
         err = unlink((*nbdcp).linkname);

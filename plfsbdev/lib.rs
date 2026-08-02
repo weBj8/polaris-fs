@@ -36,7 +36,6 @@ pub mod src {
     } // mod mfsclient
     #[path = "plfscommon"]
     pub mod mfscommon {
-        pub mod pcqueue;
         pub mod squeue;
         pub mod strerr;
         pub mod workers;

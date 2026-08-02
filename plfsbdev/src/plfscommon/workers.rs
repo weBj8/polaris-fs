@@ -1,6 +1,7 @@
 pub enum _IO_wide_data {}
 pub enum _IO_codecvt {}
 pub enum _IO_marker {}
+use super::squeue::{MallocPtr, SQueue};
 use ::c2rust_bitfields;
 unsafe extern "C" {
     unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
@@ -47,11 +48,6 @@ unsafe extern "C" {
         __newmask: *const __sigset_t,
         __oldmask: *mut __sigset_t,
     ) -> ::core::ffi::c_int;
-    unsafe fn squeue_new(length: uint32_t) -> *mut ::core::ffi::c_void;
-    unsafe fn squeue_delete(que: *mut ::core::ffi::c_void);
-    unsafe fn squeue_close(que: *mut ::core::ffi::c_void);
-    unsafe fn squeue_put(que: *mut ::core::ffi::c_void, element: *mut ::core::ffi::c_void);
-    unsafe fn squeue_get(que: *mut ::core::ffi::c_void, element: *mut *mut ::core::ffi::c_void);
     static mut stderr: *mut FILE;
     unsafe fn fprintf(
         __stream: *mut FILE,
@@ -199,7 +195,7 @@ pub type FILE = _IO_FILE;
 pub struct _workers {
     pub sustainworkers: uint32_t,
     pub maxworkers: uint32_t,
-    pub jqueue: *mut ::core::ffi::c_void,
+    pub jqueue: *mut SQueue<MallocPtr<::core::ffi::c_void>>,
     pub name: *mut ::core::ffi::c_char,
     pub workerfn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, uint32_t) -> ()>,
     pub lock: pthread_mutex_t,
@@ -731,7 +727,9 @@ unsafe extern "C" fn workers_worker_thread(
                 }
             }
             firstrun = 0 as uint8_t;
-            squeue_get((*ws).jqueue, &raw mut data);
+            data = (*(*ws).jqueue)
+                .get()
+                .map_or(::core::ptr::null_mut(), MallocPtr::into_raw);
             let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*ws).lock);
             if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
                 if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
@@ -1104,7 +1102,7 @@ pub unsafe extern "C" fn workers_init(
         }
         (*ws).sustainworkers = sustainworkers;
         (*ws).maxworkers = maxworkers;
-        (*ws).jqueue = squeue_new(qleng);
+        (*ws).jqueue = Box::into_raw(Box::new(SQueue::new(qleng)));
         (*ws).name = strdup(name);
         (*ws).workerfn = workerfn;
         let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_init(
@@ -1710,7 +1708,7 @@ pub unsafe extern "C" fn workers_init(
 pub unsafe extern "C" fn workers_term(mut wsv: *mut ::core::ffi::c_void) {
     unsafe {
         let mut ws: *mut workers = wsv as *mut workers;
-        squeue_close((*ws).jqueue);
+        (*(*ws).jqueue).close();
         let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut (*ws).lock);
         if _mfs_assert_ret != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret < 0 as ::core::ffi::c_int
@@ -2001,7 +1999,7 @@ pub unsafe extern "C" fn workers_term(mut wsv: *mut ::core::ffi::c_void) {
             }
             abort();
         }
-        squeue_delete((*ws).jqueue);
+        drop(Box::from_raw((*ws).jqueue));
         let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_attr_destroy(&raw mut (*ws).thattr);
         if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
             if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
@@ -2302,6 +2300,8 @@ pub unsafe extern "C" fn workers_newjob(
 ) {
     unsafe {
         let mut ws: *mut workers = wsv as *mut workers;
-        squeue_put((*ws).jqueue, data);
+        // Queue is unbounded in this daemon, so put never fails; on a bounded
+        // closed queue C keeps the data with the caller, here MallocPtr frees it.
+        let _ = (*(*ws).jqueue).put(MallocPtr::from_raw(data));
     }
 }
