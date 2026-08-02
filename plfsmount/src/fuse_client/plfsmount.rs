@@ -59,12 +59,7 @@ unsafe extern "C" {
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    unsafe fn __getdelim(
-        __lineptr: *mut *mut ::core::ffi::c_char,
-        __n: *mut size_t,
-        __delimiter: ::core::ffi::c_int,
-        __stream: *mut FILE,
-    ) -> __ssize_t;
+    unsafe fn fileno(__stream: *mut FILE) -> ::core::ffi::c_int;
     unsafe fn mallopt(__param: ::core::ffi::c_int, __val: ::core::ffi::c_int)
     -> ::core::ffi::c_int;
     unsafe fn uname(__name: *mut utsname) -> ::core::ffi::c_int;
@@ -1058,16 +1053,6 @@ pub const KEY_CFGFILE: C2Rust_Unnamed = 0;
 pub const MCL_CURRENT: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const MCL_FUTURE: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const RLIM_INFINITY: ::core::ffi::c_ulonglong = 0xffffffffffffffff as ::core::ffi::c_ulonglong;
-#[inline]
-unsafe extern "C" fn getline(
-    mut __lineptr: *mut *mut ::core::ffi::c_char,
-    mut __n: *mut size_t,
-    mut __stream: *mut FILE,
-) -> __ssize_t {
-    unsafe {
-        return __getdelim(__lineptr, __n, '\n' as ::core::ffi::c_int, __stream);
-    }
-}
 pub const M_ARENA_TEST: ::core::ffi::c_int = -7 as ::core::ffi::c_int;
 pub const M_ARENA_MAX: ::core::ffi::c_int = -8 as ::core::ffi::c_int;
 pub const OOM_SCORE_ADJ_MIN: ::core::ffi::c_int = -1000 as ::core::ffi::c_int;
@@ -1587,6 +1572,30 @@ static mut mfsopts: mfsopts = mfsopts {
 };
 static mut defaultmountpoint: *mut ::core::ffi::c_char =
     ::core::ptr::null_mut::<::core::ffi::c_char>();
+// Owner for the strdup'd defaultmountpoint. The raw `defaultmountpoint`
+// pointer borrows from this CString, mirroring C's ownership: it stays valid
+// through mainloop (cmdopts.mountpoint may alias it) and the CString is
+// dropped at the C free(defaultmountpoint) site at the end of main.
+//
+// NOTE: mfsopts.{masterhost,masterport,bindhost,proxyhost,subfolder} are NOT
+// owned here. libfuse's fuse_opt_parse writes those struct offsets directly
+// (MFS_OPT %s templates) and its process_opt_param does
+// `free(*var); *var = strdup(param)` when an option is repeated, so those
+// fields must stay libc-malloc'd pointers for the whole option-parsing phase
+// (annotated boundary: libfuse ownership protocol).
+static mut DEFAULTMOUNTPOINT_OWNER: Option<std::ffi::CString> = None;
+// C: free(defaultmountpoint); defaultmountpoint = strdup(bytes). Replacing
+// the owner drops the previous allocation. unwrap is unreachable: callers
+// pass C-string bytes (no interior NUL).
+unsafe fn defaultmountpoint_set(bytes: &[u8]) {
+    unsafe {
+        DEFAULTMOUNTPOINT_OWNER = Some(std::ffi::CString::new(bytes).unwrap());
+        defaultmountpoint = (*&raw const DEFAULTMOUNTPOINT_OWNER)
+            .as_ref()
+            .unwrap()
+            .as_ptr() as *mut ::core::ffi::c_char;
+    }
+}
 static mut custom_cfg: ::core::ffi::c_int = 0;
 static mut mfs_opts_stage1: [fuse_opt; 3] = [fuse_opt {
     templ: ::core::ptr::null::<::core::ffi::c_char>(),
@@ -2035,9 +2044,6 @@ unsafe extern "C" fn mfs_opt_parse_cfg_file(
 ) {
     unsafe {
         let mut fd: *mut FILE = ::core::ptr::null_mut::<FILE>();
-        let mut lbuff: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let mut p: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let mut lbsize: size_t = 0;
         fd = fopen(filename, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
         if fd.is_null() {
             if optional == 0 as ::core::ffi::c_int {
@@ -2060,55 +2066,58 @@ unsafe extern "C" fn mfs_opt_parse_cfg_file(
             }
             return;
         }
-        lbsize = 1000 as size_t;
-        lbuff = malloc(lbsize) as *mut ::core::ffi::c_char;
         custom_cfg = 1 as ::core::ffi::c_int;
-        while getline(&raw mut lbuff, &raw mut lbsize, fd) != -1 as __ssize_t {
-            if *lbuff.offset(0 as isize) as ::core::ffi::c_int != '#' as ::core::ffi::c_int
-                && *lbuff.offset(0 as isize) as ::core::ffi::c_int != ';' as ::core::ffi::c_int
+        // C: lbuff = malloc(1000) grown by getline. A Vec filled by
+        // BufRead::read_until replaces both (getline keeps the '\n', so does
+        // read_until). ManuallyDrop: fclose below still owns the fd's close.
+        let fd_file = std::mem::ManuallyDrop::new(
+            <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fileno(fd)),
+        );
+        let mut reader = std::io::BufReader::new(&*fd_file);
+        let mut lbuff: Vec<u8> = Vec::new();
+        loop {
+            lbuff.clear();
+            match std::io::BufRead::read_until(&mut reader, b'\n', &mut lbuff) {
+                Ok(0) | Err(_) => break,
+                _ => {}
+            }
+            if lbuff[0] == b'#' || lbuff[0] == b';' {
+                continue;
+            }
+            // C: lbuff[999]=0 (buffer capacity is always >= 1000)
+            lbuff.truncate(999);
+            // C: cut the line at the first NUL/'\r'/'\n'
+            if let Some(pos) = lbuff
+                .iter()
+                .position(|&b| b == 0 || b == b'\r' || b == b'\n')
             {
-                *lbuff.offset(999 as isize) = 0 as ::core::ffi::c_char;
-                p = lbuff;
-                while *p != 0 {
-                    if *p as ::core::ffi::c_int == '\r' as ::core::ffi::c_int
-                        || *p as ::core::ffi::c_int == '\n' as ::core::ffi::c_int
-                    {
-                        *p = 0 as ::core::ffi::c_char;
-                        break;
-                    } else {
-                        p = p.offset(1);
-                    }
-                }
-                p = p.offset(-1);
-                while p >= lbuff
-                    && (*p as ::core::ffi::c_int == ' ' as ::core::ffi::c_int
-                        || *p as ::core::ffi::c_int == '\t' as ::core::ffi::c_int)
-                {
-                    *p = 0 as ::core::ffi::c_char;
-                    p = p.offset(-1);
-                }
-                p = lbuff;
-                while *p as ::core::ffi::c_int == ' ' as ::core::ffi::c_int
-                    || *p as ::core::ffi::c_int == '\t' as ::core::ffi::c_int
-                {
-                    p = p.offset(1);
-                }
-                if *p != 0 {
-                    if *p as ::core::ffi::c_int == '-' as ::core::ffi::c_int {
-                        fuse_opt_add_arg(outargs, p);
-                    } else if *p as ::core::ffi::c_int == '/' as ::core::ffi::c_int {
-                        if !defaultmountpoint.is_null() {
-                            free(defaultmountpoint as *mut ::core::ffi::c_void);
-                        }
-                        defaultmountpoint = strdup(p);
-                    } else {
-                        fuse_opt_add_arg(outargs, b"-o\0".as_ptr() as *const ::core::ffi::c_char);
-                        fuse_opt_add_arg(outargs, p);
-                    }
-                }
+                lbuff.truncate(pos);
+            }
+            // C: strip trailing then leading spaces/tabs
+            while lbuff.last().is_some_and(|&b| b == b' ' || b == b'\t') {
+                lbuff.pop();
+            }
+            let start = lbuff
+                .iter()
+                .position(|&b| b != b' ' && b != b'\t')
+                .unwrap_or(lbuff.len());
+            let line = &lbuff[start..];
+            if line.is_empty() {
+                continue;
+            }
+            // unwrap is unreachable: `line` is cut at the first NUL above.
+            if line[0] == b'-' {
+                let arg = std::ffi::CString::new(line).unwrap();
+                fuse_opt_add_arg(outargs, arg.as_ptr());
+            } else if line[0] == b'/' {
+                // C: free(defaultmountpoint); defaultmountpoint = strdup(p)
+                defaultmountpoint_set(line);
+            } else {
+                let arg = std::ffi::CString::new(line).unwrap();
+                fuse_opt_add_arg(outargs, b"-o\0".as_ptr() as *const ::core::ffi::c_char);
+                fuse_opt_add_arg(outargs, arg.as_ptr());
             }
         }
-        free(lbuff as *mut ::core::ffi::c_void);
         fclose(fd);
     }
 }
@@ -2158,6 +2167,9 @@ unsafe extern "C" fn mfs_opt_proc_stage2(
             FUSE_OPT_KEY_OPT => return 1 as ::core::ffi::c_int,
             FUSE_OPT_KEY_NONOPT => return 1 as ::core::ffi::c_int,
             2 => {
+                // libfuse ownership protocol: these fields are free()'d and
+                // strdup()'d by fuse_opt_parse itself (see MFS_OPT %s note at
+                // DEFAULTMOUNTPOINT_OWNER), so they stay libc allocations.
                 if !mfsopts.masterhost.is_null() {
                     free(mfsopts.masterhost as *mut ::core::ffi::c_void);
                 }
@@ -4010,9 +4022,6 @@ pub unsafe extern "C" fn password_read(
 ) -> *mut ::core::ffi::c_char {
     unsafe {
         let mut fd: *mut FILE = ::core::ptr::null_mut::<FILE>();
-        let mut passwordbuff: *mut ::core::ffi::c_char =
-            ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let mut pbsize: size_t = 0;
         let mut i: ::core::ffi::c_int = 0;
         fd = fopen(filename, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
         if fd.is_null() {
@@ -4023,32 +4032,37 @@ pub unsafe extern "C" fn password_read(
             );
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        pbsize = 0 as size_t;
-        passwordbuff = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if getline(&raw mut passwordbuff, &raw mut pbsize, fd) == -1 as __ssize_t {
+        // C: getline(&passwordbuff, &pbsize, fd) into a malloc'd buffer.
+        // Vec + read_until mirrors it (both keep the trailing '\n').
+        // ManuallyDrop: fclose below still owns the fd's close.
+        let fd_file = std::mem::ManuallyDrop::new(
+            <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fileno(fd)),
+        );
+        let mut reader = std::io::BufReader::new(&*fd_file);
+        let mut passwordbuff: Vec<u8> = Vec::new();
+        let nread = std::io::BufRead::read_until(&mut reader, b'\n', &mut passwordbuff);
+        fclose(fd);
+        if nread.unwrap_or(0) == 0 {
             fprintf(
                 stderr,
                 b"password file (%s) is empty\n\0".as_ptr() as *const ::core::ffi::c_char,
                 filename,
             );
-            if !passwordbuff.is_null() {
-                free(passwordbuff as *mut ::core::ffi::c_void);
-            }
-            fclose(fd);
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        fclose(fd);
-        i = strlen(passwordbuff) as ::core::ffi::c_int;
+        // C: i = strlen(passwordbuff) - an embedded NUL would end the string
+        i = passwordbuff
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(passwordbuff.len()) as ::core::ffi::c_int;
+        // C quirk: i is decremented before the break test, so a one-byte
+        // password without a trailing newline also lands on i==0 below.
         while i > 0 as ::core::ffi::c_int {
             i -= 1;
-            if !(*passwordbuff.offset(i as isize) as ::core::ffi::c_int
-                == '\n' as ::core::ffi::c_int
-                || *passwordbuff.offset(i as isize) as ::core::ffi::c_int
-                    == '\r' as ::core::ffi::c_int)
-            {
+            if !(passwordbuff[i as usize] == '\n' as u8 || passwordbuff[i as usize] == '\r' as u8) {
                 break;
             }
-            *passwordbuff.offset(i as isize) = 0 as ::core::ffi::c_char;
+            passwordbuff[i as usize] = 0;
         }
         if i == 0 as ::core::ffi::c_int {
             fprintf(
@@ -4057,10 +4071,19 @@ pub unsafe extern "C" fn password_read(
                     as *const ::core::ffi::c_char,
                 filename,
             );
-            free(passwordbuff as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        return passwordbuff;
+        let end = passwordbuff
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(passwordbuff.len());
+        // C returns the malloc'd buffer; the caller zeroes it with memset
+        // after hashing but never frees it. into_raw mirrors that
+        // intentional leak. unwrap is unreachable: `end` stops at the
+        // first NUL.
+        return std::ffi::CString::new(&passwordbuff[..end])
+            .unwrap()
+            .into_raw();
     }
 }
 #[unsafe(no_mangle)]
@@ -4323,6 +4346,8 @@ unsafe fn main_0(
                         if *c as ::core::ffi::c_int == ':' as ::core::ffi::c_int {
                             c = c.offset(1);
                             if *c != 0 {
+                                // libfuse protocol: libc allocations (see
+                                // MFS_OPT %s note at DEFAULTMOUNTPOINT_OWNER)
                                 mfsopts.subfolder = strdup(c);
                             }
                             mfsopts.masterhost =
@@ -4377,16 +4402,13 @@ unsafe fn main_0(
         }
         if custom_cfg == 0 as ::core::ffi::c_int {
             let mut cfgfd: ::core::ffi::c_int = 0;
-            let mut cfgfile: *mut ::core::ffi::c_char =
-                ::core::ptr::null_mut::<::core::ffi::c_char>();
-            cfgfile =
-                strdup(b"/usr/local/etc/mfs/mfsmount.cfg\0".as_ptr() as *const ::core::ffi::c_char);
-            cfgfd = open(cfgfile, O_RDONLY);
+            // C: strdup'd cfgfile, freed on the fallback path and after use;
+            // the CString drops at scope end.
+            let mut cfgfile = std::ffi::CString::new("/usr/local/etc/mfs/mfsmount.cfg").unwrap();
+            cfgfd = open(cfgfile.as_ptr(), O_RDONLY);
             if cfgfd < 0 as ::core::ffi::c_int && *__errno_location() == ENOENT {
-                free(cfgfile as *mut ::core::ffi::c_void);
-                cfgfile =
-                    strdup(b"/usr/local/etc/mfsmount.cfg\0".as_ptr() as *const ::core::ffi::c_char);
-                cfgfd = open(cfgfile, O_RDONLY);
+                cfgfile = std::ffi::CString::new("/usr/local/etc/mfsmount.cfg").unwrap();
+                cfgfd = open(cfgfile.as_ptr(), O_RDONLY);
                 if cfgfd >= 0 as ::core::ffi::c_int {
                     fprintf(
                         stderr,
@@ -4398,8 +4420,11 @@ unsafe fn main_0(
             if cfgfd >= 0 as ::core::ffi::c_int {
                 close(cfgfd);
             }
-            mfs_opt_parse_cfg_file(cfgfile, 1 as ::core::ffi::c_int, &raw mut defaultargs);
-            free(cfgfile as *mut ::core::ffi::c_void);
+            mfs_opt_parse_cfg_file(
+                cfgfile.as_ptr(),
+                1 as ::core::ffi::c_int,
+                &raw mut defaultargs,
+            );
         }
         i = defaultargs.argc;
         while i > 0 as ::core::ffi::c_int {
@@ -4867,6 +4892,7 @@ unsafe fn main_0(
         res = mainloop(&raw mut args, &raw mut cmdopts);
         fuse_opt_free_args(&raw mut defaultargs);
         fuse_opt_free_args(&raw mut args);
+        // libfuse protocol fields (strdup'd by us or by fuse itself):
         free(mfsopts.masterhost as *mut ::core::ffi::c_void);
         free(mfsopts.masterport as *mut ::core::ffi::c_void);
         if !mfsopts.bindhost.is_null() {
@@ -4876,9 +4902,9 @@ unsafe fn main_0(
             free(mfsopts.proxyhost as *mut ::core::ffi::c_void);
         }
         free(mfsopts.subfolder as *mut ::core::ffi::c_void);
-        if !defaultmountpoint.is_null() {
-            free(defaultmountpoint as *mut ::core::ffi::c_void);
-        }
+        // C: free(defaultmountpoint) - dropping the owner frees it; the raw
+        // pointer (and cmdopts.mountpoint alias) dangles exactly as in C.
+        DEFAULTMOUNTPOINT_OWNER = None;
         plfsclient::stats::term();
         strerr_term();
         return res;

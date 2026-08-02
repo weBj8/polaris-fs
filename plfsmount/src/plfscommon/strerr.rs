@@ -3,8 +3,6 @@ pub enum _IO_codecvt {}
 pub enum _IO_marker {}
 use ::c2rust_bitfields;
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn memset(
         __s: *mut ::core::ffi::c_void,
