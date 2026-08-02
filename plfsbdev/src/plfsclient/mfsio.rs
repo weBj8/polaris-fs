@@ -2171,6 +2171,9 @@ pub unsafe extern "C" fn mfs_fremovexattr(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mfs_acl_alloc(mut namedaclscnt: uint32_t) -> *mut mfsacl {
     unsafe {
+        // ponytail: libc malloc kept — mfsacl is variable-size
+        // (namedacls: [mfsaclid; 1] tail; caller over-allocates by
+        // namedaclscnt-1 entries). Freed by mfs_acl_free's libc free.
         if namedaclscnt == 0 as uint32_t {
             return malloc(::core::mem::size_of::<mfsacl>()) as *mut mfsacl;
         } else {
@@ -2350,7 +2353,12 @@ pub unsafe extern "C" fn mfs_setfacl(
         namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
             + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
         namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
-        namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
+        // C: namedacls = malloc(namedaclsize) ... free(namedacls) after the
+        // call. Vec-owned; freed on scope exit. namedaclsize==0 yields a
+        // dangling-but-unread pointer, matching malloc(0) never being
+        // dereferenced.
+        let mut namedacls_buf: Vec<uint8_t> = vec![0; namedaclsize as usize];
+        namedacls = namedacls_buf.as_mut_ptr();
         wptr = namedacls;
         i = 0 as uint32_t;
         while i < namedaclscnt {
@@ -2377,7 +2385,7 @@ pub unsafe extern "C" fn mfs_setfacl(
             namedacls,
             namedaclsize,
         );
-        free(namedacls as *mut ::core::ffi::c_void);
+        // C free(namedacls) — namedacls_buf drops here.
         if status as ::core::ffi::c_int != MFS_STATUS_OK {
             *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as ::core::ffi::c_int;
@@ -2408,7 +2416,12 @@ pub unsafe extern "C" fn mfs_fsetfacl(
         namedaclscnt = ((*aclrec).nuserscnt as ::core::ffi::c_int
             + (*aclrec).ngroupscnt as ::core::ffi::c_int) as uint32_t;
         namedaclsize = (6 as uint32_t).wrapping_mul(namedaclscnt);
-        namedacls = malloc(namedaclsize as size_t) as *mut uint8_t;
+        // C: namedacls = malloc(namedaclsize) ... free(namedacls) after the
+        // call. Vec-owned; freed on scope exit. namedaclsize==0 yields a
+        // dangling-but-unread pointer, matching malloc(0) never being
+        // dereferenced.
+        let mut namedacls_buf: Vec<uint8_t> = vec![0; namedaclsize as usize];
+        namedacls = namedacls_buf.as_mut_ptr();
         wptr = namedacls;
         i = 0 as uint32_t;
         while i < namedaclscnt {
@@ -2435,7 +2448,7 @@ pub unsafe extern "C" fn mfs_fsetfacl(
             namedacls,
             namedaclsize,
         );
-        free(namedacls as *mut ::core::ffi::c_void);
+        // C free(namedacls) — namedacls_buf drops here.
         if status as ::core::ffi::c_int != MFS_STATUS_OK {
             *__errno_location() = mfs_errorconv(status as ::core::ffi::c_int);
             return -1 as ::core::ffi::c_int;
@@ -2459,6 +2472,10 @@ pub unsafe extern "C" fn mfs_set_defaults(mut mcfg: *mut mfscfg) {
         (*mcfg).mastermd5pass = ::core::ptr::null_mut::<::core::ffi::c_char>();
         (*mcfg).mountpoint = strdup(b"[MFSIO]\0".as_ptr() as *const ::core::ffi::c_char);
         (*mcfg).preferedlabels = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        // ponytail: libc strdup kept — plfsbdev.rs mfs_setup take-over block
+        // (~line 3800) cstrdups these fields and releases the originals with
+        // libc free; converting to CString::into_raw here would make that
+        // libc free UB.
         (*mcfg).read_cache_mb = 128 as ::core::ffi::c_int;
         (*mcfg).write_cache_mb = 128 as ::core::ffi::c_int;
         (*mcfg).io_try_cnt = 30 as ::core::ffi::c_int;

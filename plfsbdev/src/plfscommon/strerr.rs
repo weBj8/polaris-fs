@@ -3,33 +3,12 @@ pub enum _IO_codecvt {}
 pub enum _IO_marker {}
 use ::c2rust_bitfields;
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn abort() -> !;
-    unsafe fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    static mut stderr: *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
     unsafe fn snprintf(
         __s: *mut ::core::ffi::c_char,
         __maxlen: size_t,
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    unsafe fn mfs_log(
-        mode: ::core::ffi::c_int,
-        priority: ::core::ffi::c_int,
-        fmt: *const ::core::ffi::c_char,
-        ...
-    );
 }
 pub type size_t = usize;
 pub type __uint64_t = u64;
@@ -773,61 +752,22 @@ static mut strerrstorage: *mut ::core::ffi::c_void = NULL;
 unsafe extern "C" fn strerr_storage_free() {
     unsafe {
         if !strerrstorage.is_null() {
-            free(strerrstorage);
+            // C: free(strerrstorage) — pointer intentionally NOT nulled
+            // (matches C; strerr is not called after strerr_term).
+            drop(Box::from_raw(
+                strerrstorage as *mut [u8; STRERR_BUFF_SIZE as usize],
+            ));
         }
     }
 }
 unsafe extern "C" fn strerr_storage_get() -> *mut ::core::ffi::c_void {
     unsafe {
         if strerrstorage.is_null() {
-            strerrstorage = malloc(STRERR_BUFF_SIZE as size_t);
-            if strerrstorage.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if strerrstorage
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                )
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsgui/../mfscommon/strerr.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    537 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"strerrstorage\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring,
-                );
-                abort();
-            }
+            // ponytail: Box-owned; was malloc + dead OOM/mmap-error abort
+            // branches (Rust global allocator aborts on OOM; malloc never
+            // returns -1). Freed by strerr_storage_free.
+            strerrstorage = Box::into_raw(Box::new([0u8; STRERR_BUFF_SIZE as usize]))
+                as *mut ::core::ffi::c_void;
         }
         return strerrstorage;
     }
@@ -851,13 +791,19 @@ pub unsafe extern "C" fn strerr_init() {
             errhsize <<= 1 as ::core::ffi::c_int;
             n >>= 1 as ::core::ffi::c_int;
         }
-        errhash = malloc(::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t))
-            as *mut errent;
-        memset(
-            errhash as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<errent>().wrapping_mul(errhsize as size_t),
-        );
+        // C: errhash = malloc(sizeof(errent)*errhsize); memset(...,0,...)
+        // Box-owned zeroed slice (num:0 + str:null == memset 0); freed in
+        // strerr_term.
+        errhash = Box::into_raw(
+            vec![
+                errent {
+                    num: 0 as ::core::ffi::c_int,
+                    str: ::core::ptr::null::<::core::ffi::c_char>(),
+                };
+                errhsize as usize
+            ]
+            .into_boxed_slice(),
+        ) as *mut errent;
         n = 0 as uint32_t;
         while !errtab[n as usize].str.is_null() {
             hash = errtab[n as usize].num as uint32_t;
@@ -912,7 +858,12 @@ pub unsafe extern "C" fn strerr(mut error: ::core::ffi::c_int) -> *const ::core:
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn strerr_term() {
     unsafe {
-        free(errhash as *mut ::core::ffi::c_void);
+        if !errhash.is_null() {
+            drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
+                errhash,
+                errhsize as usize,
+            )));
+        }
         strerr_storage_free();
         errhash = ::core::ptr::null_mut::<errent>();
     }
