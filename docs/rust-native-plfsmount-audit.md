@@ -63,17 +63,20 @@ Rust-native migration.
 
 Typed direct Rust APIs now cover `plfsclient::inoleng`, `stats`, `csdb`,
 `chunksdatacache`, `chunkrwlock`, and `extrapackets`, plus mount
-`dirattrcache`, `fdcache`, and stats/params file state. Mount callers no
-longer declare or call the old `dcache_*`, `fdcache_*`, `inoleng_*`, or
-`stats_term` internal ABI symbols. Directory cache blobs are owned copies;
-its registry is `Weak<DirCache>` and its indexes are ordinary Rust maps.
-`fdcache::acquire` returns an owned `FdEntry`, and `.stats/.params` handles
-use `Arc<Mutex<Sinfo>>` with `Vec<u8>` buffers.
+`dirattrcache`, `dirbuf`, `fdcache`, and stats/params file state. Mount callers
+no longer declare or call the old `dcache_*`, `dirbuf_*`, `fdcache_*`,
+`inoleng_*`, or `stats_term` internal ABI symbols. Directory cache blobs are
+owned copies; its registry is `Weak<DirCache>` and its indexes are ordinary
+Rust maps. Directory read handles are opaque `u64` tokens resolving to
+`Arc<DirSlot>`; credentials, supplementary groups, master response blocks,
+cursor state, and cache handles are owned behind Rust `Mutex`/`Condvar` state.
+`fdcache::acquire` returns an owned `FdEntry`, and `.stats/.params` handles use
+`Arc<Mutex<Sinfo>>` with `Vec<u8>` buffers.
 
 Verification for this wave:
 
 - `cargo test --release -p plfsclient`: 12 passed;
-- `cargo test --release -p plfsmount --lib`: 72 passed;
+- `cargo test --release -p plfsmount --lib`: 84 passed after the dirbuf wave;
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
@@ -83,11 +86,21 @@ Verification for this wave:
 - deployed image `7e4742d21cb9` digest
   `sha256:3df8ce060e99eac1bd1505961765cc219c00f644a89e5b65721f5e414186c7eb`.
 
+The dirbuf wave removed the raw table/free-list, variable-tail malloc blocks,
+per-slot pthread lock/condition protocol, and the internal C ABI exports
+`dirbuf_cleardata`, `mfs_readdir_readmore`, and `mfs_readdir_next`. Workspace
+search found no consumers of those internal translation artifacts; true
+libfuse callback symbols and signatures remain unchanged. Release now removes
+the token before close, holds in-flight state through `Arc`, serializes complete
+readdir replies, waits for an active fetch, and rejects stale handles. It also
+fixes the supplementary-group leak and validates a nonempty master response
+pointer before copying at the FFI boundary.
+
 Residual mount work is explicit: `mfs_fuse` still contains the generated
-`dirbuf`/`finfo` pthread lock and condition-variable protocol, `getgroups`
-still exposes its groups blob at the FUSE/C boundary, and `pcqueue` plus
-some FUSE metadata handles retain boundary-shaped ownership. These remain
-next migration waves; this commit does not claim raw/pthread global zero.
+`finfo` pthread lock and condition-variable protocol, `getgroups` still exposes
+its groups blob at the FUSE/C boundary, and `pcqueue` plus some FUSE metadata
+handles retain boundary-shaped ownership. These remain next migration waves;
+this commit does not claim raw/pthread global zero.
 
 ## Completed thread wave
 
@@ -100,7 +113,6 @@ The first native-thread wave now uses `std::thread::Builder`, `JoinHandle`,
 - mount symlink and xattr caches (Rust mutexes; xattr values use `Arc`).
 
 POSIX signal-mask calls remain at the system boundary. These modules no longer
-use pthread start-routine or pthread join protocols internally. Remaining
-pthread occurrences are concentrated in the generated `mfs_fuse` dirbuf/finfo
-lock protocol and the separate bdev data path; typed cache/thread modules above
-are no longer part of that residual list.
+use pthread start-routine or pthread join protocols internally. Remaining pthread occurrences are concentrated in the generated `mfs_fuse`
+`finfo` lock protocol and the separate bdev data path; typed cache/thread and
+dirbuf modules above are no longer part of that residual list.

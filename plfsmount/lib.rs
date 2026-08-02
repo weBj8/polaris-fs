@@ -36,6 +36,7 @@ pub mod src {
     pub mod fuse_client {
         pub mod dentry_invalidator;
         pub mod dirattrcache;
+        pub mod dirbuf;
         pub mod fdcache;
         pub mod getgroups;
         pub mod masterproxy;
