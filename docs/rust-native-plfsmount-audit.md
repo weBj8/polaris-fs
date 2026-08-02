@@ -88,8 +88,10 @@ Verification for this wave:
 - `cargo fmt --all` and `git diff --check`: passed;
 - CI run `30742916264`: gates, workspace tests, release build, cluster smoke,
   container build, and GHCR publish all passed;
-- deployed image `7e4742d21cb9` digest
-  `sha256:3df8ce060e99eac1bd1505961765cc219c00f644a89e5b65721f5e414186c7eb`.
+- deployed image `45ff7343310a` digest
+  `sha256:18e10073afd52a9d3160c4e32404bc8f626f45cb2fee5d07a4d1178d1b451556`
+  (plfsmount-only update; other services not restarted; post-deploy concurrent
+  read/write smoke passed).
 
 The dirbuf wave removed the raw table/free-list, variable-tail malloc blocks,
 per-slot pthread lock/condition protocol, and the internal C ABI exports

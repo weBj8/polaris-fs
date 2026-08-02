@@ -35,7 +35,16 @@ port 9421 beyond a private network.
 The image includes libfuse 3.18.2. Host libfuse version does not affect the
 container.
 
-Latest verified deployment: commit `7e4742d`, image tag
+Latest verified deployment: commit `45ff734`, image tag
+`45ff7343310a`, digest
+`sha256:18e10073afd52a9d3160c4e32404bc8f626f45cb2fee5d07a4d1178d1b451556`.
+CI run for `45ff734` (run `30764567563`) passed gates, release build,
+workspace tests, and cluster smoke before publishing this image. Production
+update was plfsmount-only (`docker compose up -d --no-deps plfsmount`);
+master, metalogger, and GUI were not restarted. Post-deploy concurrent
+read/write smoke passed (`DEPLOY_SMOKE_OK`) with a clean log scan.
+
+Previous verified deployment: commit `7e4742d`, image tag
 `7e4742d21cb9`, digest
 `sha256:3df8ce060e99eac1bd1505961765cc219c00f644a89e5b65721f5e414186c7eb`.
 CI run `30742916264` passed gates, release build, workspace tests, and cluster

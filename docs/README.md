@@ -37,9 +37,9 @@ P4 remains partial. Current mount/client ownership and thread waves are recorded
 in [rust-native-plfsmount-audit.md](rust-native-plfsmount-audit.md). Commit
 The latest completed source waves migrate `mfs_fuse` dirbuf and finfo ownership
 to typed Rust registries with `Arc`, `Mutex`, and `Condvar`; mount now has 96
-lib tests plus 2 bin tests. Production still runs verified image
-`7e4742d21cb9` per [deployment.md](deployment.md). Queue ownership, shared IO
-backends, and bdev data-path work remain open.
+lib tests plus 2 bin tests. Production runs verified image
+`45ff7343310a` per [deployment.md](deployment.md). Remaining work: typed
+collections for backend intrusive lists and the separate bdev data path.
 
 ## House rules (from methodology.md, binding on all docs here)
 
