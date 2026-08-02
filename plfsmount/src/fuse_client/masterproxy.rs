@@ -236,11 +236,15 @@ fn masterproxy_keepalive(cd: Arc<ConnData>) {
 fn masterproxy_server(cd: Arc<ConnData>) {
     unsafe {
         let mut header = [0u8; 8];
-        let auxbuffer = libc::malloc(AUXBUFFSIZE) as *mut uint8_t;
-        if auxbuffer.is_null() {
+        // C: malloc(AUXBUFFSIZE) + free at fn end; Vec-owned, dropped at scope
+        // exit. try_reserve keeps the C graceful-OOM path (sendnops=255).
+        let mut auxv: Vec<u8> = Vec::new();
+        if auxv.try_reserve_exact(AUXBUFFSIZE).is_err() {
             (*cd).sendnops.store(255, Ordering::SeqCst);
             return;
         }
+        auxv.resize(AUXBUFFSIZE, 0);
+        let auxbuffer = auxv.as_mut_ptr();
         loop {
             if tcptoread(
                 (*cd).sock,
@@ -360,7 +364,6 @@ fn masterproxy_server(cd: Arc<ConnData>) {
                 }
             }
         }
-        libc::free(auxbuffer as *mut ::core::ffi::c_void);
         (*cd).sendnops.store(255, Ordering::SeqCst);
     }
 }
