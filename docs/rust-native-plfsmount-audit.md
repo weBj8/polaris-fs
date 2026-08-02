@@ -103,8 +103,10 @@ pointer before copying at the FFI boundary.
 
 Residual mount work is explicit: readdata/writedata remain shared raw
 backends. Their job
-queues now use typed Rust ownership directly; worker pthread state remains for a
-later wave. Supplementary groups now use `Arc<[u32]>` ownership from the cache
+queues now use typed Rust ownership directly; worker-thread lifecycle (spawn,
+counters, termination wait/join) now uses `std::thread` plus a Rust
+`Mutex`/`Condvar` pool per module, while per-inodedata/chunkdata pthread locks,
+inoleng, chunkrwlock and mastercomm pthread state remain for a later wave. Supplementary groups now use `Arc<[u32]>` ownership from the cache
 through every `mfs_fuse` caller; only immediate backend FFI borrows remain.
 The finfo registry/state is now typed Rust ownership; its `ReadDataHandle` and
 `WriteDataHandle` are narrow RAII adapters whose Drop methods call the existing

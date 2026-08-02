@@ -65,21 +65,6 @@ unsafe extern "C" {
         __newmask: *const __sigset_t,
         __oldmask: *mut __sigset_t,
     ) -> ::core::ffi::c_int;
-    unsafe fn pthread_create(
-        __newthread: *mut pthread_t,
-        __attr: *const pthread_attr_t,
-        __start_routine: Option<
-            unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-        >,
-        __arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_detach(__th: pthread_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_init(__attr: *mut pthread_attr_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_destroy(__attr: *mut pthread_attr_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_setstacksize(
-        __attr: *mut pthread_attr_t,
-        __stacksize: size_t,
-    ) -> ::core::ffi::c_int;
     unsafe fn pthread_mutex_init(
         __mutex: *mut pthread_mutex_t,
         __mutexattr: *const pthread_mutexattr_t,
@@ -250,7 +235,6 @@ pub struct __pthread_cond_s {
     pub __unused_initialized_1: ::core::ffi::c_uint,
     pub __unused_initialized_2: ::core::ffi::c_uint,
 }
-pub type pthread_t = ::core::ffi::c_ulong;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union pthread_mutexattr_t {
@@ -264,12 +248,6 @@ pub union pthread_condattr_t {
     pub __align: ::core::ffi::c_int,
 }
 pub type pthread_key_t = ::core::ffi::c_uint;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_attr_t {
-    pub __size: [::core::ffi::c_char; 56],
-    pub __align: ::core::ffi::c_long,
-}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union pthread_mutex_t {
@@ -353,12 +331,6 @@ pub struct _cspri {
     pub priority: uint32_t,
 }
 pub type cspri = _cspri;
-pub type worker = worker_s;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct worker_s {
-    pub thread_id: pthread_t,
-}
 pub type rrequest = rrequest_s;
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -756,36 +728,103 @@ static mut inode_lock: pthread_mutex_t = pthread_mutex_t {
         },
     },
 };
-static mut workers_lock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0,
-        __count: 0,
-        __owner: 0,
-        __nusers: 0,
-        __kind: 0,
-        __spins: 0,
-        __glibc_reserved: 0,
-        __list: __pthread_list_t {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
+// Worker-thread lifecycle pool: replaces the C workers_lock mutex,
+// workers_avail/workers_total counters, worker_term_cond and worker_thattr
+// with a Rust Mutex+Condvar and std::thread JoinHandles. C detached workers
+// instead of joining; we keep handles and join in read_data_term after the
+// pool has drained (workers exit on a null job from the closed queue).
+struct ReadWorkerPoolState {
+    avail: u32,
+    total: u32,
+    lastnotify: u32,
+    stack_size: usize,
+    handles: Vec<std::thread::JoinHandle<()>>,
+}
+
+struct ReadWorkerPool {
+    state: std::sync::Mutex<ReadWorkerPoolState>,
+    term_cond: std::sync::Condvar,
+}
+
+static READ_WORKER_POOL: ReadWorkerPool = ReadWorkerPool {
+    state: std::sync::Mutex::new(ReadWorkerPoolState {
+        avail: 0,
+        total: 0,
+        lastnotify: 0,
+        stack_size: 0,
+        handles: Vec::new(),
+    }),
+    term_cond: std::sync::Condvar::new(),
 };
-static mut workers_avail: uint32_t = 0;
-static mut workers_total: uint32_t = 0;
-static mut worker_term_cond: pthread_cond_t = pthread_cond_t {
-    __data: __pthread_cond_s {
-        __wseq: __atomic_wide_counter { __value64: 0 },
-        __g1_start: __atomic_wide_counter { __value64: 0 },
-        __g_size: [0; 2],
-        __g1_orig_size: 0,
-        __wrefs: 0,
-        __g_signals: [0; 2],
-        __unused_initialized_1: 0,
-        __unused_initialized_2: 0,
-    },
-};
-static mut worker_thattr: pthread_attr_t = pthread_attr_t { __size: [0; 56] };
+
+impl ReadWorkerPool {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, ReadWorkerPoolState> {
+        // pthread mutexes have no poisoning; mirror that.
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    // C: read_data_spawn_worker (called with the pool state locked).
+    fn spawn_worker(&self, st: &mut ReadWorkerPoolState) {
+        unsafe {
+            let mut oldset: sigset_t = sigset_t { __val: [0; 16] };
+            let mut newset: sigset_t = sigset_t { __val: [0; 16] };
+            sigemptyset(&raw mut newset);
+            sigaddset(&raw mut newset, SIGTERM);
+            sigaddset(&raw mut newset, SIGINT);
+            sigaddset(&raw mut newset, SIGHUP);
+            sigaddset(&raw mut newset, SIGQUIT);
+            // Worker inherits the blocked signal mask, as with pthread_create.
+            pthread_sigmask(SIG_BLOCK, &raw mut newset, &raw mut oldset);
+            let res = std::thread::Builder::new()
+                .stack_size(st.stack_size)
+                .spawn(move || {
+                    read_worker(::core::ptr::null_mut::<::core::ffi::c_void>());
+                });
+            pthread_sigmask(
+                SIG_SETMASK,
+                &raw mut oldset,
+                ::core::ptr::null_mut::<__sigset_t>(),
+            );
+            // C: on pthread_create failure, return without touching counters.
+            let handle = match res {
+                Ok(handle) => handle,
+                Err(_) => return,
+            };
+            st.handles.push(handle);
+            st.avail = st.avail.wrapping_add(1);
+            st.total = st.total.wrapping_add(1);
+            if st.total.wrapping_rem(10 as u32) == 0 as u32 && st.total != st.lastnotify {
+                mfs_log(
+                    MFSLOG_SYSLOG,
+                    MFSLOG_INFO,
+                    b"read workers: %u+\0".as_ptr() as *const ::core::ffi::c_char,
+                    st.total,
+                );
+                st.lastnotify = st.total;
+            }
+        }
+    }
+
+    // C: read_data_close_worker (called with the pool state locked).
+    fn close_worker(&self, st: &mut ReadWorkerPoolState) {
+        unsafe {
+            st.avail = st.avail.wrapping_sub(1);
+            st.total = st.total.wrapping_sub(1);
+            if st.total == 0 as u32 {
+                self.term_cond.notify_one();
+            }
+            if st.total.wrapping_rem(10 as u32) == 0 as u32 && st.total != st.lastnotify {
+                mfs_log(
+                    MFSLOG_SYSLOG,
+                    MFSLOG_INFO,
+                    b"read workers: %u-\0".as_ptr() as *const ::core::ffi::c_char,
+                    st.total,
+                );
+                st.lastnotify = st.total;
+            }
+        }
+    }
+}
 static JQUEUE: QueueSlot<OwnedJob<rrequest>> = QueueSlot::new();
 
 unsafe fn read_queue_put(rreq: *mut rrequest) {
@@ -1789,184 +1828,8 @@ pub unsafe extern "C" fn read_job_end(
         }
     }
 }
-static mut lastnotify: uint32_t = 0 as uint32_t;
-#[inline]
-unsafe extern "C" fn read_data_spawn_worker() {
-    unsafe {
-        let mut oldset: sigset_t = sigset_t { __val: [0; 16] };
-        let mut newset: sigset_t = sigset_t { __val: [0; 16] };
-        let mut w: *mut worker = ::core::ptr::null_mut::<worker>();
-        let mut res: ::core::ffi::c_int = 0;
-        w = malloc(::core::mem::size_of::<worker>()) as *mut worker;
-        if w.is_null() {
-            return;
-        }
-        sigemptyset(&raw mut newset);
-        sigaddset(&raw mut newset, SIGTERM);
-        sigaddset(&raw mut newset, SIGINT);
-        sigaddset(&raw mut newset, SIGHUP);
-        sigaddset(&raw mut newset, SIGQUIT);
-        pthread_sigmask(SIG_BLOCK, &raw mut newset, &raw mut oldset);
-        res = pthread_create(
-            &raw mut (*w).thread_id,
-            &raw mut worker_thattr,
-            Some(
-                read_worker
-                    as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-            ),
-            w as *mut ::core::ffi::c_void,
-        );
-        pthread_sigmask(
-            SIG_SETMASK,
-            &raw mut oldset,
-            ::core::ptr::null_mut::<__sigset_t>(),
-        );
-        if res < 0 as ::core::ffi::c_int {
-            return;
-        }
-        workers_avail = workers_avail.wrapping_add(1);
-        workers_total = workers_total.wrapping_add(1);
-        if workers_total.wrapping_rem(10 as uint32_t) == 0 as uint32_t
-            && workers_total != lastnotify
-        {
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_INFO,
-                b"read workers: %u+\0".as_ptr() as *const ::core::ffi::c_char,
-                workers_total,
-            );
-            lastnotify = workers_total;
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn read_data_close_worker(mut w: *mut worker) {
-    unsafe {
-        workers_avail = workers_avail.wrapping_sub(1);
-        workers_total = workers_total.wrapping_sub(1);
-        if workers_total == 0 as uint32_t {
-            let mut _mfs_assert_ret: ::core::ffi::c_int =
-                pthread_cond_signal(&raw mut worker_term_cond);
-            if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-                if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                    && *__errno_location() != 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        *__errno_location(),
-                        _mfs_errorstring,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        *__errno_location(),
-                        _mfs_errorstring,
-                    );
-                } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                    && *__errno_location() == 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        _mfs_errorstring_0,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        _mfs_errorstring_0,
-                    );
-                } else {
-                    let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    let mut _mfs_errorstring_ret: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        _mfs_errorstring_ret,
-                        *__errno_location(),
-                        _mfs_errorstring_err,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        556 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_signal(&worker_term_cond)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret,
-                        _mfs_errorstring_ret,
-                        *__errno_location(),
-                        _mfs_errorstring_err,
-                    );
-                }
-                abort();
-            }
-        }
-        pthread_detach((*w).thread_id);
-        free(w as *mut ::core::ffi::c_void);
-        if workers_total.wrapping_rem(10 as uint32_t) == 0 as uint32_t
-            && workers_total != lastnotify
-        {
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_INFO,
-                b"read workers: %u-\0".as_ptr() as *const ::core::ffi::c_char,
-                workers_total,
-            );
-            lastnotify = workers_total;
-        }
-    }
-}
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn read_worker(
-    mut arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+pub unsafe extern "C" fn read_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut data: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         let mut datasrc: [data_source; 8] = [data_source {
@@ -2052,7 +1915,6 @@ pub unsafe extern "C" fn read_worker(
         let mut lrdiff: ::core::ffi::c_double = 0.;
         let mut timeoutadd: ::core::ffi::c_double = 0.;
         let mut firsttime: uint8_t = 1 as uint8_t;
-        let mut w: *mut worker = arg as *mut worker;
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         parts = 0 as uint8_t;
@@ -2078,319 +1940,13 @@ pub unsafe extern "C" fn read_worker(
             }
             parts = 0 as uint8_t;
             if firsttime as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                let mut _mfs_assert_ret: ::core::ffi::c_int =
-                    pthread_mutex_lock(&raw mut workers_lock);
-                if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-                    if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                        && *__errno_location() != 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            *__errno_location(),
-                            _mfs_errorstring,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            *__errno_location(),
-                            _mfs_errorstring,
-                        );
-                    } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                        && *__errno_location() == 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            _mfs_errorstring_0,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            _mfs_errorstring_0,
-                        );
-                    } else {
-                        let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        let mut _mfs_errorstring_ret: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            _mfs_errorstring_ret,
-                            *__errno_location(),
-                            _mfs_errorstring_err,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            689 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret,
-                            _mfs_errorstring_ret,
-                            *__errno_location(),
-                            _mfs_errorstring_err,
-                        );
-                    }
-                    abort();
-                }
-                workers_avail = workers_avail.wrapping_add(1);
-                if workers_avail > SUSTAIN_WORKERS as uint32_t {
-                    read_data_close_worker(w);
-                    let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                        pthread_mutex_unlock(&raw mut workers_lock);
-                    if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                        if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                            && *__errno_location() != 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_1,
-                            );
-                        } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                            && *__errno_location() == 0 as ::core::ffi::c_int
-                        {
-                            let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_2,
-                            );
-                        } else {
-                            let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                                strerr(_mfs_assert_ret_0);
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                    .as_ptr() as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                694 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                _mfs_assert_ret_0,
-                                _mfs_errorstring_ret_0,
-                                *__errno_location(),
-                                _mfs_errorstring_err_0,
-                            );
-                        }
-                        abort();
-                    }
+                let mut st = READ_WORKER_POOL.lock_state();
+                st.avail = st.avail.wrapping_add(1);
+                if st.avail > SUSTAIN_WORKERS as uint32_t {
+                    READ_WORKER_POOL.close_worker(&mut st);
+                    drop(st);
                     close_pipe(&raw mut pipefd as *mut ::core::ffi::c_int);
                     return NULL;
-                }
-                let mut _mfs_assert_ret_1: ::core::ffi::c_int =
-                    pthread_mutex_unlock(&raw mut workers_lock);
-                if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-                    if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                        && *__errno_location() != 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            *__errno_location(),
-                            _mfs_errorstring_3,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            *__errno_location(),
-                            _mfs_errorstring_3,
-                        );
-                    } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                        && *__errno_location() == 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring_4: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret_1);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            _mfs_errorstring_4,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            _mfs_errorstring_4,
-                        );
-                    } else {
-                        let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret_1);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            _mfs_errorstring_ret_1,
-                            *__errno_location(),
-                            _mfs_errorstring_err_1,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            698 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_1,
-                            _mfs_errorstring_ret_1,
-                            *__errno_location(),
-                            _mfs_errorstring_err_1,
-                        );
-                    }
-                    abort();
                 }
             }
             firsttime = 0 as uint8_t;
@@ -2398,326 +1954,23 @@ pub unsafe extern "C" fn read_worker(
                 .get()
                 .and_then(|queue| queue.get())
                 .map_or(::core::ptr::null_mut(), OwnedJob::into_raw);
-            let mut _mfs_assert_ret_2: ::core::ffi::c_int =
-                pthread_mutex_lock(&raw mut workers_lock);
-            if _mfs_assert_ret_2 != 0 as ::core::ffi::c_int {
-                if _mfs_assert_ret_2 < 0 as ::core::ffi::c_int
-                    && *__errno_location() != 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_5: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        *__errno_location(),
-                        _mfs_errorstring_5,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        *__errno_location(),
-                        _mfs_errorstring_5,
-                    );
-                } else if _mfs_assert_ret_2 > 0 as ::core::ffi::c_int
-                    && *__errno_location() == 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_6: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_2);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        _mfs_errorstring_6,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        _mfs_errorstring_6,
-                    );
-                } else {
-                    let mut _mfs_errorstring_err_2: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    let mut _mfs_errorstring_ret_2: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_2);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        _mfs_errorstring_ret_2,
-                        *__errno_location(),
-                        _mfs_errorstring_err_2,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        705 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_lock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_2,
-                        _mfs_errorstring_ret_2,
-                        *__errno_location(),
-                        _mfs_errorstring_err_2,
-                    );
-                }
-                abort();
-            }
+            let mut st = READ_WORKER_POOL.lock_state();
             if data.is_null() {
-                read_data_close_worker(w);
-                let mut _mfs_assert_ret_3: ::core::ffi::c_int =
-                    pthread_mutex_unlock(&raw mut workers_lock);
-                if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
-                    if _mfs_assert_ret_3 < 0 as ::core::ffi::c_int
-                        && *__errno_location() != 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring_7: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            *__errno_location(),
-                            _mfs_errorstring_7,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            *__errno_location(),
-                            _mfs_errorstring_7,
-                        );
-                    } else if _mfs_assert_ret_3 > 0 as ::core::ffi::c_int
-                        && *__errno_location() == 0 as ::core::ffi::c_int
-                    {
-                        let mut _mfs_errorstring_8: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret_3);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            _mfs_errorstring_8,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            _mfs_errorstring_8,
-                        );
-                    } else {
-                        let mut _mfs_errorstring_err_3: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        let mut _mfs_errorstring_ret_3: *const ::core::ffi::c_char =
-                            strerr(_mfs_assert_ret_3);
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            _mfs_errorstring_ret_3,
-                            *__errno_location(),
-                            _mfs_errorstring_err_3,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            710 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            _mfs_assert_ret_3,
-                            _mfs_errorstring_ret_3,
-                            *__errno_location(),
-                            _mfs_errorstring_err_3,
-                        );
-                    }
-                    abort();
-                }
+                READ_WORKER_POOL.close_worker(&mut st);
+                drop(st);
                 close_pipe(&raw mut pipefd as *mut ::core::ffi::c_int);
                 return NULL;
             }
-            workers_avail = workers_avail.wrapping_sub(1);
-            if workers_avail == 0 as uint32_t && workers_total < MAX_WORKERS as uint32_t {
-                read_data_spawn_worker();
+            st.avail = st.avail.wrapping_sub(1);
+            if st.avail == 0 as uint32_t && st.total < MAX_WORKERS as uint32_t {
+                READ_WORKER_POOL.spawn_worker(&mut st);
             }
-            timeoutadd = if workers_total > HEAVYLOAD_WORKERS as uint32_t {
+            timeoutadd = if st.total > HEAVYLOAD_WORKERS as uint32_t {
                 0.0f64
             } else {
                 WORKER_BUSY_NOJOBS_INCREASE_TIMEOUT
             };
-            let mut _mfs_assert_ret_4: ::core::ffi::c_int =
-                pthread_mutex_unlock(&raw mut workers_lock);
-            if _mfs_assert_ret_4 != 0 as ::core::ffi::c_int {
-                if _mfs_assert_ret_4 < 0 as ::core::ffi::c_int
-                    && *__errno_location() != 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_9: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        *__errno_location(),
-                        _mfs_errorstring_9,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        *__errno_location(),
-                        _mfs_errorstring_9,
-                    );
-                } else if _mfs_assert_ret_4 > 0 as ::core::ffi::c_int
-                    && *__errno_location() == 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_10: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_4);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        _mfs_errorstring_10,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        _mfs_errorstring_10,
-                    );
-                } else {
-                    let mut _mfs_errorstring_err_4: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    let mut _mfs_errorstring_ret_4: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_4);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        _mfs_errorstring_ret_4,
-                        *__errno_location(),
-                        _mfs_errorstring_err_4,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        721 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_mutex_unlock(&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_4,
-                        _mfs_errorstring_ret_4,
-                        *__errno_location(),
-                        _mfs_errorstring_err_4,
-                    );
-                }
-                abort();
-            }
+            drop(st);
             rreq = data;
             ind = (*rreq).ind as *mut inodedata;
             let mut _mfs_assert_ret_5: ::core::ffi::c_int =
@@ -11864,109 +11117,6 @@ pub unsafe extern "C" fn read_data_init(
             }
             abort();
         }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_init(
-            &raw mut workers_lock,
-            ::core::ptr::null::<pthread_mutexattr_t>(),
-        );
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2038 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_init(&workers_lock,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
-        }
         let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_init(
             &raw mut inode_lock,
             ::core::ptr::null::<pthread_mutexattr_t>(),
@@ -12070,109 +11220,6 @@ pub unsafe extern "C" fn read_data_init(
             }
             abort();
         }
-        let mut _mfs_assert_ret_3: ::core::ffi::c_int = pthread_cond_init(
-            &raw mut worker_term_cond,
-            ::core::ptr::null::<pthread_condattr_t>(),
-        );
-        if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_3 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_7,
-                );
-            } else if _mfs_assert_ret_3 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_8: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_8,
-                );
-            } else {
-                let mut _mfs_errorstring_err_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_3: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_3);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2040 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_init(&worker_term_cond,NULL)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_3,
-                    _mfs_errorstring_ret_3,
-                    *__errno_location(),
-                    _mfs_errorstring_err_3,
-                );
-            }
-            abort();
-        }
         indhash =
             malloc(::core::mem::size_of::<*mut inodedata>().wrapping_mul(IDHASHSIZE as size_t))
                 as *mut *mut inodedata;
@@ -12224,396 +11271,16 @@ pub unsafe extern "C" fn read_data_init(
             i = i.wrapping_add(1);
         }
         JQUEUE.init();
-        let mut _mfs_assert_ret_4: ::core::ffi::c_int = pthread_attr_init(&raw mut worker_thattr);
-        if _mfs_assert_ret_4 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_4 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_10: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_10,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_10,
-                );
-            } else if _mfs_assert_ret_4 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_11: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_4);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_11,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_11,
-                );
-            } else {
-                let mut _mfs_errorstring_err_4: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_4: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_4);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_err_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2052 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_init(&worker_thattr)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_4,
-                    _mfs_errorstring_ret_4,
-                    *__errno_location(),
-                    _mfs_errorstring_err_4,
-                );
-            }
-            abort();
-        }
         mystacksize = __sysconf(__SC_THREAD_STACK_MIN_VALUE) as size_t;
         if mystacksize < 0x20000 as ::core::ffi::c_int as size_t {
             mystacksize = 0x20000 as ::core::ffi::c_int as size_t;
         }
-        let mut _mfs_assert_ret_5: ::core::ffi::c_int =
-            pthread_attr_setstacksize(&raw mut worker_thattr, mystacksize);
-        if _mfs_assert_ret_5 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_5 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_12: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_12,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_12,
-                );
-            } else if _mfs_assert_ret_5 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_13: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_5);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_13,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_13,
-                );
-            } else {
-                let mut _mfs_errorstring_err_5: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_5: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_5);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_err_5,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2061 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_setstacksize(&worker_thattr,mystacksize)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_5,
-                    _mfs_errorstring_ret_5,
-                    *__errno_location(),
-                    _mfs_errorstring_err_5,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_6: ::core::ffi::c_int = pthread_mutex_lock(&raw mut workers_lock);
-        if _mfs_assert_ret_6 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_6 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_14: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_14,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_14,
-                );
-            } else if _mfs_assert_ret_6 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_15: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_6);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_15,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_15,
-                );
-            } else {
-                let mut _mfs_errorstring_err_6: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_6: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_6);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_err_6,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2072 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_6,
-                    _mfs_errorstring_ret_6,
-                    *__errno_location(),
-                    _mfs_errorstring_err_6,
-                );
-            }
-            abort();
-        }
-        workers_avail = 0 as uint32_t;
-        workers_total = 0 as uint32_t;
-        read_data_spawn_worker();
-        let mut _mfs_assert_ret_7: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut workers_lock);
-        if _mfs_assert_ret_7 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_7 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_16: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_16,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_16,
-                );
-            } else if _mfs_assert_ret_7 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_17: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_7);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_17,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_17,
-                );
-            } else {
-                let mut _mfs_errorstring_err_7: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_7: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_7);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_err_7,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2076 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_7,
-                    _mfs_errorstring_ret_7,
-                    *__errno_location(),
-                    _mfs_errorstring_err_7,
-                );
-            }
-            abort();
-        }
+        let mut st = READ_WORKER_POOL.lock_state();
+        st.avail = 0 as uint32_t;
+        st.total = 0 as uint32_t;
+        st.stack_size = mystacksize as usize;
+        READ_WORKER_POOL.spawn_worker(&mut st);
+        drop(st);
     }
 }
 #[unsafe(no_mangle)]
@@ -12623,295 +11290,17 @@ pub unsafe extern "C" fn read_data_term() {
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         let mut indn: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         JQUEUE.close();
-        let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_lock(&raw mut workers_lock);
-        if _mfs_assert_ret != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    *__errno_location(),
-                    _mfs_errorstring,
-                );
-            } else if _mfs_assert_ret > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_0,
-                );
-            } else {
-                let mut _mfs_errorstring_err: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret: *const ::core::ffi::c_char = strerr(_mfs_assert_ret);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2095 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_lock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret,
-                    _mfs_errorstring_ret,
-                    *__errno_location(),
-                    _mfs_errorstring_err,
-                );
-            }
-            abort();
+        let mut st = READ_WORKER_POOL.lock_state();
+        while st.total > 0 as uint32_t {
+            st = READ_WORKER_POOL
+                .term_cond
+                .wait(st)
+                .unwrap_or_else(|e| e.into_inner());
         }
-        while workers_total > 0 as uint32_t {
-            let mut _mfs_assert_ret_0: ::core::ffi::c_int =
-                pthread_cond_wait(&raw mut worker_term_cond, &raw mut workers_lock);
-            if _mfs_assert_ret_0 != 0 as ::core::ffi::c_int {
-                if _mfs_assert_ret_0 < 0 as ::core::ffi::c_int
-                    && *__errno_location() != 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        *__errno_location(),
-                        _mfs_errorstring_1,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        *__errno_location(),
-                        _mfs_errorstring_1,
-                    );
-                } else if _mfs_assert_ret_0 > 0 as ::core::ffi::c_int
-                    && *__errno_location() == 0 as ::core::ffi::c_int
-                {
-                    let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_0);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        _mfs_errorstring_2,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        _mfs_errorstring_2,
-                    );
-                } else {
-                    let mut _mfs_errorstring_err_0: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    let mut _mfs_errorstring_ret_0: *const ::core::ffi::c_char =
-                        strerr(_mfs_assert_ret_0);
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        _mfs_errorstring_ret_0,
-                        *__errno_location(),
-                        _mfs_errorstring_err_0,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0"
-                            .as_ptr() as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2098 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"pthread_cond_wait(&worker_term_cond,&workers_lock)\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        _mfs_assert_ret_0,
-                        _mfs_errorstring_ret_0,
-                        *__errno_location(),
-                        _mfs_errorstring_err_0,
-                    );
-                }
-                abort();
-            }
-        }
-        let mut _mfs_assert_ret_1: ::core::ffi::c_int = pthread_mutex_unlock(&raw mut workers_lock);
-        if _mfs_assert_ret_1 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_1 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_3,
-                );
-            } else if _mfs_assert_ret_1 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_4: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_4,
-                );
-            } else {
-                let mut _mfs_errorstring_err_1: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_1: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_1);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2100 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_unlock(&workers_lock)\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_1,
-                    _mfs_errorstring_ret_1,
-                    *__errno_location(),
-                    _mfs_errorstring_err_1,
-                );
-            }
-            abort();
+        let handles = ::core::mem::take(&mut st.handles);
+        drop(st);
+        for handle in handles {
+            let _ = handle.join();
         }
         JQUEUE.delete();
         let mut _mfs_assert_ret_2: ::core::ffi::c_int = pthread_mutex_lock(&raw mut inode_lock);
@@ -13517,310 +11906,6 @@ pub unsafe extern "C" fn read_data_term() {
                     _mfs_errorstring_ret_7,
                     *__errno_location(),
                     _mfs_errorstring_err_7,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_8: ::core::ffi::c_int =
-            pthread_attr_destroy(&raw mut worker_thattr);
-        if _mfs_assert_ret_8 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_8 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_17: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_17,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_17,
-                );
-            } else if _mfs_assert_ret_8 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_18: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_8);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_18,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_18,
-                );
-            } else {
-                let mut _mfs_errorstring_err_8: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_8: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_8);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_err_8,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2118 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_attr_destroy(&worker_thattr)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_8,
-                    _mfs_errorstring_ret_8,
-                    *__errno_location(),
-                    _mfs_errorstring_err_8,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_9: ::core::ffi::c_int =
-            pthread_cond_destroy(&raw mut worker_term_cond);
-        if _mfs_assert_ret_9 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_9 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_19: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    *__errno_location(),
-                    _mfs_errorstring_19,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    *__errno_location(),
-                    _mfs_errorstring_19,
-                );
-            } else if _mfs_assert_ret_9 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_20: *const ::core::ffi::c_char = strerr(_mfs_assert_ret_9);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    _mfs_errorstring_20,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    _mfs_errorstring_20,
-                );
-            } else {
-                let mut _mfs_errorstring_err_9: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_9: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_9);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    _mfs_errorstring_ret_9,
-                    *__errno_location(),
-                    _mfs_errorstring_err_9,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2119 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_cond_destroy(&worker_term_cond)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_9,
-                    _mfs_errorstring_ret_9,
-                    *__errno_location(),
-                    _mfs_errorstring_err_9,
-                );
-            }
-            abort();
-        }
-        let mut _mfs_assert_ret_10: ::core::ffi::c_int =
-            pthread_mutex_destroy(&raw mut workers_lock);
-        if _mfs_assert_ret_10 != 0 as ::core::ffi::c_int {
-            if _mfs_assert_ret_10 < 0 as ::core::ffi::c_int
-                && *__errno_location() != 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_21: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    *__errno_location(),
-                    _mfs_errorstring_21,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    *__errno_location(),
-                    _mfs_errorstring_21,
-                );
-            } else if _mfs_assert_ret_10 > 0 as ::core::ffi::c_int
-                && *__errno_location() == 0 as ::core::ffi::c_int
-            {
-                let mut _mfs_errorstring_22: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_10);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    _mfs_errorstring_22,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    _mfs_errorstring_22,
-                );
-            } else {
-                let mut _mfs_errorstring_err_10: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                let mut _mfs_errorstring_ret_10: *const ::core::ffi::c_char =
-                    strerr(_mfs_assert_ret_10);
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    _mfs_errorstring_ret_10,
-                    *__errno_location(),
-                    _mfs_errorstring_err_10,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - unexpected status, '%s' returned: %d : %s (errno=%d: %s)\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2120 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"pthread_mutex_destroy(&workers_lock)\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    _mfs_assert_ret_10,
-                    _mfs_errorstring_ret_10,
-                    *__errno_location(),
-                    _mfs_errorstring_err_10,
                 );
             }
             abort();
