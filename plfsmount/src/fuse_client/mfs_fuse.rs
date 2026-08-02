@@ -428,6 +428,7 @@ unsafe extern "C" {
         vid: *mut ::core::ffi::c_void,
         vrhead: *mut ::core::ffi::c_void,
         iov: *mut iovec,
+        iovcnt: uint32_t,
     );
     unsafe fn read_inode_clear_cache(inode: uint32_t, offset: uint64_t, leng: uint64_t);
     unsafe fn read_inode_set_length_active(inode: uint32_t, newlength: uint64_t);
@@ -8441,7 +8442,7 @@ pub unsafe extern "C" fn mfs_read(
             fuse_reply_iov(req, iov, iovcnt as ::core::ffi::c_int);
             fs_read_notify(ssize as uint64_t);
         }
-        read_data_free_buff(read_ptr, buffptr, iov);
+        read_data_free_buff(read_ptr, buffptr, iov, iovcnt);
         plfsclient::inoleng::read_end(fileinfo.as_ref().unwrap().length.as_ref().unwrap());
         let mut state = fileinfo.as_ref().unwrap().state();
         drop(state);

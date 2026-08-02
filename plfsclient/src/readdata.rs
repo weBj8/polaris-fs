@@ -32,8 +32,6 @@ unsafe extern "C" {
         __nfds: nfds_t,
         __timeout: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn qsort(
         __base: *mut ::core::ffi::c_void,
@@ -4290,56 +4288,11 @@ pub unsafe extern "C" fn read_data(
             if ((*ind).readahead as ::core::ffi::c_int) < READAHEAD_MAX {
                 (*ind).seqdata = (*ind).seqdata.wrapping_add(*size);
             }
-            *iov =
-                malloc(::core::mem::size_of::<iovec>().wrapping_mul(cnt as size_t)) as *mut iovec;
-            if (*iov).is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2571 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"*iov\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2571 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"*iov\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if *iov
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut iovec
-            {
-                let mut _mfs_errorstring_20: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2571 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"*iov\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_20,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    2571 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"*iov\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_20,
-                );
-                abort();
-            }
+            // C: malloc(cnt * sizeof(iovec)) + passert. Box<[iovec]> leaked as
+            // raw ptr (uninit like C; every entry written before use below);
+            // freed by read_data_free_buff with the count passed by callers.
+            *iov = Box::into_raw(Box::<[iovec]>::new_uninit_slice(cnt as usize).assume_init())
+                as *mut iovec;
             rl = rhead;
             i = 0 as uint32_t;
             while i < cnt {
@@ -4415,6 +4368,7 @@ pub unsafe extern "C" fn read_data_free_buff(
     mut vid: *mut ::core::ffi::c_void,
     mut vrhead: *mut ::core::ffi::c_void,
     mut iov: *mut iovec,
+    mut iovcnt: uint32_t,
 ) {
     unsafe {
         let mut ind: *mut inodedata = vid as *mut inodedata;
@@ -4436,7 +4390,11 @@ pub unsafe extern "C" fn read_data_free_buff(
             rl = rln;
         }
         if !iov.is_null() {
-            free(iov as *mut ::core::ffi::c_void);
+            // C: free(iov). Box<[iovec]> allocated with iovcnt entries.
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                iov,
+                iovcnt as usize,
+            )));
         }
         if (*ind).closing as ::core::ffi::c_int != 0 && (*ind).reqhead.is_null() {
             (*ind).closecond.notify_all();

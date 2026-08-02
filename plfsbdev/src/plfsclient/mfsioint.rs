@@ -347,6 +347,7 @@ unsafe extern "C" {
         vid: *mut ::core::ffi::c_void,
         vrhead: *mut ::core::ffi::c_void,
         iov: *mut iovec,
+        iovcnt: uint32_t,
     );
     unsafe fn read_inode_clear_cache(inode: uint32_t, offset: uint64_t, leng: uint64_t);
     unsafe fn read_inode_set_length_active(inode: uint32_t, newlength: uint64_t);
@@ -9247,7 +9248,7 @@ unsafe extern "C" fn mfs_int_pread_common(
                 i = i.wrapping_add(1);
             }
         }
-        read_data_free_buff((*fileinfo).rdata, buffptr, iov);
+        read_data_free_buff((*fileinfo).rdata, buffptr, iov, iovcnt);
         let mut _mfs_assert_ret_3: ::core::ffi::c_int =
             pthread_mutex_lock(&raw mut (*fileinfo).lock);
         if _mfs_assert_ret_3 != 0 as ::core::ffi::c_int {
