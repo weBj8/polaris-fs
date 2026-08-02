@@ -140,10 +140,6 @@ unsafe extern "C" {
         ...
     ) -> ::core::ffi::c_int;
     unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn mfs_fstat(fildes: ::core::ffi::c_int, buf: *mut stat) -> ::core::ffi::c_int;
     unsafe fn mfs_open(
         path: *const ::core::ffi::c_char,
@@ -168,12 +164,6 @@ unsafe extern "C" {
     unsafe fn mfs_set_defaults(mcfg_0: *mut mfscfg);
     unsafe fn mfs_init(mcfg_0: *mut mfscfg, stage: uint8_t) -> ::core::ffi::c_int;
     unsafe fn mfs_term();
-    unsafe fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn workers_init(
         maxworkers: uint32_t,
         sustainworkers: uint32_t,
@@ -297,7 +287,6 @@ pub struct timespec {
     pub tv_sec: __time_t,
     pub tv_nsec: __syscall_slong_t,
 }
-pub type pthread_t = ::core::ffi::c_ulong;
 pub type uint8_t = u8;
 pub type uint16_t = u16;
 pub type uint32_t = u32;
@@ -485,7 +474,6 @@ pub const MFSNBD_NOP: C2Rust_Unnamed_11 = 0;
 pub type C2Rust_Unnamed_12 = ::core::ffi::c_uint;
 pub const MFSNBD_ERROR: C2Rust_Unnamed_12 = 1;
 pub const MFSNBD_OK: C2Rust_Unnamed_12 = 0;
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct nbdcommon {
     pub linkname: *mut ::core::ffi::c_char,
@@ -497,7 +485,7 @@ pub struct nbdcommon {
     pub sp: [::core::ffi::c_int; 2],
     pub mfsfd: ::core::ffi::c_int,
     pub nbdfd: ::core::ffi::c_int,
-    pub ctrl_thread: pthread_t,
+    pub ctrl_thread: Option<std::thread::JoinHandle<()>>,
     pub active: ::core::ffi::c_int,
     pub aqueue: *mut SQueue<MallocPtr<nbdrequest>>,
 }
@@ -513,6 +501,13 @@ pub struct nbdrequest {
     pub status: uint32_t,
     pub data: [uint8_t; 1],
 }
+/// Sendable raw nbdcommon pointer for thread spawns (NBD threads share the
+/// session struct with the controller; lifetime managed by nbd_start/nbd_stop).
+#[derive(Clone, Copy)]
+struct NbdcPtr(*mut nbdcommon);
+// SAFETY: threads only access the shared session under its existing
+// synchronization (aqueue SQueue, active flag protocol), exactly as pthreads did.
+unsafe impl Send for NbdcPtr {}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct _bdlist {
@@ -1406,49 +1401,51 @@ pub unsafe extern "C" fn nbd_controller_thread(
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let mut nbdcp: *mut nbdcommon = arg as *mut nbdcommon;
-        let mut recv_th: pthread_t = 0;
-        let mut send_th: pthread_t = 0;
+        let mut recv_th: Option<std::thread::JoinHandle<()>> = None;
+        let mut send_th: Option<std::thread::JoinHandle<()>> = None;
         let mut thflags: uint8_t = 0;
         thflags = 0 as uint8_t;
         while (*nbdcp).active != 0 {
             while (*nbdcp).active != 0 {
-                if lwt_minthread_create(
-                    &raw mut send_th,
-                    0 as uint8_t,
-                    Some(
-                        send_thread
-                            as unsafe extern "C" fn(
-                                *mut ::core::ffi::c_void,
-                            )
-                                -> *mut ::core::ffi::c_void,
-                    ),
-                    nbdcp as *mut ::core::ffi::c_void,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    sleep(1 as ::core::ffi::c_uint);
-                } else {
-                    thflags = (thflags as ::core::ffi::c_int | 1 as ::core::ffi::c_int) as uint8_t;
-                    break;
+                // C: lwt_minthread_create(joinable, send_thread); spawn_min
+                // keeps the same stack clamp + blocked daemon signal mask.
+                let ptr = NbdcPtr(nbdcp);
+                match plfscommon::lwthread::spawn_min("nbdsend", move || {
+                    // Bind whole wrapper: edition-2024 closures otherwise
+                    // capture only the ptr.0 field (not Send).
+                    let ptr = ptr;
+                    unsafe {
+                        send_thread(ptr.0 as *mut ::core::ffi::c_void);
+                    }
+                }) {
+                    Err(_) => {
+                        sleep(1 as ::core::ffi::c_uint);
+                    }
+                    Ok(handle) => {
+                        send_th = Some(handle);
+                        thflags =
+                            (thflags as ::core::ffi::c_int | 1 as ::core::ffi::c_int) as uint8_t;
+                        break;
+                    }
                 }
             }
             while (*nbdcp).active != 0 {
-                if lwt_minthread_create(
-                    &raw mut recv_th,
-                    0 as uint8_t,
-                    Some(
-                        receive_thread
-                            as unsafe extern "C" fn(
-                                *mut ::core::ffi::c_void,
-                            )
-                                -> *mut ::core::ffi::c_void,
-                    ),
-                    nbdcp as *mut ::core::ffi::c_void,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    sleep(1 as ::core::ffi::c_uint);
-                } else {
-                    thflags = (thflags as ::core::ffi::c_int | 2 as ::core::ffi::c_int) as uint8_t;
-                    break;
+                let ptr = NbdcPtr(nbdcp);
+                match plfscommon::lwthread::spawn_min("nbdrecv", move || {
+                    let ptr = ptr;
+                    unsafe {
+                        receive_thread(ptr.0 as *mut ::core::ffi::c_void);
+                    }
+                }) {
+                    Err(_) => {
+                        sleep(1 as ::core::ffi::c_uint);
+                    }
+                    Ok(handle) => {
+                        recv_th = Some(handle);
+                        thflags =
+                            (thflags as ::core::ffi::c_int | 2 as ::core::ffi::c_int) as uint8_t;
+                        break;
+                    }
                 }
             }
             if (*nbdcp).active != 0 {
@@ -1469,10 +1466,14 @@ pub unsafe extern "C" fn nbd_controller_thread(
             close((*nbdcp).sp[0 as usize]);
             close((*nbdcp).sp[1 as usize]);
             if thflags as ::core::ffi::c_int & 2 as ::core::ffi::c_int != 0 {
-                pthread_join(recv_th, ::core::ptr::null_mut::<*mut ::core::ffi::c_void>());
+                if let Some(handle) = recv_th.take() {
+                    let _ = handle.join();
+                }
             }
             if thflags as ::core::ffi::c_int & 1 as ::core::ffi::c_int != 0 {
-                pthread_join(send_th, ::core::ptr::null_mut::<*mut ::core::ffi::c_void>());
+                if let Some(handle) = send_th.take() {
+                    let _ = handle.join();
+                }
             }
             thflags = 0 as uint8_t;
             close((*nbdcp).nbdfd);
@@ -2190,18 +2191,24 @@ pub unsafe extern "C" fn nbd_start(
                                 );
                             } else {
                                 (*nbdcp).active = 1 as ::core::ffi::c_int;
-                                err = lwt_minthread_create(
-                                    &raw mut (*nbdcp).ctrl_thread,
-                                    0 as uint8_t,
-                                    Some(
-                                        nbd_controller_thread
-                                            as unsafe extern "C" fn(
-                                                *mut ::core::ffi::c_void,
-                                            )
-                                                -> *mut ::core::ffi::c_void,
-                                    ),
-                                    nbdcp as *mut ::core::ffi::c_void,
-                                );
+                                // C: lwt_minthread_create(joinable,
+                                // nbd_controller_thread). spawn_min keeps the
+                                // same stack clamp + blocked daemon signals.
+                                let ptr = NbdcPtr(nbdcp);
+                                match plfscommon::lwthread::spawn_min("nbdctrl", move || {
+                                    let ptr = ptr;
+                                    unsafe {
+                                        nbd_controller_thread(ptr.0 as *mut ::core::ffi::c_void);
+                                    }
+                                }) {
+                                    Ok(handle) => {
+                                        (*nbdcp).ctrl_thread = Some(handle);
+                                        err = 0 as ::core::ffi::c_int;
+                                    }
+                                    Err(_) => {
+                                        err = -(1 as ::core::ffi::c_int);
+                                    }
+                                }
                                 if err < 0 as ::core::ffi::c_int {
                                     mfs_log(
                                         MFSLOG_SYSLOG,
@@ -2276,10 +2283,9 @@ pub unsafe extern "C" fn nbd_stop(mut nbdcp: *mut nbdcommon) {
                 strerror(*__errno_location()),
             );
         }
-        pthread_join(
-            (*nbdcp).ctrl_thread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
+        if let Some(handle) = (*nbdcp).ctrl_thread.take() {
+            let _ = handle.join();
+        }
         drop(Box::from_raw((*nbdcp).aqueue));
         mfs_flock((*nbdcp).mfsfd, LOCK_UN);
         mfs_close((*nbdcp).mfsfd);
@@ -2653,6 +2659,9 @@ unsafe extern "C" fn nbd_auto_maps(mut cfgfname: *const ::core::ffi::c_char) -> 
                 );
                 abort();
             }
+            // Rust JoinHandle slot (replaces pthread_t): init before any
+            // nbd_stop path can take() it; malloc leaves it uninit otherwise.
+            std::ptr::write(&raw mut (*(*bdl).nbdcp).ctrl_thread, None);
             (*(*bdl).nbdcp).mfsfile = nbd_packet_to_str(path, pleng as uint32_t);
             (*(*bdl).nbdcp).nbddevice = nbd_packet_to_str(device, dleng as uint32_t);
             (*(*bdl).nbdcp).linkname = nbd_packet_to_str(name, nleng as uint32_t);
@@ -2958,6 +2967,9 @@ pub unsafe extern "C" fn nbd_handle_add_device(
                 );
                 abort();
             }
+            // Rust JoinHandle slot (replaces pthread_t): init before any
+            // nbd_stop path can take() it; malloc leaves it uninit otherwise.
+            std::ptr::write(&raw mut (*(*bdl).nbdcp).ctrl_thread, None);
             (*(*bdl).nbdcp).mfsfile = nbd_packet_to_str(path, pleng as uint32_t);
             (*(*bdl).nbdcp).nbddevice = nbd_packet_to_str(device, dleng as uint32_t);
             (*(*bdl).nbdcp).linkname = nbd_packet_to_str(name, nleng as uint32_t);
