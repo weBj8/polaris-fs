@@ -1315,10 +1315,11 @@ pub unsafe extern "C" fn mfs_meta_opendir(
                 wasread: false,
                 lock: StdMutex::new(()),
             });
-            (*fi).fh = Box::into_raw(dirinfo) as ::core::ffi::c_ulong;
+            let raw = Box::into_raw(dirinfo);
+            (*fi).fh = raw as ::core::ffi::c_ulong;
             if fuse_reply_open(req, fi) == -ENOENT {
                 (*fi).fh = 0;
-                drop(Box::from_raw((*fi).fh as *mut DirBuf));
+                drop(Box::from_raw(raw));
             }
         } else {
             fuse_reply_err(req, ENOTDIR);
@@ -1403,9 +1404,15 @@ pub unsafe extern "C" fn mfs_meta_releasedir(
     fi: *mut fuse_file_info,
 ) {
     unsafe {
-        if (*fi).fh != 0 {
+        let raw = (*fi).fh as *mut DirBuf;
+        if !raw.is_null() {
+            // Match C teardown: wait for any in-flight readdir before drop.
+            {
+                let dirinfo = &*raw;
+                let _g = dirinfo.lock.lock().unwrap();
+            }
             // SAFETY: fh from mfs_meta_opendir, released exactly once.
-            drop(Box::from_raw((*fi).fh as *mut DirBuf));
+            drop(Box::from_raw(raw));
             (*fi).fh = 0;
         }
         fuse_reply_err(req, 0);
@@ -1450,10 +1457,11 @@ pub unsafe extern "C" fn mfs_meta_open(req: fuse_req_t, ino: fuse_ino_t, fi: *mu
             lock: StdMutex::new(()),
         });
         (*fi).set_direct_io(1);
-        (*fi).fh = Box::into_raw(pathinfo) as ::core::ffi::c_ulong;
+        let raw = Box::into_raw(pathinfo);
+        (*fi).fh = raw as ::core::ffi::c_ulong;
         if fuse_reply_open(req, fi) == -ENOENT {
             (*fi).fh = 0;
-            drop(Box::from_raw((*fi).fh as *mut PathBuf));
+            drop(Box::from_raw(raw));
         }
     }
 }
@@ -1470,8 +1478,13 @@ pub unsafe extern "C" fn mfs_meta_release(
             fuse_reply_err(req, 0);
             return;
         }
+        let raw = (*fi).fh as *mut PathBuf;
+        if raw.is_null() {
+            fuse_reply_err(req, EBADF);
+            return;
+        }
         // SAFETY: fh from mfs_meta_open, released exactly once.
-        let pathinfo = Box::from_raw((*fi).fh as *mut PathBuf);
+        let pathinfo = Box::from_raw(raw);
         {
             let _g = pathinfo.lock.lock().unwrap();
             let mut data = pathinfo.data.clone();
