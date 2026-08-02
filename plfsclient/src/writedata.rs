@@ -210,8 +210,12 @@ pub struct cblock_s {
     pub writeid: uint32_t,
     pub from: uint32_t,
     pub to: uint32_t,
-    pub next: *mut cblock_s,
-    pub prev: *mut cblock_s,
+    // C: struct cblock_s *next, *prev — free-list link plus the per-chunkdata
+    // datachain links. Replaced by the FREECBLOCKS stack and
+    // chunkdata_s.datachain below. Blocks live in CACHEBLOCKS_ARENA (never
+    // individually freed) and raw handles escape into write_worker locals
+    // (cb/ncb/rcb across loop iterations), so both collections only
+    // enumerate arena pointers.
 }
 pub type cblock = cblock_s;
 // std::sync primitives replace pthread_cond_t/pthread_mutex_t: futex-based,
@@ -229,17 +233,25 @@ pub struct inodedata_s {
     pub chunkwaiting: uint16_t,
     pub lcnt: uint16_t,
     pub chunkscnt: uint16_t,
-    pub chunks: *mut chunkdata,
-    pub chunkstail: *mut *mut chunkdata,
+    // C: chunkdata *chunks, **chunkstail (writedata.c:148) — tail-append
+    // FIFO of raw chunkdata handles; push == C's `*(ind->chunkstail) = chd`
+    // tail link, iteration from index 0 == walking from chunks. Raw handles
+    // escape (JQUEUE jobs, delay_run udata), so chunks only enumerates.
+    pub chunks: Vec<*mut chunkdata>,
+    // C: chunkdata *chunksnext — cursor into chunks naming the next chunk
+    // to enqueue (or null). Stays a raw handle like C.
     pub chunksnext: *mut chunkdata,
     pub flushcond: std::sync::Condvar,
     pub writecond: std::sync::Condvar,
     pub chunkcond: std::sync::Condvar,
     pub lock: std::sync::Mutex<()>,
-    pub next: *mut inodedata_s,
+    // C: struct inodedata_s *next (idhash bucket chain, writedata.c:157) —
+    // replaced by the idhash Vec buckets below. Raw inodedata handles escape
+    // (write_data_new returns the node as the opaque void* file handle
+    // consumed by mfs_fuse), so nodes stay Box::into_raw'd and buckets only
+    // enumerate.
 }
 pub type chunkdata = chunkdata_s;
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct chunkdata_s {
     pub chindx: uint32_t,
@@ -250,11 +262,14 @@ pub struct chunkdata_s {
     pub continueop: uint8_t,
     pub superuser: uint8_t,
     pub wakeup_fd: ::core::ffi::c_int,
-    pub datachainhead: *mut cblock,
-    pub datachaintail: *mut cblock,
+    // C: cblock *datachainhead, *datachaintail (writedata.c:133) —
+    // tail-append FIFO of arena cblock handles; push == C's tail link,
+    // index 0 == datachainhead. Raw handles escape into write_worker
+    // locals, so datachain only enumerates.
+    pub datachain: Vec<*mut cblock>,
     pub parent: *mut inodedata_s,
-    pub next: *mut chunkdata_s,
-    pub prev: *mut *mut chunkdata_s,
+    // C: struct chunkdata_s *next, **prev (per-inode chunks chain,
+    // writedata.c:135) — replaced by inodedata_s.chunks above.
 }
 pub type inodedata = inodedata_s;
 pub const POLLIN: ::core::ffi::c_int = 0x1 as ::core::ffi::c_int;
@@ -539,11 +554,15 @@ fn fcb_signal() {
     FCB_COND.notify_one();
 }
 static mut fcbwaiting: uint16_t = 0;
-// Owned slab of cache blocks; replaces malloc'd `cacheblocks`. Raw
-// intrusive free-list pointers inside are only walked via freecblockshead
-// under FCB_LOCK; the Box keeps storage contiguous and pointer-stable.
+// Owned slab of cache blocks; replaces malloc'd `cacheblocks`. The Box
+// keeps storage contiguous and pointer-stable for the raw handles in
+// FREECBLOCKS and the datachain enumerations.
 static mut CACHEBLOCKS_ARENA: Option<Box<[cblock]>> = None;
-static mut freecblockshead: *mut cblock = ::core::ptr::null_mut::<cblock>();
+// Free-block stack over CACHEBLOCKS_ARENA (C: freecblockshead chain via
+// cblock.next, a LIFO). pop == C's head pop in write_cb_acquire, push ==
+// C's head insert in write_cb_release. All mutation happens under
+// FCB_LOCK.
+static mut FREECBLOCKS: Vec<*mut cblock> = Vec::new();
 static mut freecacheblocks: uint32_t = 0;
 static mut cacheblockcount: uint32_t = 0;
 static mut optimeout: ::core::ffi::c_double = 0.;
@@ -552,9 +571,11 @@ static mut minlogretry: uint32_t = 0;
 static mut erroronlostchunk: uint8_t = 0;
 static mut erroronnospace: uint8_t = 0;
 // Owned fixed-size bucket table; replaces malloc'd `*mut *mut inodedata`.
-// Entries remain raw intrusive-list heads mutated under HASH_LOCK.
-static mut idhash: [*mut inodedata; IDHASHSIZE as usize] =
-    [::core::ptr::null_mut::<inodedata>(); IDHASHSIZE as usize];
+// Buckets enumerate raw handles (nodes escape as the void* file handle);
+// insert(0, ..) preserves C's head-insert in write_get_inodedata. All
+// bucket mutation happens under HASH_LOCK.
+static mut idhash: [Vec<*mut inodedata>; IDHASHSIZE as usize] =
+    [const { Vec::new() }; IDHASHSIZE as usize];
 // Global inode-table lock (C hashlock). Same thread_local guard-slot
 // emulation as FCB_LOCK above.
 // INVARIANT: every lock/unlock pair runs on the same thread (verified 4/4
@@ -792,8 +813,8 @@ pub unsafe extern "C" fn write_get_total_bytes() -> uint64_t {
 pub unsafe extern "C" fn write_cb_release(mut ind: *mut inodedata, mut cb: *mut cblock) {
     unsafe {
         fcb_lock();
-        (*cb).next = freecblockshead as *mut cblock_s;
-        freecblockshead = cb;
+        // C: cb->next = freecblockshead; freecblockshead = cb — LIFO push.
+        (*&raw mut FREECBLOCKS).push(cb);
         freecacheblocks = freecacheblocks.wrapping_add(1);
         (*ind).cacheblockcount = (*ind).cacheblockcount.wrapping_sub(1);
         if fcbwaiting != 0 {
@@ -808,18 +829,18 @@ pub unsafe extern "C" fn write_cb_acquire(mut ind: *mut inodedata) -> *mut cbloc
         let mut ret: *mut cblock = ::core::ptr::null_mut::<cblock>();
         fcb_lock();
         fcbwaiting = fcbwaiting.wrapping_add(1);
-        while freecblockshead.is_null() {
+        while (&*&raw const FREECBLOCKS).is_empty() {
             fcb_wait();
         }
         fcbwaiting = fcbwaiting.wrapping_sub(1);
-        ret = freecblockshead;
-        freecblockshead = (*ret).next as *mut cblock;
+        // C: ret = freecblockshead; freecblockshead = ret->next — LIFO pop.
+        ret = (*&raw mut FREECBLOCKS)
+            .pop()
+            .expect("write_cb_acquire: free stack empty after wait");
         (*ret).pos = 0 as uint16_t;
         (*ret).writeid = 0 as uint32_t;
         (*ret).from = 0 as uint32_t;
         (*ret).to = 0 as uint32_t;
-        (*ret).next = ::core::ptr::null_mut::<cblock_s>();
-        (*ret).prev = ::core::ptr::null_mut::<cblock_s>();
         freecacheblocks = freecacheblocks.wrapping_sub(1);
         (*ind).cacheblockcount = (*ind).cacheblockcount.wrapping_add(1);
         fcb_unlock();
@@ -846,16 +867,14 @@ pub unsafe extern "C" fn write_find_inodedata(mut inode: uint32_t) -> *mut inode
         let mut indh: uint32_t = inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         hashlock_lock();
-        ind = idhash[indh as usize];
-        while !ind.is_null() {
+        // C: for (ind=idhash[indh] ; ind ; ind=ind->next) — bucket walk.
+        for &ind in &(*&raw const idhash)[indh as usize] {
             if (*ind).inode == inode {
                 (*ind).lcnt = (*ind).lcnt.wrapping_add(1);
                 hashlock_unlock();
                 return ind;
             }
-            ind = (*ind).next as *mut inodedata;
         }
         hashlock_unlock();
         return ::core::ptr::null_mut::<inodedata>();
@@ -872,19 +891,14 @@ pub unsafe extern "C" fn write_get_inodedata(
             .wrapping_rem(IDHASHSIZE as uint32_t);
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         hashlock_lock();
-        ind = idhash[indh as usize];
-        while !ind.is_null() {
-            if (*ind).inode == inode {
-                (*ind).lcnt = (*ind).lcnt.wrapping_add(1);
+        for &cand in &(*&raw const idhash)[indh as usize] {
+            if (*cand).inode == inode {
+                (*cand).lcnt = (*cand).lcnt.wrapping_add(1);
                 hashlock_unlock();
-                return ind;
+                return cand;
             }
-            ind = (*ind).next as *mut inodedata;
         }
         // C: malloc(sizeof(inodedata)) + passert; Box::new aborts on OOM.
-        // chunkstail is self-referential, patched after into_raw (C assigns
-        // it before the cond inits; all of this is inside hashlock, so the
-        // reordering is unobservable).
         ind = Box::into_raw(Box::new(inodedata_s {
             inode,
             maxfleng: fleng,
@@ -895,18 +909,15 @@ pub unsafe extern "C" fn write_get_inodedata(
             chunkwaiting: 0 as uint16_t,
             lcnt: 1 as uint16_t,
             chunkscnt: 0 as uint16_t,
-            chunks: ::core::ptr::null_mut::<chunkdata>(),
-            chunkstail: ::core::ptr::null_mut::<*mut chunkdata>(),
+            chunks: Vec::new(),
             chunksnext: ::core::ptr::null_mut::<chunkdata>(),
             flushcond: std::sync::Condvar::new(),
             writecond: std::sync::Condvar::new(),
             chunkcond: std::sync::Condvar::new(),
             lock: std::sync::Mutex::new(()),
-            next: ::core::ptr::null_mut::<inodedata_s>(),
         }));
-        (*ind).chunkstail = &raw mut (*ind).chunks;
-        (*ind).next = idhash[indh as usize] as *mut inodedata_s;
-        idhash[indh as usize] = ind;
+        // C: ind->next = idhash[indh]; idhash[indh] = ind — head insert.
+        (*&raw mut idhash)[indh as usize].insert(0, ind);
         hashlock_unlock();
         return ind;
     }
@@ -918,57 +929,52 @@ pub unsafe extern "C" fn write_free_inodedata(mut fid: *mut inodedata) {
             .inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut indp: *mut *mut inodedata = ::core::ptr::null_mut::<*mut inodedata>();
         hashlock_lock();
-        indp = &raw mut idhash[indh as usize];
-        loop {
-            ind = *indp;
-            if ind.is_null() {
-                break;
+        // C: pointer-to-pointer bucket walk unlinking fid when its lcnt
+        // drops to 0. Pointer-identity position lookup + remove is the same
+        // unlink; the destroy protocol below is unchanged.
+        let bucket = &mut (*&raw mut idhash)[indh as usize];
+        if let Some(pos) = bucket.iter().position(|&p| p == fid) {
+            let ind = bucket[pos];
+            (*ind).lcnt = (*ind).lcnt.wrapping_sub(1);
+            if (*ind).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+                bucket.remove(pos);
+                ind_lock(ind);
+                if (*ind).chunkscnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                    && (*ind).flushwaiting as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                    && (*ind).writewaiting as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                {
+                } else {
+                    fprintf(
+                        stderr,
+                        b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        391 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"ind->chunkscnt==0 && ind->flushwaiting==0 && ind->writewaiting==0\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        b"inode structure not clean\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        b"%s:%u - failed assertion '%s' : %s\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                        391 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                        b"ind->chunkscnt==0 && ind->flushwaiting==0 && ind->writewaiting==0\0"
+                            .as_ptr() as *const ::core::ffi::c_char,
+                        b"inode structure not clean\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                    abort();
+                };
+                ind_unlock(ind);
+                drop(Box::from_raw(ind));
             }
-            if ind == fid {
-                (*ind).lcnt = (*ind).lcnt.wrapping_sub(1);
-                if (*ind).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                    *indp = (*ind).next as *mut inodedata;
-                    ind_lock(ind);
-                    if (*ind).chunkscnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                        && (*ind).flushwaiting as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                        && (*ind).writewaiting as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                    {
-                    } else {
-                        fprintf(
-                            stderr,
-                            b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            391 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"ind->chunkscnt==0 && ind->flushwaiting==0 && ind->writewaiting==0\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"inode structure not clean\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - failed assertion '%s' : %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            391 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"ind->chunkscnt==0 && ind->flushwaiting==0 && ind->writewaiting==0\0"
-                                .as_ptr() as *const ::core::ffi::c_char,
-                            b"inode structure not clean\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        abort();
-                    };
-                    ind_unlock(ind);
-                    drop(Box::from_raw(ind));
-                }
-                hashlock_unlock();
-                return;
-            }
-            indp = &raw mut (*ind).next as *mut *mut inodedata;
+            hashlock_unlock();
+            return;
         }
         hashlock_unlock();
     }
@@ -980,13 +986,28 @@ pub unsafe extern "C" fn write_test_chunkdata(mut ind: *mut inodedata) {
         if ((*ind).chunkscnt as ::core::ffi::c_int) < MAX_SIM_CHUNKS {
             if !(*ind).chunksnext.is_null() {
                 chd = (*ind).chunksnext;
-                (*ind).chunksnext = (*chd).next as *mut chunkdata;
+                // C: ind->chunksnext = chd->next — successor in the chunks
+                // FIFO (null at the tail). ponytail: O(n) position lookup,
+                // n bounded by pending chunks per inode; index-based cursor
+                // only if profiling flags it.
+                let chunks = &(*ind).chunks;
+                let pos = chunks
+                    .iter()
+                    .position(|&p| p == chd)
+                    .expect("write_test_chunkdata: chunksnext not in ind->chunks");
+                (*ind).chunksnext = chunks
+                    .get(pos.wrapping_add(1))
+                    .copied()
+                    .unwrap_or(::core::ptr::null_mut::<chunkdata>());
                 (*ind).chunkscnt = (*ind).chunkscnt.wrapping_add(1);
                 write_enqueue(chd);
             }
         } else {
-            chd = (*ind).chunks;
-            while !chd.is_null() {
+            // C: for (chd=ind->chunks ; chd ; chd=chd->next) — wake scan,
+            // no removal inside.
+            let mut ci: usize = 0;
+            while ci < (&(*ind).chunks).len() {
+                chd = (&(*ind).chunks)[ci];
                 if (*chd).waitingworker != 0 {
                     if write(
                         (*chd).wakeup_fd,
@@ -1003,7 +1024,7 @@ pub unsafe extern "C" fn write_test_chunkdata(mut ind: *mut inodedata) {
                     (*chd).waitingworker = 0 as uint8_t;
                     (*chd).wakeup_fd = -1 as ::core::ffi::c_int;
                 }
-                chd = (*chd).next as *mut chunkdata;
+                ci = ci.wrapping_add(1);
             }
         };
     }
@@ -1023,14 +1044,12 @@ pub unsafe extern "C" fn write_new_chunkdata(
             continueop: 0 as uint8_t,
             superuser: 0 as uint8_t,
             wakeup_fd: -1 as ::core::ffi::c_int,
-            datachainhead: ::core::ptr::null_mut::<cblock>(),
-            datachaintail: ::core::ptr::null_mut::<cblock>(),
+            datachain: Vec::new(),
             parent: ind as *mut inodedata_s,
-            next: ::core::ptr::null_mut::<chunkdata_s>(),
-            prev: (*ind).chunkstail as *mut *mut chunkdata_s,
         }));
-        *(*ind).chunkstail = chd;
-        (*ind).chunkstail = &raw mut (*chd).next as *mut *mut chunkdata;
+        // C: chd->prev = ind->chunkstail; *(ind->chunkstail) = chd;
+        // ind->chunkstail = &(chd->next); — tail append.
+        (&mut (*ind).chunks).push(chd);
         if (*ind).chunksnext.is_null() {
             (*ind).chunksnext = chd;
         }
@@ -1040,14 +1059,18 @@ pub unsafe extern "C" fn write_new_chunkdata(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn write_free_chunkdata(mut chd: *mut chunkdata) {
     unsafe {
-        *(*chd).prev = (*chd).next;
-        if !(*chd).next.is_null() {
-            (*(*chd).next).prev = (*chd).prev;
-        } else {
-            (*(*chd).parent).chunkstail = (*chd).prev as *mut *mut chunkdata;
-        }
-        (*(*chd).parent).chunkscnt = (*(*chd).parent).chunkscnt.wrapping_sub(1);
-        write_test_chunkdata((*chd).parent as *mut inodedata);
+        // C: *(chd->prev) = chd->next; ... doubly-linked unlink. Scan for
+        // the handle instead. ponytail: O(n) position lookup, n bounded by
+        // chunks per inode; index-based links only if profiling flags it.
+        let parent: *mut inodedata = (*chd).parent as *mut inodedata;
+        let chunks = &raw mut (*parent).chunks;
+        let pos = (*chunks)
+            .iter()
+            .position(|&p| p == chd)
+            .expect("write_free_chunkdata: chd not in parent->chunks");
+        (&mut *chunks).remove(pos);
+        (*parent).chunkscnt = (*parent).chunkscnt.wrapping_sub(1);
+        write_test_chunkdata(parent);
         drop(Box::from_raw(chd));
     }
 }
@@ -1086,7 +1109,6 @@ pub unsafe extern "C" fn write_job_end(
 ) {
     unsafe {
         let mut cb: *mut cblock = ::core::ptr::null_mut::<cblock>();
-        let mut fcb: *mut cblock = ::core::ptr::null_mut::<cblock>();
         let mut ind: *mut inodedata = (*chd).parent as *mut inodedata;
         ind_lock(ind);
         if status != 0 as ::core::ffi::c_int {
@@ -1105,18 +1127,20 @@ pub unsafe extern "C" fn write_job_end(
             (*chd).trycnt = 0 as uint16_t;
         }
         status = (*ind).status;
-        if !(*chd).datachainhead.is_null() && status == 0 as ::core::ffi::c_int {
-            cb = (*chd).datachainhead;
-            while !cb.is_null() {
+        if !(&(*chd).datachain).is_empty() && status == 0 as ::core::ffi::c_int {
+            // C: for (cb=chd->datachainhead ; cb ; cb=cb->next) cb->writeid = 0;
+            let mut ci: usize = 0;
+            while ci < (&(*chd).datachain).len() {
+                cb = (&(*chd).datachain)[ci];
                 (*cb).writeid = 0 as uint32_t;
-                cb = (*cb).next as *mut cblock;
+                ci = ci.wrapping_add(1);
             }
             write_delayed_enqueue(chd, delay);
         } else {
-            cb = (*chd).datachainhead;
-            while !cb.is_null() {
-                fcb = cb;
-                cb = (*cb).next as *mut cblock;
+            // C: cb=chd->datachainhead; while (cb) { fcb=cb; cb=cb->next;
+            // write_cb_release(ind,fcb); } — release order head-to-tail
+            // preserved; the chain dies with chd in write_free_chunkdata.
+            for &fcb in &(*chd).datachain {
                 write_cb_release(ind, fcb);
             }
             if (*ind).flushwaiting as ::core::ffi::c_int > 0 as ::core::ffi::c_int {
@@ -1262,7 +1286,7 @@ pub unsafe extern "C" fn write_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::
             chd = data;
             ind = (*chd).parent as *mut inodedata;
             ind_lock(ind);
-            if !(*chd).datachainhead.is_null() {
+            if !(&(*chd).datachain).is_empty() {
                 chindx = (*chd).chindx;
                 status = (*ind).status;
             } else {
@@ -1818,16 +1842,42 @@ pub unsafe extern "C" fn write_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::
                                         && (waitforstatus as ::core::ffi::c_int)
                                             < 64 as ::core::ffi::c_int
                                     {
-                                        if cb.is_null() {
-                                            ncb = (*chd).datachainhead;
+                                        // C: ncb = cb ? cb->next :
+                                        // chd->datachainhead — successor of
+                                        // the current block or chain head.
+                                        // ponytail: O(n) position lookup,
+                                        // n = blocks pending on the chunk
+                                        // (small); index links only if
+                                        // profiling flags it.
+                                        let npos: Option<usize> = if cb.is_null() {
+                                            if (&(*chd).datachain).is_empty() {
+                                                None
+                                            } else {
+                                                Some(0 as usize)
+                                            }
                                         } else {
-                                            ncb = (*cb).next as *mut cblock;
-                                        }
+                                            let pos = (&(*chd).datachain)
+                                                .iter()
+                                                .position(|&p| p == cb)
+                                                .expect("write_worker: cb not in chd->datachain");
+                                            let nxt = pos.wrapping_add(1);
+                                            if nxt < (&(*chd).datachain).len() {
+                                                Some(nxt)
+                                            } else {
+                                                None
+                                            }
+                                        };
+                                        ncb = npos.map_or(::core::ptr::null_mut::<cblock>(), |p| {
+                                            (&(*chd).datachain)[p]
+                                        });
                                         if !ncb.is_null() {
                                             if (*ncb).to.wrapping_sub((*ncb).from)
                                                 == MFSBLOCKSIZE as uint32_t
                                                 || lbdiff >= NEXT_BLOCK_DELAY
-                                                || !(*ncb).next.is_null()
+                                                // C: ncb->next != NULL
+                                                || npos.unwrap_or(0 as usize)
+                                                    .wrapping_add(1)
+                                                    < (&(*chd).datachain).len()
                                                 || (*ind).flushwaiting as ::core::ffi::c_int != 0
                                             {
                                                 cb = ncb;
@@ -2401,13 +2451,14 @@ pub unsafe extern "C" fn write_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::
                                             } else {
                                                 if recwriteid > 0 as uint32_t {
                                                     ind_lock(ind);
-                                                    rcb = (*chd).datachainhead;
-                                                    while !rcb.is_null()
-                                                        && (*rcb).writeid != recwriteid
-                                                    {
-                                                        rcb = (*rcb).next as *mut cblock;
-                                                    }
-                                                    if rcb.is_null() {
+                                                    // C: for (rcb = chd->datachainhead ;
+                                                    // rcb && rcb->writeid!=recwriteid ;
+                                                    // rcb=rcb->next) — first block with
+                                                    // the acked writeid.
+                                                    let rpos: Option<usize> = (&(*chd).datachain)
+                                                        .iter()
+                                                        .position(|&p| (*p).writeid == recwriteid);
+                                                    if rpos.is_none() {
                                                         mfs_log(
                                                             MFSLOG_SYSLOG,
                                                             MFSLOG_WARNING,
@@ -2419,6 +2470,8 @@ pub unsafe extern "C" fn write_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::
                                                         status = EIO;
                                                         break;
                                                     } else {
+                                                        let rp: usize = rpos.unwrap_or(0 as usize);
+                                                        rcb = (&(*chd).datachain)[rp];
                                                         if rcb == cb {
                                                             if sending_mode as ::core::ffi::c_int
                                                                 == 2 as ::core::ffi::c_int
@@ -2437,18 +2490,9 @@ pub unsafe extern "C" fn write_worker(_arg: *mut ::core::ffi::c_void) -> *mut ::
                                                                 );
                                                             }
                                                         }
-                                                        if !(*rcb).prev.is_null() {
-                                                            (*(*rcb).prev).next = (*rcb).next;
-                                                        } else {
-                                                            (*chd).datachainhead =
-                                                                (*rcb).next as *mut cblock;
-                                                        }
-                                                        if !(*rcb).next.is_null() {
-                                                            (*(*rcb).next).prev = (*rcb).prev;
-                                                        } else {
-                                                            (*chd).datachaintail =
-                                                                (*rcb).prev as *mut cblock;
-                                                        }
+                                                        // C: prev/next unlink with datachainhead/tail
+                                                        // fixups — Vec removal is the same unlink.
+                                                        (&mut (*chd).datachain).remove(rp);
                                                         maxwroffset = ((chindx as uint64_t)
                                                             << MFSCHUNKBITS)
                                                             .wrapping_add(
@@ -2653,7 +2697,6 @@ pub unsafe extern "C" fn write_data_init(
     mut erronnospace: uint8_t,
 ) {
     unsafe {
-        let mut i: uint32_t = 0;
         let mut mystacksize: size_t = 0;
         erroronlostchunk = erronlostchunk;
         erroronnospace = erronnospace;
@@ -2672,22 +2715,21 @@ pub unsafe extern "C" fn write_data_init(
         // Owned slab replaces C malloc; allocation failure aborts, matching
         // passert(cacheblocks). Zeroed blocks are safe: C only reads block
         // fields after writing them (next is chain-linked below).
-        let mut arena: Box<[cblock]> =
+        let arena: Box<[cblock]> =
             vec![::core::mem::zeroed::<cblock>(); cacheblockcount as usize].into_boxed_slice();
-        let cacheblocks: *mut cblock = arena.as_mut_ptr();
+        let cacheblocks: *mut cblock = arena.as_ptr() as *mut cblock;
         CACHEBLOCKS_ARENA = Some(arena);
-        i = 0 as uint32_t;
-        while i < cacheblockcount.wrapping_sub(1 as uint32_t) {
-            (*cacheblocks.offset(i as isize)).next =
-                cacheblocks.offset(i.wrapping_add(1 as uint32_t) as isize) as *mut cblock_s;
-            i = i.wrapping_add(1);
-        }
-        (*cacheblocks.offset(cacheblockcount.wrapping_sub(1 as uint32_t) as isize)).next =
-            ::core::ptr::null_mut::<cblock_s>();
-        freecblockshead = cacheblocks;
+        // C: for (i=0;i<cacheblockcount-1;i++) cacheblocks[i].next =
+        // cacheblocks+(i+1); freecblockshead = cacheblocks — so the first
+        // acquire returns slot 0. FREECBLOCKS is a stack (pop from the
+        // end): push slots in reverse to reproduce that pop order.
+        (*&raw mut FREECBLOCKS) = (0..cacheblockcount as usize)
+            .rev()
+            .map(|i| cacheblocks.wrapping_add(i))
+            .collect();
         freecacheblocks = cacheblockcount;
-        // idhash buckets are a null-initialized static array (see decl);
-        // write_data_term re-nulls heads, so re-init needs no zeroing here.
+        // idhash buckets are Vec-initialized statics (see decl);
+        // write_data_term drains them, so re-init needs no clearing here.
         JQUEUE.init();
         mystacksize = __sysconf(__SC_THREAD_STACK_MIN_VALUE) as size_t;
         if mystacksize < 0x20000 as ::core::ffi::c_int as size_t {
@@ -2706,10 +2748,6 @@ pub unsafe extern "C" fn write_data_init(
 pub unsafe extern "C" fn write_data_term() {
     unsafe {
         let mut i: uint32_t = 0;
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut indn: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut chd: *mut chunkdata = ::core::ptr::null_mut::<chunkdata>();
-        let mut chdn: *mut chunkdata = ::core::ptr::null_mut::<chunkdata>();
         JQUEUE.close();
         let mut st = WRITE_WORKER_POOL.lock_state();
         while st.total > 0 as uint32_t {
@@ -2728,22 +2766,19 @@ pub unsafe extern "C" fn write_data_term() {
         hashlock_lock();
         i = 0 as uint32_t;
         while i < IDHASHSIZE as uint32_t {
-            ind = idhash[i as usize];
-            // Null the bucket head so a later write_data_init cannot dangle
-            // (C freed and re-malloc'd the table, re-zeroing all heads).
-            idhash[i as usize] = ::core::ptr::null_mut::<inodedata>();
-            while !ind.is_null() {
-                indn = (*ind).next as *mut inodedata;
+            // Drain clears the bucket so a later write_data_init cannot
+            // dangle (C freed and re-malloc'd the table, re-zeroing all
+            // heads).
+            for ind in ::core::mem::take(&mut (*&raw mut idhash)[i as usize]) {
                 ind_lock(ind);
-                chd = (*ind).chunks;
-                while !chd.is_null() {
-                    chdn = (*chd).next as *mut chunkdata;
+                // C: chd = ind->chunks; while (chd) { chdn = chd->next;
+                // write_free_chunkdata(chd); chd = chdn; } — head-first
+                // free order; write_free_chunkdata removes chd from chunks.
+                while let Some(&chd) = (&(*ind).chunks).first() {
                     write_free_chunkdata(chd);
-                    chd = chdn;
                 }
                 ind_unlock(ind);
                 drop(Box::from_raw(ind));
-                ind = indn;
             }
             i = i.wrapping_add(1);
         }
@@ -2776,7 +2811,8 @@ pub unsafe extern "C" fn write_cb_expand(
             (*cb).to = to;
         }
         if (*cb).to.wrapping_sub((*cb).from) == MFSBLOCKSIZE as uint32_t
-            && (*cb).next.is_null()
+            // C: cb->next == NULL — cb is the datachain tail.
+            && (&(*chd).datachain).last().copied() == Some(cb)
             && (*chd).waitingworker as ::core::ffi::c_int == 2 as ::core::ffi::c_int
         {
             if write(
@@ -2814,14 +2850,24 @@ pub unsafe extern "C" fn write_block(
         let mut newchunk: uint8_t = 0;
         ncb = write_cb_acquire(ind);
         ind_lock(ind);
-        chd = (*ind).chunks;
-        while !chd.is_null() {
-            if (*chd).chindx == chindx {
+        // C: for (chd=ind->chunks ; chd ; chd=chd->next) — find the chunk
+        // writer for chindx.
+        chd = ::core::ptr::null_mut::<chunkdata>();
+        let mut ci: usize = 0;
+        while ci < (&(*ind).chunks).len() {
+            let cand: *mut chunkdata = (&(*ind).chunks)[ci];
+            if (*cand).chindx == chindx {
+                chd = cand;
                 if superuser != 0 {
                     (*chd).superuser = 1 as uint8_t;
                 }
-                cb = (*chd).datachaintail;
-                while !cb.is_null() {
+                // C: for (cb=chd->datachaintail ; cb ; cb=cb->prev) —
+                // newest-first scan for a same-pos block to expand; a pos
+                // match stops the scan whether or not the expand succeeds.
+                let mut di: usize = (&(*chd).datachain).len();
+                while di > 0 as usize {
+                    di = di.wrapping_sub(1);
+                    cb = (&(*chd).datachain)[di];
                     if (*cb).pos as ::core::ffi::c_int == pos as ::core::ffi::c_int {
                         if write_cb_expand(chd, cb, from, to, data) == 0 as ::core::ffi::c_int {
                             write_cb_release(ind, ncb);
@@ -2829,14 +2875,11 @@ pub unsafe extern "C" fn write_block(
                             return 0 as ::core::ffi::c_int;
                         }
                         break;
-                    } else {
-                        cb = (*cb).prev as *mut cblock;
                     }
                 }
                 break;
-            } else {
-                chd = (*chd).next as *mut chunkdata;
             }
+            ci = ci.wrapping_add(1);
         }
         (*ncb).pos = pos;
         (*ncb).from = from;
@@ -2856,14 +2899,10 @@ pub unsafe extern "C" fn write_block(
         } else {
             newchunk = 0 as uint8_t;
         }
-        (*ncb).prev = (*chd).datachaintail as *mut cblock_s;
-        (*ncb).next = ::core::ptr::null_mut::<cblock_s>();
-        if !(*chd).datachaintail.is_null() {
-            (*(*chd).datachaintail).next = ncb as *mut cblock_s;
-        } else {
-            (*chd).datachainhead = ncb;
-        }
-        (*chd).datachaintail = ncb;
+        // C: ncb->prev = chd->datachaintail; ncb->next = NULL;
+        // if (tail) tail->next = ncb; else head = ncb; tail = ncb —
+        // tail append (send order).
+        (&mut (*chd).datachain).push(ncb);
         if newchunk != 0 {
             write_test_chunkdata(ind);
         } else if (*chd).waitingworker != 0 {
@@ -2985,10 +3024,14 @@ unsafe extern "C" fn write_data_do_chunk_wait(mut ind: *mut inodedata) -> ::core
         loop {
             chd = ::core::ptr::null_mut::<chunkdata>();
             if (*ind).status == 0 as ::core::ffi::c_int {
-                chd = (*ind).chunks;
-                while !chd.is_null() && (*chd).chunkready as ::core::ffi::c_int != 0 {
-                    chd = (*chd).next as *mut chunkdata;
-                }
+                // C: for (chd = ind->chunks ; chd!=NULL && chd->chunkready ;
+                // chd=chd->next) — first chunk not yet ready (null if all
+                // ready); flush waits for readiness in FIFO order.
+                chd = (&(*ind).chunks)
+                    .iter()
+                    .copied()
+                    .find(|&c| (*c).chunkready as ::core::ffi::c_int == 0 as ::core::ffi::c_int)
+                    .unwrap_or(::core::ptr::null_mut::<chunkdata>());
                 if !chd.is_null() {
                     ind_cond_wait(&raw const (*ind).chunkcond, ind);
                 }
@@ -2997,10 +3040,13 @@ unsafe extern "C" fn write_data_do_chunk_wait(mut ind: *mut inodedata) -> ::core
                 break;
             }
         }
-        chd = (*ind).chunks;
-        while !chd.is_null() {
+        // C: for (chd = ind->chunks ; chd!=NULL ; chd=chd->next)
+        // chd->unbreakable = 1;
+        let mut ci: usize = 0;
+        while ci < (&(*ind).chunks).len() {
+            chd = (&(*ind).chunks)[ci];
             (*chd).unbreakable = 1 as uint8_t;
-            chd = (*chd).next as *mut chunkdata;
+            ci = ci.wrapping_add(1);
         }
         ret = (*ind).status;
         ind_unlock(ind);
@@ -3026,8 +3072,12 @@ unsafe extern "C" fn write_data_do_flush(
         ind_lock(ind);
         (*ind).flushwaiting = (*ind).flushwaiting.wrapping_add(1);
         while (*ind).chunkscnt as ::core::ffi::c_int > 0 as ::core::ffi::c_int {
-            chd = (*ind).chunks;
-            while !chd.is_null() {
+            // C: for (chd = ind->chunks ; chd!=NULL ; chd=chd->next) — wake
+            // scan, no removal inside (chunks leave via write_job_end on
+            // worker threads).
+            let mut ci: usize = 0;
+            while ci < (&(*ind).chunks).len() {
+                chd = (&(*ind).chunks)[ci];
                 if (*chd).waitingworker != 0 {
                     if write(
                         (*chd).wakeup_fd,
@@ -3044,7 +3094,7 @@ unsafe extern "C" fn write_data_do_flush(
                     (*chd).waitingworker = 0 as uint8_t;
                     (*chd).wakeup_fd = -1 as ::core::ffi::c_int;
                 }
-                chd = (*chd).next as *mut chunkdata;
+                ci = ci.wrapping_add(1);
             }
             ind_cond_wait(&raw const (*ind).flushcond, ind);
         }
