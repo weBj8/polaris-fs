@@ -14855,6 +14855,10 @@ pub unsafe extern "C" fn mfs_open(
                 ctx.pid as i32,
                 ino as uint32_t,
             );
+            if let Some(entry) = fdrec.as_ref() {
+                attr[..35].copy_from_slice(&entry.attr);
+                lflags = entry.lflags;
+            }
             noatomictrunc = 0 as uint8_t;
         }
         if fdrec.is_some() {

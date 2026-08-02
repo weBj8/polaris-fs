@@ -16,6 +16,8 @@
 # 12 shared client modules out of plfsmount/plfsbdev into the plfsclient crate.
 # Totals: unsafe 8,727 → 7,105, wrapping 11,498 → 8,387 (duplicates eliminated,
 # VC-05/VC-06).
+# Baseline change (P4 native ownership/thread wave): generated internal wrapper
+# removal lowered wrapping floors: plfsclient 796 -> 723, plfsmount 410 -> 400.
 unsafe_sites	plfsmaster	le	3007
 unsafe_sites	plfschunkserver	le	1002
 unsafe_sites	plfsmetalogger	le	302
@@ -35,11 +37,11 @@ unsafe_no_safety	plfscommon	le	171
 migration_iou	workspace	le	1
 unsafe_sites	plfsclient	le	562
 unsafe_no_safety	plfsclient	le	562
-wrapping_ops	plfsclient	ge	796
+wrapping_ops	plfsclient	ge	723
 wrapping_ops	plfsmaster	ge	4068
 wrapping_ops	plfschunkserver	ge	1316
 wrapping_ops	plfsmetalogger	ge	151
-wrapping_ops	plfsmount	ge	410
+wrapping_ops	plfsmount	ge	400
 wrapping_ops	plfsbdev	ge	240
 wrapping_ops	plfsgui	ge	149
 wrapping_ops	plfsnetdump	ge	68
