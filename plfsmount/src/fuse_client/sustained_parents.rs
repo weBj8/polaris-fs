@@ -8,61 +8,12 @@
 //! cleanup thread and monotonic clock. term is a real AtomicU8.
 
 unsafe extern "C" {
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-}
-
-// local copy, mirroring the C static-inline portable_usleep (each TU had
-// its own; cross-module private symbols do not survive clean LTO builds)
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct portable_timespec {
-    tv_sec: ::core::ffi::c_long,
-    tv_nsec: ::core::ffi::c_long,
-}
-unsafe extern "C" {
-    fn nanosleep(
-        __requested_time: *const portable_timespec,
-        __remaining: *mut portable_timespec,
-    ) -> ::core::ffi::c_int;
-}
-#[inline]
-fn portable_usleep(usec: uint64_t) {
-    let mut req = portable_timespec {
-        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
-        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
-    };
-    let mut rem = portable_timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: req/rem are valid stack structs.
-    unsafe {
-        loop {
-            let s = nanosleep(&req, &mut rem);
-            if s < 0 {
-                req = rem;
-            } else {
-                break;
-            }
-        }
-    }
 }
 
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
-pub type pthread_t = ::core::ffi::c_ulong;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 
 #[deny(unsafe_code)]
 pub mod imp {
@@ -150,15 +101,20 @@ pub mod imp {
 }
 
 use imp::SParents;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
-static mut SPARENTS: Option<SParents> = None;
+static SPARENTS: Mutex<Option<Arc<SParents>>> = Mutex::new(None);
 static TERM: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
-static mut clthread: pthread_t = 0;
+static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-/// SAFETY: set once in sparents_init before any thread can call in; never
-/// cleared (C also kept the tables until process exit).
-unsafe fn sparents() -> &'static SParents {
-    unsafe { (*(&raw const SPARENTS)).as_ref().unwrap_unchecked() }
+fn sparents() -> Arc<SParents> {
+    SPARENTS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("sparents used before init")
+        .clone()
 }
 
 #[unsafe(no_mangle)]
@@ -173,46 +129,45 @@ pub unsafe extern "C" fn sparents_get(inode: uint32_t) -> uint32_t {
     unsafe { sparents().get(inode) }
 }
 
-unsafe extern "C" fn sparents_cleanupthread(
-    _arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut cuhashpos: usize = 0;
-        loop {
-            let current_time = monotonic_seconds() as uint32_t;
-            for _ in 0..imp::CLEANUP_PER_CYCLE {
-                sparents().cleanup(cuhashpos, current_time);
-                cuhashpos = (cuhashpos + 1) % imp::HASH_SIZE;
-            }
-            portable_usleep(100000);
-            if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
-                return NULL;
-            }
+fn sparents_cleanupthread(sparents: Arc<SParents>) {
+    let mut cuhashpos: usize = 0;
+    loop {
+        // SAFETY: external monotonic clock takes no arguments.
+        let current_time = unsafe { monotonic_seconds() } as uint32_t;
+        for _ in 0..imp::CLEANUP_PER_CYCLE {
+            sparents.cleanup(cuhashpos, current_time);
+            cuhashpos = (cuhashpos + 1) % imp::HASH_SIZE;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
+            return;
         }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sparents_term() {
-    unsafe {
-        TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
-        pthread_join(
-            clthread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
+    TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
+    if let Some(thread) = THREAD.lock().unwrap().take() {
+        thread.join().expect("sustained-parents reaper panicked");
+    }
+    if let Some(sparents) = SPARENTS.lock().unwrap().take() {
         for hash in 0..imp::HASH_SIZE {
-            sparents().cleanup(hash, u32::MAX);
+            sparents.cleanup(hash, u32::MAX);
         }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sparents_init() {
-    unsafe {
-        SPARENTS = Some(SParents::new());
-        TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
-        lwt_minthread_create(&raw mut clthread, 0, Some(sparents_cleanupthread), NULL);
-    }
+    let sparents = Arc::new(SParents::new());
+    *SPARENTS.lock().unwrap() = Some(sparents.clone());
+    TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
+    let thread = plfscommon::lwthread::spawn_min("sustained-parents", move || {
+        sparents_cleanupthread(sparents)
+    })
+    .unwrap_or_else(|_| std::process::abort());
+    *THREAD.lock().unwrap() = Some(thread);
 }
 
 #[cfg(test)]

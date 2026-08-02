@@ -146,8 +146,6 @@ unsafe extern "C" {
         csdatasize: uint32_t,
         writeflag: uint8_t,
     ) -> uint32_t;
-    unsafe fn csdb_writeinc(ip: uint32_t, port: uint16_t);
-    unsafe fn csdb_writedec(ip: uint32_t, port: uint16_t);
     unsafe fn delay_run(
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>,
         udata: *mut ::core::ffi::c_void,
@@ -176,17 +174,6 @@ unsafe extern "C" {
     ) -> uint8_t;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
     unsafe fn read_inode_clear_cache(inode: uint32_t, offset: uint64_t, leng: uint64_t);
-    unsafe fn chunkrwlock_wlock(inode: uint32_t, indx: uint32_t);
-    unsafe fn chunkrwlock_wunlock(inode: uint32_t, indx: uint32_t);
-    unsafe fn chunksdatacache_insert(
-        inode: uint32_t,
-        chindx: uint32_t,
-        chunkid: uint64_t,
-        version: uint32_t,
-        csdataver: uint8_t,
-        csdata: *const uint8_t,
-        csdatasize: uint32_t,
-    );
 }
 pub type size_t = usize;
 pub type __uint64_t = u64;
@@ -4672,7 +4659,7 @@ pub unsafe extern "C" fn write_worker(
         loop {
             i = 0 as ::core::ffi::c_int;
             while i < chainelements as ::core::ffi::c_int {
-                csdb_writedec(chain[i as usize].ip, chain[i as usize].port);
+                crate::csdb::write_dec(chain[i as usize].ip, chain[i as usize].port);
                 i += 1;
             }
             chainelements = 0 as uint16_t;
@@ -5541,7 +5528,7 @@ pub unsafe extern "C" fn write_worker(
                 write_job_end(chd, status, 0 as uint32_t);
             } else {
                 inode = (*ind).inode;
-                chunkrwlock_wlock(inode, chindx);
+                crate::chunkrwlock::write_lock(inode, chindx);
                 opbegin = 0 as ::core::ffi::c_int as ::core::ffi::c_double;
                 if optimeout > 0.0f64 {
                     opbegin = monotonic_seconds();
@@ -5711,10 +5698,15 @@ pub unsafe extern "C" fn write_worker(
                     } else {
                         write_delayed_enqueue(chd, 500000 as uint32_t);
                     }
-                    chunkrwlock_wunlock(inode, chindx);
+                    crate::chunkrwlock::write_unlock(inode, chindx);
                 } else {
-                    chunksdatacache_insert(
-                        inode, chindx, chunkid, version, csdataver, csdata, csdatasize,
+                    crate::chunksdatacache::insert(
+                        inode,
+                        chindx,
+                        chunkid,
+                        version,
+                        csdataver,
+                        ::core::slice::from_raw_parts(csdata, csdatasize as usize),
                     );
                     if !csdata.is_null() && csdatasize > 0 as uint32_t {
                         chainelements = csorder_sort(
@@ -5976,18 +5968,18 @@ pub unsafe extern "C" fn write_worker(
                         } else {
                             write_delayed_enqueue(chd, 60000000 as uint32_t);
                         }
-                        chunkrwlock_wunlock(inode, chindx);
+                        crate::chunkrwlock::write_unlock(inode, chindx);
                     } else {
                         ip = chain[0 as usize].ip;
                         port = chain[0 as usize].port;
                         chainminver = chain[0 as usize].version;
-                        csdb_writeinc(ip, port);
+                        crate::csdb::write_inc(ip, port);
                         csstrip[0 as usize] = 0 as ::core::ffi::c_char;
                         cpw = &raw mut cschain as *mut uint8_t;
                         cschainsize = 0 as uint32_t;
                         i = 1 as ::core::ffi::c_int;
                         while i < chainelements as ::core::ffi::c_int {
-                            csdb_writeinc(chain[i as usize].ip, chain[i as usize].port);
+                            crate::csdb::write_inc(chain[i as usize].ip, chain[i as usize].port);
                             if chain[i as usize].version < chainminver {
                                 chainminver = chain[i as usize].version;
                             }
@@ -6759,7 +6751,7 @@ pub unsafe extern "C" fn write_worker(
                                         })) as uint32_t,
                                 );
                             }
-                            chunkrwlock_wunlock(inode, chindx);
+                            crate::chunkrwlock::write_unlock(inode, chindx);
                         } else {
                             if tcpnodelay(fd) < 0 as ::core::ffi::c_int {
                                 mfs_log(
@@ -9632,7 +9624,7 @@ pub unsafe extern "C" fn write_worker(
                                 }
                                 write_job_end(chd, 0 as ::core::ffi::c_int, 0 as uint32_t);
                             }
-                            chunkrwlock_wunlock(inode, chindx);
+                            crate::chunkrwlock::write_unlock(inode, chindx);
                         }
                     }
                 }

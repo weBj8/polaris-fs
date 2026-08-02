@@ -61,97 +61,13 @@ unsafe extern "C" {
         fmt: *const ::core::ffi::c_char,
         ...
     );
-    unsafe fn pthread_create(
-        __newthread: *mut pthread_t,
-        __attr: *const pthread_attr_t,
-        __start_routine: Option<
-            unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-        >,
-        __arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_init(__attr: *mut pthread_attr_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_destroy(__attr: *mut pthread_attr_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_setstacksize(
-        __attr: *mut pthread_attr_t,
-        __stacksize: size_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_attr_setdetachstate(
-        __attr: *mut pthread_attr_t,
-        __detachstate: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_sigmask(
-        __how: ::core::ffi::c_int,
-        __set: *const sigset_t,
-        __oset: *mut sigset_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn sigemptyset(__set: *mut sigset_t) -> ::core::ffi::c_int;
-    unsafe fn sigaddset(__set: *mut sigset_t, __signo: ::core::ffi::c_int) -> ::core::ffi::c_int;
     unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
 }
-pub type size_t = usize;
 pub type uint8_t = u8;
 pub type uint16_t = u16;
 pub type uint32_t = u32;
-pub type uint64_t = u64;
-pub type pthread_t = ::core::ffi::c_ulong;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct pthread_attr_t {
-    pub __size: [::core::ffi::c_char; 56],
-    pub __align: ::core::ffi::c_long,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct sigset_t {
-    pub __val: [::core::ffi::c_ulong; 16],
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 pub const ENOTSUP: ::core::ffi::c_int = 95;
-pub const SIGINT: ::core::ffi::c_int = 2;
-pub const SIGTERM: ::core::ffi::c_int = 15;
-pub const SIGHUP: ::core::ffi::c_int = 1;
-pub const SIGQUIT: ::core::ffi::c_int = 3;
-pub const SIG_BLOCK: ::core::ffi::c_int = 0;
-pub const SIG_SETMASK: ::core::ffi::c_int = 2;
-pub const PTHREAD_CREATE_DETACHED: ::core::ffi::c_int = 1;
-pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
 pub const MFS_STATUS_OK: ::core::ffi::c_int = 0;
 pub const MFSLOG_NOTICE: ::core::ffi::c_int = 2;
 pub const MFSLOG_ERR: ::core::ffi::c_int = 4;
@@ -240,9 +156,11 @@ pub mod imp {
 // ---------------------------------------------------------------------------
 
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 static mut lsock: ::core::ffi::c_int = -1;
-static mut proxythread: pthread_t = 0;
+static PROXY_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static TERMINATE: AtomicU8 = AtomicU8::new(0);
 static mut proxyhost: uint32_t = 0;
 static mut proxyport: uint16_t = 0;
@@ -252,40 +170,16 @@ struct ConnData {
     sendnops: AtomicU8, // 0 idle / 1 in-request / 2 nop-in-flight / 255 dead
 }
 
-// local copy, mirroring the C static-inline portable_usleep (per TU)
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct portable_timespec {
-    tv_sec: ::core::ffi::c_long,
-    tv_nsec: ::core::ffi::c_long,
-}
-unsafe extern "C" {
-    fn nanosleep(
-        __requested_time: *const portable_timespec,
-        __remaining: *mut portable_timespec,
-    ) -> ::core::ffi::c_int;
-}
-#[inline]
-fn portable_usleep(usec: uint64_t) {
-    let mut req = portable_timespec {
-        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
-        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
-    };
-    let mut rem = portable_timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: req/rem are valid stack structs.
-    unsafe {
-        loop {
-            let s = nanosleep(&req, &mut rem);
-            if s < 0 {
-                req = rem;
-            } else {
-                break;
-            }
-        }
+impl Drop for ConnData {
+    fn drop(&mut self) {
+        // SAFETY: ConnData owns the accepted socket.
+        unsafe { tcpclose(self.sock) };
     }
+}
+
+#[inline]
+fn portable_usleep(usec: u64) {
+    std::thread::sleep(std::time::Duration::from_micros(usec));
 }
 
 #[unsafe(no_mangle)]
@@ -305,27 +199,14 @@ pub unsafe extern "C" fn masterproxy_getlocation(masterinfo: *mut uint8_t) {
     }
 }
 
-/// SAFETY: cd owned by the two connection threads; called once via the
-/// keepalive thread when sendnops goes 255.
-unsafe fn free_conn_data(cd: *mut ConnData) {
+fn masterproxy_keepalive(cd: Arc<ConnData>) {
     unsafe {
-        tcpclose((*cd).sock);
-        drop(Box::from_raw(cd));
-    }
-}
-
-unsafe extern "C" fn masterproxy_keepalive(
-    args: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let cd = args as *mut ConnData;
         let nopbuff = imp::nop_packet();
         let mut nopcnt: u32 = 0;
         loop {
             let state = (*cd).sendnops.load(Ordering::SeqCst);
             if state == 255 {
-                free_conn_data(cd);
-                return NULL;
+                return;
             }
             if state == 0 {
                 nopcnt = 0;
@@ -349,20 +230,16 @@ unsafe extern "C" fn masterproxy_keepalive(
             }
             portable_usleep(100000);
         }
-        NULL
     }
 }
 
-unsafe extern "C" fn masterproxy_server(
-    args: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+fn masterproxy_server(cd: Arc<ConnData>) {
     unsafe {
-        let cd = args as *mut ConnData;
         let mut header = [0u8; 8];
         let auxbuffer = libc::malloc(AUXBUFFSIZE) as *mut uint8_t;
         if auxbuffer.is_null() {
             (*cd).sendnops.store(255, Ordering::SeqCst);
-            return NULL;
+            return;
         }
         loop {
             if tcptoread(
@@ -485,80 +362,54 @@ unsafe extern "C" fn masterproxy_server(
         }
         libc::free(auxbuffer as *mut ::core::ffi::c_void);
         (*cd).sendnops.store(255, Ordering::SeqCst);
-        NULL
     }
 }
 
-/// block the usual termination signals around thread creation (C pattern)
-unsafe fn sigmask_block(oldset: *mut sigset_t) {
-    unsafe {
-        let mut newset: sigset_t = ::core::mem::zeroed();
-        sigemptyset(&raw mut newset);
-        sigaddset(&raw mut newset, SIGTERM);
-        sigaddset(&raw mut newset, SIGINT);
-        sigaddset(&raw mut newset, SIGHUP);
-        sigaddset(&raw mut newset, SIGQUIT);
-        pthread_sigmask(SIG_BLOCK, &raw const newset, oldset);
-    }
-}
-
-unsafe extern "C" fn masterproxy_acceptor(
-    _args: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut thattr: pthread_attr_t = ::core::mem::zeroed();
-        pthread_attr_init(&raw mut thattr);
-        pthread_attr_setstacksize(&raw mut thattr, 0x100000);
-        pthread_attr_setdetachstate(&raw mut thattr, PTHREAD_CREATE_DETACHED);
-        while TERMINATE.load(Ordering::SeqCst) == 0 {
-            let sock = tcptoaccept(lsock, 1000);
-            if sock >= 0 {
-                let cd = Box::into_raw(Box::new(ConnData {
-                    sock,
-                    sendnops: AtomicU8::new(0),
-                }));
-                tcpnodelay(sock);
-                tcpnonblock(sock);
-                let mut oldset: sigset_t = ::core::mem::zeroed();
-                sigmask_block(&raw mut oldset);
-                let mut nopthread: pthread_t = 0;
-                let res = pthread_create(
-                    &raw mut nopthread,
-                    &raw const thattr,
-                    Some(masterproxy_keepalive),
-                    cd as *mut ::core::ffi::c_void,
-                );
-                if res != 0 {
-                    free_conn_data(cd);
-                } else {
-                    let mut clientthread: pthread_t = 0;
-                    let res = pthread_create(
-                        &raw mut clientthread,
-                        &raw const thattr,
-                        Some(masterproxy_server),
-                        cd as *mut ::core::ffi::c_void,
-                    );
-                    if res != 0 {
-                        (*cd).sendnops.store(255, Ordering::SeqCst);
-                    }
-                }
-                let mut nullset: sigset_t = ::core::mem::zeroed();
-                pthread_sigmask(SIG_SETMASK, &raw const oldset, &raw mut nullset);
-            }
+fn masterproxy_acceptor() {
+    loop {
+        if TERMINATE.load(Ordering::SeqCst) != 0 {
+            return;
         }
-        pthread_attr_destroy(&raw mut thattr);
-        NULL
+        // SAFETY: listening socket is initialized before this worker starts.
+        let sock = unsafe { tcptoaccept(lsock, 1000) };
+        if sock < 0 {
+            continue;
+        }
+        let cd = Arc::new(ConnData {
+            sock,
+            sendnops: AtomicU8::new(0),
+        });
+        // SAFETY: accepted socket is owned by cd.
+        unsafe {
+            tcpnodelay(sock);
+            tcpnonblock(sock);
+        }
+        let keepalive =
+            plfscommon::lwthread::spawn_with_stack("masterproxy-keepalive", 0x100000, {
+                let cd = Arc::clone(&cd);
+                move || masterproxy_keepalive(cd)
+            });
+        if keepalive.is_err() {
+            continue;
+        }
+        if plfscommon::lwthread::spawn_with_stack("masterproxy-server", 0x100000, {
+            let cd = Arc::clone(&cd);
+            move || masterproxy_server(cd)
+        })
+        .is_err()
+        {
+            cd.sendnops.store(255, Ordering::SeqCst);
+        }
+        // Keepalive handle is intentionally detached; it owns its Arc until
+        // it observes the server's terminal state.
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn masterproxy_term() {
-    unsafe {
-        TERMINATE.store(1, Ordering::SeqCst);
-        pthread_join(
-            proxythread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
+    TERMINATE.store(1, Ordering::SeqCst);
+    if let Some(thread) = PROXY_THREAD.lock().unwrap().take() {
+        thread.join().expect("master proxy acceptor panicked");
     }
 }
 
@@ -610,20 +461,19 @@ pub unsafe extern "C" fn masterproxy_init(
             return -1;
         }
         TERMINATE.store(0, Ordering::SeqCst);
-        let mut thattr: pthread_attr_t = ::core::mem::zeroed();
-        pthread_attr_init(&raw mut thattr);
-        pthread_attr_setstacksize(&raw mut thattr, 0x100000);
-        let mut oldset: sigset_t = ::core::mem::zeroed();
-        sigmask_block(&raw mut oldset);
-        pthread_create(
-            &raw mut proxythread,
-            &raw const thattr,
-            Some(masterproxy_acceptor),
-            NULL,
-        );
-        let mut nullset: sigset_t = ::core::mem::zeroed();
-        pthread_sigmask(SIG_SETMASK, &raw const oldset, &raw mut nullset);
-        pthread_attr_destroy(&raw mut thattr);
+        let thread = match plfscommon::lwthread::spawn_with_stack(
+            "masterproxy-acceptor",
+            0x100000,
+            masterproxy_acceptor,
+        ) {
+            Ok(thread) => thread,
+            Err(_) => {
+                tcpclose(lsock);
+                lsock = -1;
+                return -1;
+            }
+        };
+        *PROXY_THREAD.lock().unwrap() = Some(thread);
         1
     }
 }

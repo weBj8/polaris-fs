@@ -447,14 +447,8 @@ unsafe extern "C" {
     unsafe fn symlink_cache_term();
     unsafe fn negentry_cache_init(to: ::core::ffi::c_double);
     unsafe fn negentry_cache_term();
-    unsafe fn chunksdatacache_term();
-    unsafe fn chunksdatacache_init();
-    unsafe fn inoleng_term();
-    unsafe fn inoleng_init();
     unsafe fn conncache_term();
     unsafe fn conncache_init(capacity: uint32_t) -> ::core::ffi::c_int;
-    unsafe fn chunkrwlock_init();
-    unsafe fn chunkrwlock_term();
     unsafe fn read_data_init(
         readaheadsize: uint64_t,
         readaheadleng: uint32_t,
@@ -481,9 +475,6 @@ unsafe extern "C" {
     unsafe fn write_term();
     unsafe fn delay_term();
     unsafe fn delay_init();
-    unsafe fn csdb_init();
-    unsafe fn csdb_term();
-    unsafe fn stats_term();
     unsafe fn mycrc32_init();
     unsafe fn processname_init(argc: ::core::ffi::c_int, argv: *mut *mut ::core::ffi::c_char);
     unsafe fn processname_set(name: *mut ::core::ffi::c_char);
@@ -3544,10 +3535,10 @@ pub unsafe extern "C" fn mainloop(
                 as *const ::core::ffi::c_char,
             monotonic_speed(),
         );
-        inoleng_init();
+        plfsclient::inoleng::init();
         conncache_init(200 as uint32_t);
-        chunkrwlock_init();
-        chunksdatacache_init();
+        plfsclient::chunkrwlock::init();
+        plfsclient::chunksdatacache::init();
         symlink_cache_init(mfsopts.symlinkcacheto);
         negentry_cache_init(mfsopts.negentrycacheto);
         read_init();
@@ -3570,7 +3561,7 @@ pub unsafe extern "C" fn mainloop(
                     &raw mut piped as *mut ::core::ffi::c_int as *mut ::core::ffi::c_void,
                 );
             } else {
-                csdb_init();
+                plfsclient::csdb::init();
                 delay_init();
                 read_data_init(
                     mfsopts
@@ -3761,7 +3752,7 @@ pub unsafe extern "C" fn mainloop(
                 write_data_term();
                 read_data_term();
                 delay_term();
-                csdb_term();
+                plfsclient::csdb::term();
             }
             masterproxy_term();
         }
@@ -3770,10 +3761,10 @@ pub unsafe extern "C" fn mainloop(
         read_term();
         negentry_cache_term();
         symlink_cache_term();
-        chunksdatacache_term();
-        chunkrwlock_term();
+        plfsclient::chunksdatacache::term();
+        plfsclient::chunkrwlock::term();
         conncache_term();
-        inoleng_term();
+        plfsclient::inoleng::term();
         mfs_log_term();
         return if err != 0 {
             1 as ::core::ffi::c_int
@@ -4388,17 +4379,13 @@ unsafe fn main_0(
             let mut cfgfd: ::core::ffi::c_int = 0;
             let mut cfgfile: *mut ::core::ffi::c_char =
                 ::core::ptr::null_mut::<::core::ffi::c_char>();
-            cfgfile = strdup(
-                b"/usr/local/etc/mfs/mfsmount.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
-            );
+            cfgfile =
+                strdup(b"/usr/local/etc/mfs/mfsmount.cfg\0".as_ptr() as *const ::core::ffi::c_char);
             cfgfd = open(cfgfile, O_RDONLY);
             if cfgfd < 0 as ::core::ffi::c_int && *__errno_location() == ENOENT {
                 free(cfgfile as *mut ::core::ffi::c_void);
-                cfgfile = strdup(
-                    b"/usr/local/etc/mfsmount.cfg\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                );
+                cfgfile =
+                    strdup(b"/usr/local/etc/mfsmount.cfg\0".as_ptr() as *const ::core::ffi::c_char);
                 cfgfd = open(cfgfile, O_RDONLY);
                 if cfgfd >= 0 as ::core::ffi::c_int {
                     fprintf(
@@ -4892,7 +4879,7 @@ unsafe fn main_0(
         if !defaultmountpoint.is_null() {
             free(defaultmountpoint as *mut ::core::ffi::c_void);
         }
-        stats_term();
+        plfsclient::stats::term();
         strerr_term();
         return res;
     }

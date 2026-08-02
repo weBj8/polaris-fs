@@ -12,27 +12,17 @@
 //! hands ownership of `udata` to the scheduler thread.
 
 pub type size_t = usize;
-pub type pthread_t = ::core::ffi::c_ulong;
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
 
 use std::collections::BinaryHeap;
 use std::sync::{Condvar, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 unsafe extern "C" {
     fn monotonic_useconds() -> uint64_t;
-    fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    fn pthread_join(
-        th: pthread_t,
-        thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
 }
 
 pub type DelayFn = unsafe extern "C" fn(*mut ::core::ffi::c_void);
@@ -76,18 +66,13 @@ static STATE: Mutex<State> = Mutex::new(State {
     exitflag: false,
 });
 static COND: Condvar = Condvar::new();
-static SCHEDULER: Mutex<Option<pthread_t>> = Mutex::new(None);
+static SCHEDULER: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-/// # Safety
-/// pthread start-routine signature; `arg` passed through, as the original.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn delay_scheduler(
-    mut arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+fn delay_scheduler() {
     let mut guard = STATE.lock().unwrap();
     loop {
         if guard.exitflag {
-            return arg;
+            return;
         }
         let Some(top) = guard.heap.peek() else {
             guard = COND.wait(guard).unwrap();
@@ -141,8 +126,7 @@ pub extern "C" fn delay_term() {
     }
     let th = SCHEDULER.lock().unwrap().take();
     if let Some(th) = th {
-        // SAFETY: extern; th is the scheduler thread, joinable, alive.
-        unsafe { pthread_join(th, std::ptr::null_mut()) };
+        th.join().expect("delay scheduler panicked");
     }
     STATE.lock().unwrap().heap.clear();
 }
@@ -154,16 +138,8 @@ pub extern "C" fn delay_init() {
         guard.exitflag = false;
         guard.heap.clear();
     }
-    let mut th: pthread_t = 0;
-    // SAFETY: th written by the call; scheduler is joinable (detached=0),
-    // joined in delay_term.
-    let rc =
-        unsafe { lwt_minthread_create(&mut th, 0, Some(delay_scheduler), std::ptr::null_mut()) };
-    if rc < 0 {
-        // original abort()ed on thread-create failure paths
-        // SAFETY: abort has no preconditions.
-        unsafe { libc::abort() };
-    }
+    let th = crate::lwthread::spawn_min("delayrun", delay_scheduler)
+        .unwrap_or_else(|_| std::process::abort());
     *SCHEDULER.lock().unwrap() = Some(th);
 }
 

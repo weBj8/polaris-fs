@@ -24,18 +24,6 @@ use std::sync::Mutex as StdMutex;
 unsafe extern "C" {
     unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
     unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_create(
-        __newthread: *mut pthread_t,
-        __attr: *const ::core::ffi::c_void,
-        __start_routine: Option<
-            unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-        >,
-        __arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
 }
 pub type size_t = usize;
@@ -45,44 +33,6 @@ pub type uint64_t = u64;
 pub type pid_t = ::core::ffi::c_int;
 pub type uid_t = ::core::ffi::c_uint;
 pub type gid_t = ::core::ffi::c_uint;
-pub type pthread_t = ::core::ffi::c_ulong;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-
-// local copy, mirroring the C static-inline portable_usleep (per TU)
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct portable_timespec {
-    tv_sec: ::core::ffi::c_long,
-    tv_nsec: ::core::ffi::c_long,
-}
-unsafe extern "C" {
-    fn nanosleep(
-        __requested_time: *const portable_timespec,
-        __remaining: *mut portable_timespec,
-    ) -> ::core::ffi::c_int;
-}
-#[inline]
-fn portable_usleep(usec: uint64_t) {
-    let mut req = portable_timespec {
-        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
-        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
-    };
-    let mut rem = portable_timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: req/rem are valid stack structs.
-    unsafe {
-        loop {
-            let s = nanosleep(&req, &mut rem);
-            if s < 0 {
-                req = rem;
-            } else {
-                break;
-            }
-        }
-    }
-}
 
 /// C-layout result blob (getgroups.h); gidtab points right after header.
 #[derive(Copy, Clone)]
@@ -234,8 +184,8 @@ use imp::{GetResult, GroupCache};
 
 static CACHE: StdMutex<Option<GroupCache>> = StdMutex::new(None);
 static KEEP_ALIVE: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
-static mut main_thread: pthread_t = 0;
-static mut debug_mode: ::core::ffi::c_int = 0;
+static THREAD: StdMutex<Option<std::thread::JoinHandle<()>>> = StdMutex::new(None);
+static DEBUG_MODE: ::core::sync::atomic::AtomicI32 = ::core::sync::atomic::AtomicI32::new(0);
 
 /// Fetch supplementary groups from /proc (Linux path of the C original).
 /// Fallback [gid] when unreadable/unparseable, exactly like C.
@@ -320,7 +270,7 @@ pub unsafe extern "C" fn groups_get_common(
                 b
             }
         };
-        if debug_mode != 0 {
+        if DEBUG_MODE.load(::core::sync::atomic::Ordering::Relaxed) != 0 {
             eprintln!(
                 "groups_get(pid={pid},uid={uid},gid={gid}): gidcnt={} lcnt={}",
                 (*blob).gidcnt,
@@ -346,9 +296,7 @@ pub unsafe extern "C" fn groups_rel(g: *mut groups) {
     }
 }
 
-unsafe extern "C" fn groups_cleanup_thread(
-    arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+fn groups_cleanup_thread() {
     unsafe {
         loop {
             {
@@ -364,9 +312,9 @@ unsafe extern "C" fn groups_cleanup_thread(
                 }
             }
             if KEEP_ALIVE.load(::core::sync::atomic::Ordering::SeqCst) == 0 {
-                return arg;
+                return;
             }
-            portable_usleep(10000);
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }
@@ -375,10 +323,9 @@ unsafe extern "C" fn groups_cleanup_thread(
 pub unsafe extern "C" fn groups_term() {
     unsafe {
         KEEP_ALIVE.store(0, ::core::sync::atomic::Ordering::SeqCst);
-        pthread_join(
-            main_thread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
+        if let Some(thread) = THREAD.lock().unwrap().take() {
+            thread.join().expect("groups reaper panicked");
+        }
         let mut g = CACHE.lock().unwrap();
         if let Some(c) = g.as_mut() {
             for b in c.term() {
@@ -390,20 +337,15 @@ pub unsafe extern "C" fn groups_term() {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn groups_init(to: ::core::ffi::c_double, dm: ::core::ffi::c_int) {
-    unsafe {
-        debug_mode = dm;
-        {
-            let mut g = CACHE.lock().unwrap();
-            *g = Some(GroupCache::new(to));
-        }
-        KEEP_ALIVE.store(1, ::core::sync::atomic::Ordering::SeqCst);
-        pthread_create(
-            &raw mut main_thread,
-            ::core::ptr::null(),
-            Some(groups_cleanup_thread),
-            NULL,
-        );
+    DEBUG_MODE.store(dm, ::core::sync::atomic::Ordering::Relaxed);
+    {
+        let mut g = CACHE.lock().unwrap();
+        *g = Some(GroupCache::new(to));
     }
+    KEEP_ALIVE.store(1, ::core::sync::atomic::Ordering::SeqCst);
+    let thread = plfscommon::lwthread::spawn_min("groups-reaper", groups_cleanup_thread)
+        .unwrap_or_else(|_| std::process::abort());
+    *THREAD.lock().unwrap() = Some(thread);
 }
 
 #[cfg(test)]

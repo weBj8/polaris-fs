@@ -10,16 +10,6 @@
 //! term is a real AtomicU8 (replaces core::intrinsics::__sync_fetch_and_or).
 
 unsafe extern "C" {
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    unsafe fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
     unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
@@ -29,48 +19,9 @@ unsafe extern "C" {
     );
 }
 
-// local copy, mirroring the C static-inline portable_usleep (each TU had
-// its own; cross-module private symbols do not survive clean LTO builds)
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct portable_timespec {
-    tv_sec: ::core::ffi::c_long,
-    tv_nsec: ::core::ffi::c_long,
-}
-unsafe extern "C" {
-    fn nanosleep(
-        __requested_time: *const portable_timespec,
-        __remaining: *mut portable_timespec,
-    ) -> ::core::ffi::c_int;
-}
-#[inline]
-fn portable_usleep(usec: uint64_t) {
-    let mut req = portable_timespec {
-        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
-        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
-    };
-    let mut rem = portable_timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: req/rem are valid stack structs.
-    unsafe {
-        loop {
-            let s = nanosleep(&req, &mut rem);
-            if s < 0 {
-                req = rem;
-            } else {
-                break;
-            }
-        }
-    }
-}
-
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
-pub type pthread_t = ::core::ffi::c_ulong;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 pub const MFS_STATUS_OK: ::core::ffi::c_int = 0;
 pub const MFS_ERROR_ENOENT: ::core::ffi::c_int = 3;
 pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0;
@@ -173,16 +124,20 @@ pub mod imp {
 }
 
 use imp::Stats;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
-static mut STATS: Option<Stats> = None;
+static STATS: Mutex<Option<Arc<Stats>>> = Mutex::new(None);
 static TERM: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
-static mut clthread: pthread_t = 0;
+static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-/// SAFETY: STATS is set once in sstats_init before the reaper and any FUSE
-/// thread can call in, and never cleared until process exit (C leaked the
-/// table the same way; sstats_term only joins the reaper).
-unsafe fn stats() -> &'static Stats {
-    unsafe { (*(&raw const STATS)).as_ref().unwrap_unchecked() }
+fn stats() -> Arc<Stats> {
+    STATS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("sstats used before init")
+        .clone()
 }
 
 #[unsafe(no_mangle)]
@@ -224,41 +179,37 @@ pub unsafe extern "C" fn sstats_set(inode: uint32_t, attr: *const uint8_t, creat
     }
 }
 
-unsafe extern "C" fn sstats_thread(_arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut hash: usize = 0;
-        loop {
-            let now = monotonic_seconds();
-            stats().reap_bucket(hash, now);
-            hash = (hash + 1) % imp::HASHSIZE;
-            portable_usleep(100000);
-            if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
-                return NULL;
-            }
+fn sstats_thread(stats: Arc<Stats>) {
+    let mut hash: usize = 0;
+    loop {
+        // SAFETY: external monotonic clock takes no arguments.
+        let now = unsafe { monotonic_seconds() };
+        stats.reap_bucket(hash, now);
+        hash = (hash + 1) % imp::HASHSIZE;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
+            return;
         }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sstats_term() {
-    unsafe {
-        TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
-        pthread_join(
-            clthread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
-        // C freed the tables; process is exiting anyway — leave STATS to the
-        // OS (identical observable behavior, no post-join use).
+    TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
+    if let Some(thread) = THREAD.lock().unwrap().take() {
+        thread.join().expect("sustained-stats reaper panicked");
     }
+    STATS.lock().unwrap().take();
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sstats_init() {
-    unsafe {
-        STATS = Some(Stats::new());
-        TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
-        lwt_minthread_create(&raw mut clthread, 0, Some(sstats_thread), NULL);
-    }
+    let stats = Arc::new(Stats::new());
+    *STATS.lock().unwrap() = Some(stats.clone());
+    TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
+    let thread = plfscommon::lwthread::spawn_min("sustained-stats", move || sstats_thread(stats))
+        .unwrap_or_else(|_| std::process::abort());
+    *THREAD.lock().unwrap() = Some(thread);
 }
 
 #[cfg(test)]

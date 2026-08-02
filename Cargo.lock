@@ -50,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "c2rust-bitfields",
  "libc",
+ "plfscommon",
 ]
 
 [[package]]

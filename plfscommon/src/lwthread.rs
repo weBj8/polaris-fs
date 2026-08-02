@@ -12,6 +12,7 @@ pub type size_t = usize;
 pub type pthread_t = ::core::ffi::c_ulong;
 pub type uint8_t = u8;
 
+const MIN_STACK_SIZE: usize = 0x20000;
 const MFSLOG_ERR: ::core::ffi::c_int = 4;
 const MFSLOG_SYSLOG: ::core::ffi::c_int = 0;
 
@@ -47,6 +48,69 @@ fn die(what: &std::ffi::CStr) {
     }
 }
 
+struct SignalMaskGuard(libc::sigset_t);
+
+impl SignalMaskGuard {
+    fn block_daemon_signals() -> Self {
+        let mut newset: libc::sigset_t = unsafe { std::mem::zeroed() };
+        let mut oldset: libc::sigset_t = unsafe { std::mem::zeroed() };
+        // SAFETY: both sigsets are valid for the duration of these calls.
+        unsafe {
+            libc::sigemptyset(&mut newset);
+            for sig in [
+                libc::SIGTERM,
+                libc::SIGINT,
+                libc::SIGHUP,
+                libc::SIGQUIT,
+                libc::SIGPIPE,
+                libc::SIGTSTP,
+                libc::SIGTTIN,
+                libc::SIGTTOU,
+                libc::SIGUSR1,
+                libc::SIGUSR2,
+                libc::SIGALRM,
+                libc::SIGVTALRM,
+                libc::SIGPROF,
+            ] {
+                libc::sigaddset(&mut newset, sig);
+            }
+            libc::pthread_sigmask(libc::SIG_BLOCK, &newset, &mut oldset);
+        }
+        Self(oldset)
+    }
+}
+
+impl Drop for SignalMaskGuard {
+    fn drop(&mut self) {
+        // SAFETY: saved mask was initialized by pthread_sigmask.
+        unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &self.0, std::ptr::null_mut()) };
+    }
+}
+
+/// Spawn a Rust-owned worker with MooseFS daemon signals blocked.
+pub fn spawn_with_stack<F>(
+    name: &str,
+    stack_size: usize,
+    f: F,
+) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    let _mask = SignalMaskGuard::block_daemon_signals();
+    std::thread::Builder::new()
+        .name(name.into())
+        .stack_size(stack_size)
+        .spawn(f)
+}
+
+/// Spawn with the historical 128 KiB minimum worker stack.
+pub fn spawn_min<F>(name: &str, f: F) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    spawn_with_stack(name, MIN_STACK_SIZE, f)
+}
+
 /// pthread_create with the daemon's signal set blocked in the new thread.
 ///
 /// # Safety
@@ -58,35 +122,9 @@ pub unsafe extern "C" fn lwt_thread_create(
     mut r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
     mut arg: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    let mut newset: libc::sigset_t = unsafe { std::mem::zeroed() };
-    let mut oldset: libc::sigset_t = unsafe { std::mem::zeroed() };
-    // SAFETY: newset/oldset are valid, initialized sigsets.
-    unsafe {
-        libc::sigemptyset(&mut newset);
-        for sig in [
-            libc::SIGTERM,
-            libc::SIGINT,
-            libc::SIGHUP,
-            libc::SIGQUIT,
-            libc::SIGPIPE,
-            libc::SIGTSTP,
-            libc::SIGTTIN,
-            libc::SIGTTOU,
-            libc::SIGUSR1,
-            libc::SIGUSR2,
-            libc::SIGALRM,
-            libc::SIGVTALRM,
-            libc::SIGPROF,
-        ] {
-            libc::sigaddset(&mut newset, sig);
-        }
-        libc::pthread_sigmask(libc::SIG_BLOCK, &newset, &mut oldset);
-    }
+    let _mask = SignalMaskGuard::block_daemon_signals();
     // SAFETY: per pthread_create contract.
-    let res = unsafe { pthread_create(th, attr, r#fn, arg) };
-    // SAFETY: oldset was filled by the mask call above.
-    unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &oldset, std::ptr::null_mut()) };
-    res
+    unsafe { pthread_create(th, attr, r#fn, arg) }
 }
 
 /// pthread_create with a minimal stack (>= 128 KiB or PTHREAD_STACK_MIN).
@@ -109,8 +147,8 @@ pub unsafe extern "C" fn lwt_minthread_create(
     }
     // glibc _SC_THREAD_STACK_MIN = 75 (literal kept from the original)
     let mut stacksize = unsafe { libc::sysconf(75) } as usize;
-    if stacksize < 0x20000 {
-        stacksize = 0x20000;
+    if stacksize < MIN_STACK_SIZE {
+        stacksize = MIN_STACK_SIZE;
     }
     // SAFETY: attr initialized above.
     unsafe {

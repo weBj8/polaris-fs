@@ -1,27 +1,9 @@
 pub enum __dirstream {}
 unsafe extern "C" {
     unsafe fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    unsafe fn sleep(__seconds: ::core::ffi::c_uint) -> ::core::ffi::c_uint;
-    unsafe fn nanosleep(
-        __requested_time: *const timespec,
-        __remaining: *mut timespec,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_join(
-        __th: pthread_t,
-        __thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn sparents_get(inode: uint32_t) -> uint32_t;
     unsafe fn fs_add_entry(inode: uint32_t);
     unsafe fn fs_forget_entry(inode: uint32_t);
-    unsafe fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn snprintf(
         __s: *mut ::core::ffi::c_char,
         __maxlen: size_t,
@@ -82,15 +64,6 @@ pub type uint32_t = u32;
 pub type uint64_t = u64;
 pub type size_t = usize;
 pub type pid_t = __pid_t;
-pub type pthread_t = ::core::ffi::c_ulong;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _sinodes_ino {
-    pub inode: uint32_t,
-    pub parent: uint32_t,
-    pub next: *mut _sinodes_ino,
-}
-pub type sinodes_ino = _sinodes_ino;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct dirent {
@@ -101,53 +74,24 @@ pub struct dirent {
     pub d_name: [::core::ffi::c_char; 256],
 }
 pub type DIR = __dirstream;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 pub const RINODES_CHECK_INTERVAL_100MS: ::core::ffi::c_int = 300 as ::core::ffi::c_int;
 #[inline]
-unsafe extern "C" fn portable_usleep(mut usec: uint64_t) {
-    unsafe {
-        let mut req: timespec = timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let mut rem: timespec = timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let mut s: ::core::ffi::c_int = 0;
-        req.tv_sec = usec.wrapping_div(1000000 as uint64_t) as __time_t;
-        req.tv_nsec = usec
-            .wrapping_rem(1000000 as uint64_t)
-            .wrapping_mul(1000 as uint64_t) as __syscall_slong_t;
-        loop {
-            s = nanosleep(&raw mut req, &raw mut rem);
-            if s < 0 as ::core::ffi::c_int {
-                req = rem;
-            }
-            if s >= 0 as ::core::ffi::c_int {
-                break;
-            }
-        }
-    }
+fn portable_usleep(usec: uint64_t) {
+    std::thread::sleep(std::time::Duration::from_micros(usec));
 }
 pub const MFSLOG_INFO: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 pub const MFSLOG_WARNING: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
 pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const MFSLOG_ERRNO_SYSLOG_STDERR: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-static mut clthread: pthread_t = 0;
-static mut term: uint8_t = 0;
-static mut lastlist: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-static mut currentlist: *mut sinodes_ino = ::core::ptr::null_mut::<sinodes_ino>();
-#[inline]
-unsafe extern "C" fn sinodes_close(mut inode: uint32_t) {
-    unsafe {
-        fs_forget_entry(inode);
-    }
-}
+static TERM: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
+static MYDEVID: ::core::sync::atomic::AtomicU32 = ::core::sync::atomic::AtomicU32::new(0);
+static SINODES: std::sync::LazyLock<std::sync::Mutex<imp::Sinodes>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(imp::Sinodes::default()));
+static THREAD: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(None);
 // ---------------------------------------------------------------------------
 // Safe core (P4 rewrite): sorted inode table + merge-diff. The C kept two
-// malloc'd sorted linked lists (current/last) and diffed them in sinodes_end;
-// here they are sorted Vecs with identical merge semantics.
+// linked lists and diffed them in sinodes_end; here they are sorted Vecs with
+// identical merge semantics.
 // ---------------------------------------------------------------------------
 
 #[deny(unsafe_code)]
@@ -236,45 +180,24 @@ pub mod imp {
     }
 }
 
-// SAFETY: module is single-init; scan thread + FUSE threads call these
-// functions under the mount's own serialization assumptions (same as C —
-// the original had no locking here either). ponytail: global state mirrors
-// the C design; per-instance state if a second consumer ever appears.
-static mut SINODES: Option<imp::Sinodes> = None;
-
-/// SAFETY: same serialization assumptions as the C original.
-unsafe fn sinodes() -> &'static mut imp::Sinodes {
-    unsafe {
-        let p = &mut *(&raw mut SINODES);
-        if p.is_none() {
-            *p = Some(imp::Sinodes::default());
-        }
-        p.as_mut().unwrap_unchecked()
-    }
-}
-
 /// SAFETY: boundary wrapper for sparents_get.
 unsafe fn parent_of(inode: uint32_t) -> uint32_t {
-    unsafe { sparents_get(inode) }
+    sparents_get(inode)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_process_inode(inode: uint32_t) {
-    unsafe {
-        sinodes().process_inode(inode, &|i| parent_of(i));
-    }
+    let mut sinodes = SINODES.lock().unwrap();
+    sinodes.process_inode(inode, &|i| unsafe { parent_of(i) });
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_end() {
-    unsafe {
-        let mut open = |i: uint32_t| fs_add_entry(i);
-        let mut close = |i: uint32_t| fs_forget_entry(i);
-        sinodes().end(&mut open, &mut close);
-    }
+    let mut sinodes = SINODES.lock().unwrap();
+    let mut open = |i: uint32_t| unsafe { fs_add_entry(i) };
+    let mut close = |i: uint32_t| unsafe { fs_forget_entry(i) };
+    sinodes.end(&mut open, &mut close);
 }
-
-static mut mydevid: uint32_t = 0;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_pid_inodes(mut pid: pid_t) {
     unsafe {
@@ -316,7 +239,7 @@ pub unsafe extern "C" fn sinodes_pid_inodes(mut pid: pid_t) {
         if stat(&raw mut path as *mut ::core::ffi::c_char, &raw mut st) >= 0 as ::core::ffi::c_int {
             devid = st.st_dev as uint32_t;
             inode = st.st_ino as uint64_t;
-            if devid == mydevid {
+            if devid == MYDEVID.load(::core::sync::atomic::Ordering::Acquire) {
                 sinodes_process_inode(inode as uint32_t);
             }
         }
@@ -361,12 +284,7 @@ pub unsafe extern "C" fn sinodes_all_pids() {
 }
 
 // term flag as a real atomic (replaces core::intrinsics::atomic_or reads)
-static TERM: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sinodes_scanthread(
-    mut arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+fn sinodes_scanthread(mountpoint: std::ffi::CString) {
     unsafe {
         let mut st: stat = stat {
             st_dev: 0,
@@ -395,7 +313,7 @@ pub unsafe extern "C" fn sinodes_scanthread(
             __glibc_reserved: [0; 3],
         };
         let mut i: uint32_t = 0;
-        let mut mountpoint: *mut ::core::ffi::c_char = arg as *mut ::core::ffi::c_char;
+        let mountpoint = mountpoint.as_ptr();
         st.st_ino = 1 as __ino_t;
         while stat(mountpoint, &raw mut st) < 0 as ::core::ffi::c_int || st.st_ino != 1 as __ino_t {
             if st.st_ino == 1 as __ino_t {
@@ -408,20 +326,20 @@ pub unsafe extern "C" fn sinodes_scanthread(
             } else {
                 st.st_ino = 1 as __ino_t;
             }
-            sleep(1 as ::core::ffi::c_uint);
+            std::thread::sleep(std::time::Duration::from_secs(1));
             if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
-                free(arg);
-                return NULL;
+                return;
             }
         }
-        free(mountpoint as *mut ::core::ffi::c_void);
-        mountpoint = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        mydevid = st.st_dev as uint32_t;
+        MYDEVID.store(
+            st.st_dev as uint32_t,
+            ::core::sync::atomic::Ordering::Release,
+        );
         mfs_log(
             MFSLOG_SYSLOG,
             MFSLOG_INFO,
             b"my st_dev: %u\0".as_ptr() as *const ::core::ffi::c_char,
-            mydevid,
+            MYDEVID.load(::core::sync::atomic::Ordering::Acquire),
         );
         i = 0 as uint32_t;
         loop {
@@ -434,36 +352,30 @@ pub unsafe extern "C" fn sinodes_scanthread(
             }
             portable_usleep(100000 as uint64_t);
             if TERM.load(::core::sync::atomic::Ordering::SeqCst) == 1 {
-                return NULL;
+                return;
             }
         }
     }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sinodes_term() {
-    unsafe {
-        TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
-        pthread_join(
-            clthread,
-            ::core::ptr::null_mut::<*mut ::core::ffi::c_void>(),
-        );
-        sinodes_end();
+    TERM.store(1, ::core::sync::atomic::Ordering::SeqCst);
+    if let Some(thread) = THREAD.lock().unwrap().take() {
+        thread.join().expect("sustained-inodes scanner panicked");
     }
+    sinodes_end();
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sinodes_init(mut mp: *const ::core::ffi::c_char) {
-    unsafe {
-        TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
-        lwt_minthread_create(
-            &raw mut clthread,
-            0 as uint8_t,
-            Some(
-                sinodes_scanthread
-                    as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void,
-            ),
-            strdup(mp) as *mut ::core::ffi::c_void,
-        );
-    }
+pub unsafe extern "C" fn sinodes_init(mp: *const ::core::ffi::c_char) {
+    // SAFETY: caller supplies a valid NUL-terminated mountpoint string.
+    let mountpoint = unsafe { std::ffi::CStr::from_ptr(mp) };
+    let mountpoint =
+        std::ffi::CString::new(mountpoint.to_bytes()).expect("mountpoint contains interior NUL");
+    TERM.store(0, ::core::sync::atomic::Ordering::SeqCst);
+    let thread =
+        plfscommon::lwthread::spawn_min("sustained-inodes", move || sinodes_scanthread(mountpoint))
+            .unwrap_or_else(|_| std::process::abort());
+    *THREAD.lock().unwrap() = Some(thread);
 }
 
 #[cfg(test)]

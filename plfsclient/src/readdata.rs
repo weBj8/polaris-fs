@@ -173,8 +173,6 @@ unsafe extern "C" {
         csdatasize: uint32_t,
         writeflag: uint8_t,
     ) -> uint32_t;
-    unsafe fn csdb_readinc(ip: uint32_t, port: uint16_t);
-    unsafe fn csdb_readdec(ip: uint32_t, port: uint16_t);
     unsafe fn delay_run(
         r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>,
         udata: *mut ::core::ffi::c_void,
@@ -194,33 +192,6 @@ unsafe extern "C" {
     ) -> uint8_t;
     unsafe fn master_version() -> uint32_t;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-    unsafe fn chunkrwlock_rlock(inode: uint32_t, indx: uint32_t);
-    unsafe fn chunkrwlock_runlock(inode: uint32_t, indx: uint32_t);
-    unsafe fn chunksdatacache_invalidate(inode: uint32_t, chindx: uint32_t);
-    unsafe fn chunksdatacache_check(
-        inode: uint32_t,
-        chindx: uint32_t,
-        chunkid: uint64_t,
-        version: uint32_t,
-    ) -> uint8_t;
-    unsafe fn chunksdatacache_insert(
-        inode: uint32_t,
-        chindx: uint32_t,
-        chunkid: uint64_t,
-        version: uint32_t,
-        csdataver: uint8_t,
-        csdata: *const uint8_t,
-        csdatasize: uint32_t,
-    );
-    unsafe fn chunksdatacache_find(
-        inode: uint32_t,
-        chindx: uint32_t,
-        chunkid: *mut uint64_t,
-        version: *mut uint32_t,
-        csdataver: *mut uint8_t,
-        csdata: *mut uint8_t,
-        csdatasize: *mut uint32_t,
-    ) -> uint8_t;
 }
 pub type size_t = usize;
 pub type __uint64_t = u64;
@@ -2124,7 +2095,7 @@ pub unsafe extern "C" fn read_worker(
                 if datasrc[part as usize].ip != 0
                     || datasrc[part as usize].port as ::core::ffi::c_int != 0
                 {
-                    csdb_readdec(datasrc[part as usize].ip, datasrc[part as usize].port);
+                    crate::csdb::read_dec(datasrc[part as usize].ip, datasrc[part as usize].port);
                 }
                 part = part.wrapping_add(1);
             }
@@ -3305,7 +3276,7 @@ pub unsafe extern "C" fn read_worker(
                     }
                     abort();
                 }
-                chunkrwlock_rlock(inode, chindx);
+                crate::chunkrwlock::read_lock(inode, chindx);
                 mfleng = 0 as uint64_t;
                 chunkid = 0 as uint64_t;
                 version = 0 as uint32_t;
@@ -3319,16 +3290,20 @@ pub unsafe extern "C" fn read_worker(
                         } else {
                             74 as ::core::ffi::c_int
                         })) as uint32_t
-                    && chunksdatacache_find(
-                        inode,
-                        chindx,
-                        &raw mut chunkid,
-                        &raw mut version,
-                        &raw mut csdataver,
-                        &raw mut pipebuff as *mut uint8_t,
-                        &raw mut csdatasize,
-                    ) as ::core::ffi::c_int
-                        != 0
+                    && if let Some(cached) = crate::chunksdatacache::find(inode, chindx) {
+                        if cached.csdata.len() <= pipebuff.len() {
+                            chunkid = cached.chunkid;
+                            version = cached.version;
+                            csdataver = cached.csdataver;
+                            csdatasize = cached.csdata.len() as uint32_t;
+                            pipebuff[..cached.csdata.len()].copy_from_slice(&cached.csdata);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
                 {
                     rdstatus = MFS_STATUS_OK as uint8_t;
                     csdata = &raw mut pipebuff as *mut uint8_t;
@@ -3542,7 +3517,7 @@ pub unsafe extern "C" fn read_worker(
                             abort();
                         }
                         read_job_end(rreq, 0 as ::core::ffi::c_int, 0 as uint32_t);
-                        chunkrwlock_runlock(inode, chindx);
+                        crate::chunkrwlock::read_unlock(inode, chindx);
                         continue;
                     } else {
                         mfleng = (*ind).fleng;
@@ -3664,8 +3639,13 @@ pub unsafe extern "C" fn read_worker(
                         &raw mut csdatasize,
                     );
                     if rdstatus as ::core::ffi::c_int == MFS_STATUS_OK {
-                        chunksdatacache_insert(
-                            inode, chindx, chunkid, version, csdataver, csdata, csdatasize,
+                        crate::chunksdatacache::insert(
+                            inode,
+                            chindx,
+                            chunkid,
+                            version,
+                            csdataver,
+                            ::core::slice::from_raw_parts(csdata, csdatasize as usize),
                         );
                         let mut _mfs_assert_ret_13: ::core::ffi::c_int =
                             pthread_mutex_lock(&raw mut (*ind).lock);
@@ -3877,7 +3857,7 @@ pub unsafe extern "C" fn read_worker(
                                 abort();
                             }
                             read_job_end(rreq, 0 as ::core::ffi::c_int, 0 as uint32_t);
-                            chunkrwlock_runlock(inode, chindx);
+                            crate::chunkrwlock::read_unlock(inode, chindx);
                             continue;
                         } else {
                             (*ind).fleng = mfleng;
@@ -4865,7 +4845,7 @@ pub unsafe extern "C" fn read_worker(
                             );
                         }
                     }
-                    chunkrwlock_runlock(inode, chindx);
+                    crate::chunkrwlock::read_unlock(inode, chindx);
                 } else if chunkid == 0 as uint64_t && version == 0 as uint32_t {
                     let mut _mfs_assert_ret_23: ::core::ffi::c_int =
                         pthread_mutex_lock(&raw mut (*ind).lock);
@@ -5195,10 +5175,7 @@ pub unsafe extern "C" fn read_worker(
                             }
                             abort();
                         }
-                        if chunksdatacache_check(inode, chindx, chunkid, version)
-                            as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
-                        {
+                        if !crate::chunksdatacache::check(inode, chindx, chunkid, version) {
                             let mut _mfs_assert_ret_26: ::core::ffi::c_int =
                                 pthread_mutex_lock(&raw mut (*ind).lock);
                             if _mfs_assert_ret_26 != 0 as ::core::ffi::c_int {
@@ -5624,7 +5601,7 @@ pub unsafe extern "C" fn read_worker(
                         }
                     }
                     read_job_end(rreq, 0 as ::core::ffi::c_int, 0 as uint32_t);
-                    chunkrwlock_runlock(inode, chindx);
+                    crate::chunkrwlock::read_unlock(inode, chindx);
                 } else {
                     if !csdata.is_null() && csdatasize > 0 as uint32_t {
                         chainelements = csorder_sort(
@@ -6075,10 +6052,10 @@ pub unsafe extern "C" fn read_worker(
                                 }
                                 abort();
                             }
-                            chunksdatacache_invalidate(inode, chindx);
+                            crate::chunksdatacache::invalidate(inode, chindx);
                             read_delayed_enqueue(rreq, 10000000 as uint32_t);
                         }
-                        chunkrwlock_runlock(inode, chindx);
+                        crate::chunkrwlock::read_unlock(inode, chindx);
                     } else {
                         if csdataver as ::core::ffi::c_int == 3 as ::core::ffi::c_int {
                             if chainelements as ::core::ffi::c_int != 8 as ::core::ffi::c_int
@@ -6531,10 +6508,10 @@ pub unsafe extern "C" fn read_worker(
                                         }
                                         abort();
                                     }
-                                    chunksdatacache_invalidate(inode, chindx);
+                                    crate::chunksdatacache::invalidate(inode, chindx);
                                     read_delayed_enqueue(rreq, 10000000 as uint32_t);
                                 }
-                                chunkrwlock_runlock(inode, chindx);
+                                crate::chunkrwlock::read_unlock(inode, chindx);
                                 continue;
                             } else {
                                 parts = chainelements as uint8_t;
@@ -7000,14 +6977,14 @@ pub unsafe extern "C" fn read_worker(
                                     }
                                     abort();
                                 }
-                                chunksdatacache_invalidate(inode, chindx);
+                                crate::chunksdatacache::invalidate(inode, chindx);
                                 read_delayed_enqueue(rreq, 10000000 as uint32_t);
                             }
-                            chunkrwlock_runlock(inode, chindx);
+                            crate::chunkrwlock::read_unlock(inode, chindx);
                         } else {
                             part = 0 as uint8_t;
                             while (part as ::core::ffi::c_int) < parts as ::core::ffi::c_int {
-                                csdb_readinc(
+                                crate::csdb::read_inc(
                                     datasrc[part as usize].ip,
                                     datasrc[part as usize].port,
                                 );
@@ -7937,7 +7914,7 @@ pub unsafe extern "C" fn read_worker(
                                         }
                                         abort();
                                     }
-                                    chunksdatacache_invalidate(inode, chindx);
+                                    crate::chunksdatacache::invalidate(inode, chindx);
                                     read_delayed_enqueue(
                                         rreq,
                                         (1000 as uint32_t).wrapping_add(
@@ -7951,7 +7928,7 @@ pub unsafe extern "C" fn read_worker(
                                         ),
                                     );
                                 }
-                                chunkrwlock_runlock(inode, chindx);
+                                crate::chunkrwlock::read_unlock(inode, chindx);
                             } else {
                                 part = 0 as uint8_t;
                                 while (part as ::core::ffi::c_int) < parts as ::core::ffi::c_int {
@@ -8720,12 +8697,9 @@ pub unsafe extern "C" fn read_worker(
                                                 }
                                                 abort();
                                             }
-                                            if chunksdatacache_check(
+                                            if !crate::chunksdatacache::check(
                                                 inode, chindx, chunkid, version,
-                                            )
-                                                as ::core::ffi::c_int
-                                                == 0 as ::core::ffi::c_int
-                                            {
+                                            ) {
                                                 let mut _mfs_assert_ret_53: ::core::ffi::c_int =
                                                     pthread_mutex_lock(&raw mut (*ind).lock);
                                                 if _mfs_assert_ret_53 != 0 as ::core::ffi::c_int {
@@ -11422,7 +11396,7 @@ pub unsafe extern "C" fn read_worker(
                                             }
                                             abort();
                                         }
-                                        chunksdatacache_invalidate(inode, chindx);
+                                        crate::chunksdatacache::invalidate(inode, chindx);
                                         read_job_end(rreq, status, 0 as uint32_t);
                                     } else {
                                         let mut _mfs_assert_ret_66: ::core::ffi::c_int =
@@ -11531,7 +11505,7 @@ pub unsafe extern "C" fn read_worker(
                                             }
                                             abort();
                                         }
-                                        chunksdatacache_invalidate(inode, chindx);
+                                        crate::chunksdatacache::invalidate(inode, chindx);
                                         if notdone != 0 {
                                             read_job_end(
                                                 rreq,
@@ -11667,7 +11641,7 @@ pub unsafe extern "C" fn read_worker(
                                     }
                                     read_job_end(rreq, 0 as ::core::ffi::c_int, 0 as uint32_t);
                                 }
-                                chunkrwlock_runlock(inode, chindx);
+                                crate::chunkrwlock::read_unlock(inode, chindx);
                             }
                         }
                     }

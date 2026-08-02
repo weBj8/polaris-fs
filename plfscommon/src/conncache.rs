@@ -12,7 +12,6 @@
 //! for the consumer daemons.
 
 pub type size_t = usize;
-pub type pthread_t = ::core::ffi::c_ulong;
 pub type uint8_t = u8;
 pub type uint16_t = u16;
 pub type uint32_t = u32;
@@ -22,20 +21,12 @@ pub const CONN_CACHE_HASHSIZE: usize = 256;
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 unsafe extern "C" {
     fn monotonic_useconds() -> uint64_t;
     fn tcpclose(sock: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
-    fn pthread_join(
-        th: pthread_t,
-        thread_return: *mut *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
 }
 
 #[inline]
@@ -54,17 +45,7 @@ fn bucket_of(ip: uint32_t, port: uint16_t) -> usize {
 }
 
 fn portable_usleep(usec: uint64_t) {
-    let mut req = libc::timespec {
-        tv_sec: (usec / 1_000_000) as libc::time_t,
-        tv_nsec: (usec % 1_000_000 * 1000) as _,
-    };
-    // SAFETY: req/rem valid timespecs; EINTR retry loop as the original.
-    unsafe {
-        let mut rem: libc::timespec = std::mem::zeroed();
-        while libc::nanosleep(&req, &mut rem) < 0 {
-            req = rem;
-        }
-    }
+    std::thread::sleep(Duration::from_micros(usec));
 }
 
 #[derive(Clone, Copy, Default)]
@@ -109,10 +90,10 @@ impl Cache {
     }
 }
 
-// None = not initialized / after term. pthread_t of the janitor lives
-// outside the cache (joined before the cache is dropped, as the original).
+// None = not initialized / after term. Janitor handle lives outside the
+// cache and is joined before the cache is dropped, as in the original.
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
-static JANITOR: Mutex<Option<pthread_t>> = Mutex::new(None);
+static JANITOR: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn conncache_insert(ip: uint32_t, port: uint16_t, fd: ::core::ffi::c_int) {
@@ -152,18 +133,13 @@ pub extern "C" fn conncache_get(ip: uint32_t, port: uint16_t) -> ::core::ffi::c_
 /// (read → if any byte nonzero, drop; else write NOP back; drop on any
 /// error). Logic byte-for-byte from the original.
 ///
-/// # Safety
-/// pthread start-routine signature; `arg` passed through, as the original.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn conncache_keepalive_thread(
-    mut arg: *mut ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
+fn conncache_keepalive_thread() {
     let mut p: uint32_t = 0;
     loop {
         let st = unsafe { monotonic_useconds() }; // SAFETY: extern, no args
         {
             let mut guard = CACHE.lock().unwrap();
-            let Some(c) = guard.as_mut() else { return arg }; // term raced us
+            let Some(c) = guard.as_mut() else { return }; // term raced us
             let capacity = c.entries.len() as uint32_t;
             let mut q = p;
             while q < capacity {
@@ -201,7 +177,7 @@ pub unsafe extern "C" fn conncache_keepalive_thread(
                 p = 0;
             }
             if !c.keep_alive {
-                return arg;
+                return;
             }
         }
         let en = unsafe { monotonic_useconds() }; // SAFETY: extern, no args
@@ -219,8 +195,7 @@ pub extern "C" fn conncache_term() {
     }
     let th = JANITOR.lock().unwrap().take();
     if let Some(th) = th {
-        // SAFETY: extern; th is the janitor, joinable, outlives this call.
-        unsafe { pthread_join(th, std::ptr::null_mut()) };
+        th.join().expect("connection-cache janitor panicked");
     }
     if let Some(c) = CACHE.lock().unwrap().take() {
         for e in &c.entries {
@@ -248,21 +223,13 @@ pub extern "C" fn conncache_init(mut cap: uint32_t) -> ::core::ffi::c_int {
     c.keep_alive = true;
     *CACHE.lock().unwrap() = Some(c);
 
-    let mut th: pthread_t = 0;
-    // SAFETY: th written by the call; thread fn is our janitor; joinable
-    // (detached=0), joined in conncache_term.
-    let rc = unsafe {
-        lwt_minthread_create(
-            &mut th,
-            0,
-            Some(conncache_keepalive_thread),
-            std::ptr::null_mut(),
-        )
+    let th = match crate::lwthread::spawn_min("conncache", conncache_keepalive_thread) {
+        Ok(th) => th,
+        Err(_) => {
+            *CACHE.lock().unwrap() = None;
+            return -1;
+        }
     };
-    if rc < 0 {
-        *CACHE.lock().unwrap() = None;
-        return -1;
-    }
     *JANITOR.lock().unwrap() = Some(th);
     1
 }

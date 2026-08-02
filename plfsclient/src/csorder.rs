@@ -9,7 +9,6 @@ unsafe extern "C" {
         exprstr: *const ::core::ffi::c_char,
         pd_0: *mut parser_data,
     ) -> ::core::ffi::c_int;
-    unsafe fn csdb_getopcnt(ip: uint32_t, port: uint16_t) -> uint32_t;
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
         __src: *const ::core::ffi::c_void,
@@ -278,7 +277,7 @@ pub unsafe extern "C" fn csorder_sort(
             } else {
                 (*chain.offset(i as isize)).priority = (*chain.offset(i as isize))
                     .priority
-                    .wrapping_add(csdb_getopcnt(
+                    .wrapping_add(crate::csdb::get_operations(
                         (*chain.offset(i as isize)).ip,
                         (*chain.offset(i as isize)).port,
                     ));

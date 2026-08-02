@@ -57,13 +57,6 @@ unsafe extern "C" {
     unsafe fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
     unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn time(__timer: *mut time_t) -> time_t;
-    unsafe fn pthread_mutex_init(
-        __mutex: *mut pthread_mutex_t,
-        __mutexattr: *const pthread_mutexattr_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_destroy(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
@@ -121,38 +114,6 @@ pub type size_t = usize;
 pub struct timespec {
     pub tv_sec: __time_t,
     pub tv_nsec: __syscall_slong_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutexattr_t {
-    pub __size: [::core::ffi::c_char; 4],
-    pub __align: ::core::ffi::c_int,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
 }
 #[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
 #[repr(C)]
@@ -265,24 +226,6 @@ pub struct _IO_FILE {
 }
 pub type _IO_lock_t = ();
 pub type FILE = _IO_FILE;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _dirbuf {
-    pub wasread: ::core::ffi::c_int,
-    pub p: *mut uint8_t,
-    pub size: size_t,
-    pub lock: pthread_mutex_t,
-}
-pub type dirbuf = _dirbuf;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _pathbuf {
-    pub changed: ::core::ffi::c_int,
-    pub p: *mut ::core::ffi::c_char,
-    pub size: size_t,
-    pub lock: pthread_mutex_t,
-}
-pub type pathbuf = _pathbuf;
 pub const __S_IFDIR: ::core::ffi::c_int = 0o40000 as ::core::ffi::c_int;
 pub const __S_IFCHR: ::core::ffi::c_int = 0o20000 as ::core::ffi::c_int;
 pub const __S_IFBLK: ::core::ffi::c_int = 0o60000 as ::core::ffi::c_int;

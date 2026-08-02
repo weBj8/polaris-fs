@@ -5,22 +5,11 @@
 //! injected into chunksdatacache on release.
 //!
 //! Safe core in `imp` (per-bucket std Mutex + Vec); boundary keeps the
-//! monotonic clock and the chunksdatacache call. The acquire/release
-//! contract changes shape: C returned a raw entry pointer released later;
-//! here acquire returns an owned FdEntry (RAII-safe, same lifetime rules —
-//! mfs_fuse calls fdcache_release/fdcache_inject_chunkdata on it).
+//! monotonic clock and the chunksdatacache call. `acquire` returns an owned
+//! `FdEntry`, so its lifetime ends through normal Rust drop.
 
 unsafe extern "C" {
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-    unsafe fn chunksdatacache_insert(
-        inode: uint32_t,
-        chunkindx: uint32_t,
-        chunkid: uint64_t,
-        chunkversion: uint32_t,
-        csdataver: uint8_t,
-        csdata: *const uint8_t,
-        csdatasize: uint32_t,
-    );
 }
 pub type uint8_t = u8;
 pub type uint16_t = u16;
@@ -166,8 +155,7 @@ pub mod imp {
                 .map(|e| (e.attr, e.lflags))
         }
 
-        /// Like find but removes the entry and hands ownership to the
-        /// caller (C: unlinked pointer + later fdcache_release).
+        /// Like find but removes the entry and hands ownership to the caller.
         pub fn acquire(
             &self,
             uid: u32,
@@ -189,142 +177,68 @@ pub mod imp {
     }
 }
 
-use imp::FdCache;
+use imp::{FdCache, FdEntry};
+use std::sync::OnceLock;
 
-static mut FDCACHE: Option<FdCache> = None;
+static FDCACHE: OnceLock<FdCache> = OnceLock::new();
 
-/// SAFETY: set once in fdcache_init before FUSE threads start; never
-/// cleared (C kept the tables for process lifetime too).
-unsafe fn fdcache() -> &'static FdCache {
-    unsafe { (*(&raw const FDCACHE)).as_ref().unwrap_unchecked() }
+fn fdcache() -> &'static FdCache {
+    FDCACHE.get_or_init(FdCache::new)
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_insert(
-    ctx: *const fuse_ctx,
-    inode: uint32_t,
-    attr: *mut uint8_t,
-    lflags: uint16_t,
-    csdataver: uint8_t,
-    chunkid: uint64_t,
-    version: uint32_t,
-    csdata: *const uint8_t,
-    csdatasize: uint32_t,
+pub fn init() {
+    let _ = fdcache();
+}
+
+pub fn insert(
+    uid: u32,
+    gid: u32,
+    pid: i32,
+    inode: u32,
+    attr: [u8; 35],
+    lflags: u16,
+    csdataver: u8,
+    chunkid: u64,
+    version: u32,
+    csdata: &[u8],
 ) {
-    unsafe {
-        let now = monotonic_seconds();
-        let a: [u8; 35] = ::core::ptr::read(attr as *const [u8; 35]);
-        let data = if csdata.is_null() || csdatasize == 0 {
-            &[][..]
-        } else {
-            ::core::slice::from_raw_parts(csdata, csdatasize as usize)
-        };
-        fdcache().insert(
-            (*ctx).uid,
-            (*ctx).gid,
-            (*ctx).pid,
-            inode,
-            a,
-            lflags,
-            csdataver,
-            chunkid,
-            version,
-            data,
-            now,
+    fdcache().insert(
+        uid,
+        gid,
+        pid,
+        inode,
+        attr,
+        lflags,
+        csdataver,
+        chunkid,
+        version,
+        csdata,
+        unsafe { monotonic_seconds() },
+    );
+}
+
+pub fn invalidate(inode: u32) {
+    fdcache().invalidate(inode);
+}
+
+pub fn find(uid: u32, gid: u32, pid: i32, inode: u32) -> Option<([u8; 35], u16)> {
+    fdcache().find(uid, gid, pid, inode, unsafe { monotonic_seconds() })
+}
+
+pub fn acquire(uid: u32, gid: u32, pid: i32, inode: u32) -> Option<FdEntry> {
+    fdcache().acquire(uid, gid, pid, inode, unsafe { monotonic_seconds() })
+}
+
+pub fn inject_chunkdata(entry: &FdEntry) {
+    if entry.lflags & LOOKUP_CHUNK_ZERO_DATA != 0 {
+        plfsclient::chunksdatacache::insert(
+            entry.inode,
+            0,
+            entry.chunkid,
+            entry.version,
+            entry.csdataver,
+            &entry.csdata,
         );
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_invalidate(inode: uint32_t) {
-    unsafe {
-        fdcache().invalidate(inode);
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_find(
-    ctx: *const fuse_ctx,
-    inode: uint32_t,
-    attr: *mut uint8_t,
-    lflags: *mut uint16_t,
-) -> uint8_t {
-    unsafe {
-        let now = monotonic_seconds();
-        match fdcache().find((*ctx).uid, (*ctx).gid, (*ctx).pid, inode, now) {
-            Some((a, lf)) => {
-                if !attr.is_null() {
-                    ::core::ptr::copy_nonoverlapping(a.as_ptr(), attr, 35);
-                }
-                if !lflags.is_null() {
-                    *lflags = lf;
-                }
-                1
-            }
-            None => 0,
-        }
-    }
-}
-
-/// C returned a raw entry pointer; here the owned entry is boxed so the
-/// release/inject calls below stay pointer-compatible with mfs_fuse.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_acquire(
-    ctx: *const fuse_ctx,
-    inode: uint32_t,
-    attr: *mut uint8_t,
-    lflags: *mut uint16_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let now = monotonic_seconds();
-        match fdcache().acquire((*ctx).uid, (*ctx).gid, (*ctx).pid, inode, now) {
-            Some(e) => {
-                if !attr.is_null() {
-                    ::core::ptr::copy_nonoverlapping(e.attr.as_ptr(), attr, 35);
-                }
-                if !lflags.is_null() {
-                    *lflags = e.lflags;
-                }
-                Box::into_raw(Box::new(e)) as *mut ::core::ffi::c_void
-            }
-            None => ::core::ptr::null_mut(),
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_release(vfdce: *mut ::core::ffi::c_void) {
-    if !vfdce.is_null() {
-        // SAFETY: handle from fdcache_acquire, released at most once (same
-        // contract as the C fdcachee_free).
-        drop(unsafe { Box::from_raw(vfdce as *mut imp::FdEntry) });
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_inject_chunkdata(vfdce: *mut ::core::ffi::c_void) {
-    unsafe {
-        // SAFETY: handle from fdcache_acquire; caller keeps ownership and
-        // must still call fdcache_release (C did not free here either).
-        let e = &*(vfdce as *const imp::FdEntry);
-        if e.lflags & LOOKUP_CHUNK_ZERO_DATA != 0 {
-            chunksdatacache_insert(
-                e.inode,
-                0,
-                e.chunkid,
-                e.version,
-                e.csdataver,
-                e.csdata.as_ptr(),
-                e.csdata.len() as uint32_t,
-            );
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fdcache_init() {
-    unsafe {
-        FDCACHE = Some(FdCache::new());
     }
 }
 

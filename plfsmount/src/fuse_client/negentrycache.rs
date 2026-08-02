@@ -10,48 +10,11 @@
 //! ENTRIES gauge stays exact.
 
 unsafe extern "C" {
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn stats_counter_inc(node: *mut ::core::ffi::c_void);
-    unsafe fn stats_counter_dec(node: *mut ::core::ffi::c_void);
-    unsafe fn stats_get_subnode(
-        node: *mut ::core::ffi::c_void,
-        name: *const ::core::ffi::c_char,
-        absolute: uint8_t,
-        printflag: uint8_t,
-    ) -> *mut ::core::ffi::c_void;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
 }
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
 
 pub const INSERTS: usize = 0;
 pub const REMOVALS: usize = 1;
@@ -220,93 +183,42 @@ pub mod imp {
 }
 
 // ---------------------------------------------------------------------------
-// Boundary: pthread mutex + stats tree + clock.
+// Boundary: stats tree + clock.
 // ---------------------------------------------------------------------------
 
 use imp::{InsertOutcome, NegCache};
 
-static mut necachelock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut CACHE: Option<NegCache> = None;
-static mut statsptr: [*mut ::core::ffi::c_void; STATNODES] =
-    [::core::ptr::null_mut::<::core::ffi::c_void>(); STATNODES];
+static CACHE: std::sync::Mutex<Option<NegCache>> = std::sync::Mutex::new(None);
+static STATS: std::sync::OnceLock<[plfsclient::stats::StatsHandle; STATNODES]> =
+    std::sync::OnceLock::new();
 
-/// SAFETY: CACHE set in init (before threads) or accessed with necachelock
-/// held; "disabled" (timeout<=0) leaves CACHE None and every export
-/// early-returns exactly like C.
-unsafe fn cache() -> Option<&'static mut NegCache> {
-    unsafe { (*(&raw mut CACHE)).as_mut() }
-}
-
-unsafe fn negentry_cache_statsptr_init() {
-    unsafe {
-        let s = stats_get_subnode(
-            NULL,
-            b"negentry_cache\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            0 as uint8_t,
-        );
-        statsptr[INSERTS] = stats_get_subnode(
-            s,
-            b"inserts\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[REMOVALS] = stats_get_subnode(
-            s,
-            b"removals\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[SEARCH_HITS] = stats_get_subnode(
-            s,
-            b"search_hits\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[SEARCH_MISSES] = stats_get_subnode(
-            s,
-            b"search_misses\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[ENTRIES] = stats_get_subnode(
-            s,
-            b"#entries\0".as_ptr() as *const ::core::ffi::c_char,
-            1 as uint8_t,
-            1 as uint8_t,
-        );
-    }
+fn negentry_cache_statsptr_init() {
+    let root = plfsclient::stats::subnode(None, "negentry_cache", false, false);
+    assert!(
+        STATS
+            .set([
+                plfsclient::stats::subnode(Some(&root), "inserts", false, true),
+                plfsclient::stats::subnode(Some(&root), "removals", false, true),
+                plfsclient::stats::subnode(Some(&root), "search_hits", false, true),
+                plfsclient::stats::subnode(Some(&root), "search_misses", false, true),
+                plfsclient::stats::subnode(Some(&root), "#entries", true, true),
+            ])
+            .is_ok(),
+        "negative-entry stats initialized twice"
+    );
 }
 
 /// SAFETY: id < STATNODES checked; statsptr valid after init.
-unsafe fn stats_inc(id: usize) {
-    unsafe {
-        if id < STATNODES {
-            stats_counter_inc(statsptr[id]);
-        }
+fn stats_inc(id: usize) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id)) {
+        plfsclient::stats::counter_inc(node);
     }
 }
 
 /// SAFETY: as stats_inc.
-unsafe fn stats_dec_n(id: usize, n: usize) {
-    unsafe {
-        for _ in 0..n {
-            stats_counter_dec(statsptr[id]);
-        }
+fn stats_dec_n(id: usize, n: usize) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id)) {
+        plfsclient::stats::counter_sub(node, n as u64);
     }
 }
 
@@ -321,15 +233,13 @@ pub unsafe extern "C" fn negentry_cache_insert(
         stats_inc(INSERTS);
         // SAFETY: name points at nleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
-        assert_eq!(pthread_mutex_lock(&raw mut necachelock), 0);
-        let outcome = match cache() {
-            Some(c) if c.enabled => c.insert(inode, key, t),
-            _ => {
-                assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
-                return;
+        let outcome = {
+            let mut cache = CACHE.lock().unwrap();
+            match cache.as_mut() {
+                Some(c) if c.enabled => c.insert(inode, key, t),
+                _ => return,
             }
         };
-        assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
         if let InsertOutcome::Virgin = outcome {
             stats_inc(ENTRIES);
         }
@@ -347,17 +257,14 @@ pub unsafe extern "C" fn negentry_cache_remove(
         stats_inc(REMOVALS);
         // SAFETY: name points at nleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
-        assert_eq!(pthread_mutex_lock(&raw mut necachelock), 0);
-        match cache() {
-            Some(c) if c.enabled => {
-                let (_, swept) = c.remove(inode, key, t);
-                assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
-                stats_dec_n(ENTRIES, swept);
+        let swept = {
+            let mut cache = CACHE.lock().unwrap();
+            match cache.as_mut() {
+                Some(c) if c.enabled => c.remove(inode, key, t).1,
+                _ => return,
             }
-            _ => {
-                assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
-            }
-        }
+        };
+        stats_dec_n(ENTRIES, swept);
     }
 }
 
@@ -371,15 +278,13 @@ pub unsafe extern "C" fn negentry_cache_search(
         let t = monotonic_seconds();
         // SAFETY: name points at nleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
-        assert_eq!(pthread_mutex_lock(&raw mut necachelock), 0);
-        let (found, swept) = match cache() {
-            Some(c) if c.enabled => c.search(inode, key, t),
-            _ => {
-                assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
-                return 0;
+        let (found, swept) = {
+            let mut cache = CACHE.lock().unwrap();
+            match cache.as_mut() {
+                Some(c) if c.enabled => c.search(inode, key, t),
+                _ => return 0,
             }
         };
-        assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
         stats_dec_n(ENTRIES, swept);
         if found {
             stats_inc(SEARCH_HITS);
@@ -395,33 +300,23 @@ pub unsafe extern "C" fn negentry_cache_search(
 pub unsafe extern "C" fn negentry_cache_clear() {
     unsafe {
         let t = monotonic_seconds();
-        assert_eq!(pthread_mutex_lock(&raw mut necachelock), 0);
-        if let Some(c) = cache() {
+        if let Some(c) = CACHE.lock().unwrap().as_mut() {
             c.clear(t);
         }
-        assert_eq!(pthread_mutex_unlock(&raw mut necachelock), 0);
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn negentry_cache_init(to: ::core::ffi::c_double) {
-    unsafe {
-        if to <= 0.0 {
-            CACHE = Some(NegCache::new(to)); // disabled sentinel
-            return;
-        }
-        CACHE = Some(NegCache::new(to));
+    *CACHE.lock().unwrap() = Some(NegCache::new(to));
+    if to > 0.0 {
         negentry_cache_statsptr_init();
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn negentry_cache_term() {
-    unsafe {
-        pthread_mutex_lock(&raw mut necachelock);
-        CACHE = None;
-        pthread_mutex_unlock(&raw mut necachelock);
-    }
+    CACHE.lock().unwrap().take();
 }
 
 #[cfg(test)]

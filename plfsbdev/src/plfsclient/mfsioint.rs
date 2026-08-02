@@ -323,13 +323,6 @@ unsafe extern "C" {
     ) -> ::core::ffi::c_int;
     unsafe fn fs_init_threads(retries: uint32_t, to: uint32_t);
     unsafe fn fs_term();
-    unsafe fn inoleng_acquire(inode: uint32_t) -> *mut ::core::ffi::c_void;
-    unsafe fn inoleng_release(ptr: *mut ::core::ffi::c_void);
-    unsafe fn inoleng_getfleng(ptr: *mut ::core::ffi::c_void) -> uint64_t;
-    unsafe fn inoleng_setfleng(ptr: *mut ::core::ffi::c_void, fleng: uint64_t);
-    unsafe fn inoleng_update_fleng(inode: uint32_t, fleng: uint64_t);
-    unsafe fn inoleng_term();
-    unsafe fn inoleng_init();
     unsafe fn csorder_init(labelexpr: *const ::core::ffi::c_char) -> ::core::ffi::c_int;
     unsafe fn read_data_init(
         readaheadsize: uint64_t,
@@ -396,18 +389,10 @@ unsafe extern "C" {
         attr: *mut uint8_t,
         prevlength: *mut uint64_t,
     ) -> uint8_t;
-    unsafe fn csdb_init();
-    unsafe fn csdb_term();
     unsafe fn delay_term();
     unsafe fn delay_init();
     unsafe fn conncache_term();
     unsafe fn conncache_init(capacity: uint32_t) -> ::core::ffi::c_int;
-    unsafe fn chunkrwlock_init();
-    unsafe fn chunkrwlock_term();
-    unsafe fn chunksdatacache_clear_inode(inode: uint32_t, chindx: uint32_t);
-    unsafe fn chunksdatacache_term();
-    unsafe fn chunksdatacache_init();
-    unsafe fn stats_term();
     unsafe fn mycrc32_init();
     unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
     unsafe fn strerr_init();
@@ -694,10 +679,9 @@ pub struct _data_buff {
     pub data: [uint8_t; 1],
 }
 pub type data_buff = _data_buff;
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct file_info {
-    pub flengptr: *mut ::core::ffi::c_void,
+    pub flengptr: Option<plfsclient::inoleng::Handle>,
     pub inode: uint32_t,
     pub mode: uint8_t,
     pub writing: uint8_t,
@@ -1158,6 +1142,7 @@ unsafe extern "C" fn mfs_fi_init(mut fileinfo: *mut file_info) {
             0 as ::core::ffi::c_int,
             ::core::mem::size_of::<file_info>(),
         );
+        std::ptr::write(&raw mut (*fileinfo).flengptr, None);
         (*fileinfo).mode = MFS_IO_FORBIDDEN as ::core::ffi::c_int as uint8_t;
         let mut _mfs_assert_ret: ::core::ffi::c_int = pthread_mutex_init(
             &raw mut (*fileinfo).lock,
@@ -2726,7 +2711,7 @@ unsafe extern "C" fn mfs_get_fi(mut fd: ::core::ffi::c_int) -> *mut file_info {
 }
 unsafe extern "C" fn finfo_change_fleng(mut inode: uint32_t, mut fleng: uint64_t) {
     unsafe {
-        inoleng_update_fleng(inode, fleng);
+        plfsclient::inoleng::update_length(inode, fleng);
     }
 }
 static mut sugid_clear_mode: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
@@ -4731,7 +4716,10 @@ unsafe extern "C" fn mfs_int_truncate_common(
         if status as ::core::ffi::c_int != MFS_STATUS_OK {
             return status;
         }
-        chunksdatacache_clear_inode(inode, (size / MFSCHUNKSIZE as int64_t) as uint32_t);
+        plfsclient::chunksdatacache::clear_inode(
+            inode,
+            (size / MFSCHUNKSIZE as int64_t) as uint32_t,
+        );
         finfo_change_fleng(inode, size as uint64_t);
         write_data_inode_setmaxfleng(inode, size as uint64_t);
         read_inode_set_length_active(inode, size as uint64_t);
@@ -5330,7 +5318,9 @@ pub unsafe extern "C" fn mfs_int_lseek(
                 noffset = (*fileinfo).offset as int64_t + *offset;
             }
             MFS_SEEK_END => {
-                noffset = inoleng_getfleng((*fileinfo).flengptr) as int64_t + *offset;
+                noffset = plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap())
+                    as int64_t
+                    + *offset;
             }
             _ => {
                 let mut _mfs_assert_ret_1: ::core::ffi::c_int =
@@ -8633,7 +8623,7 @@ pub unsafe extern "C" fn mfs_int_open(
             }
             abort();
         }
-        (*fileinfo).flengptr = inoleng_acquire(inode);
+        (*fileinfo).flengptr = Some(plfsclient::inoleng::acquire(inode));
         (*fileinfo).inode = inode;
         (*fileinfo).mode = MFS_IO_FORBIDDEN as ::core::ffi::c_int as uint8_t;
         (*fileinfo).offset = 0 as uint64_t;
@@ -8652,7 +8642,7 @@ pub unsafe extern "C" fn mfs_int_open(
         (*fileinfo).dataformat = 0 as uint8_t;
         (*fileinfo).dbuff = ::core::ptr::null_mut::<uint8_t>();
         (*fileinfo).dbuffsize = 0 as uint64_t;
-        inoleng_setfleng((*fileinfo).flengptr, fsize);
+        plfsclient::inoleng::set_length((*fileinfo).flengptr.as_ref().unwrap(), fsize);
         if oflag & MFS_O_ACCMODE == MFS_O_RDONLY {
             (*fileinfo).mode = MFS_IO_READONLY as ::core::ffi::c_int as uint8_t;
             (*fileinfo).rdata = read_data_new(inode, fsize);
@@ -10857,7 +10847,7 @@ unsafe extern "C" fn mfs_int_pwrite_common(
                     offset = prevleng;
                 }
             } else {
-                offset = inoleng_getfleng((*fileinfo).flengptr);
+                offset = plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap());
                 if offset.wrapping_add(nbyte as uint64_t) >= MAX_FILE_SIZE as uint64_t {
                     status = MFS_ERROR_EFBIG as uint8_t;
                 }
@@ -11286,8 +11276,13 @@ unsafe extern "C" fn mfs_int_pwrite_common(
             fs_write_notify(0 as uint64_t);
             return status;
         }
-        if offset.wrapping_add(nbyte as uint64_t) > inoleng_getfleng((*fileinfo).flengptr) {
-            inoleng_setfleng((*fileinfo).flengptr, offset.wrapping_add(nbyte as uint64_t));
+        if offset.wrapping_add(nbyte as uint64_t)
+            > plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap())
+        {
+            plfsclient::inoleng::set_length(
+                (*fileinfo).flengptr.as_ref().unwrap(),
+                offset.wrapping_add(nbyte as uint64_t),
+            );
             newfleng = offset.wrapping_add(nbyte as uint64_t);
         } else {
             newfleng = 0 as uint64_t;
@@ -11807,7 +11802,8 @@ pub unsafe extern "C" fn mfs_int_write(
         if (*fileinfo).mode as ::core::ffi::c_int == MFS_IO_APPENDONLY as ::core::ffi::c_int
             || (*fileinfo).mode as ::core::ffi::c_int == MFS_IO_READAPPEND as ::core::ffi::c_int
         {
-            (*fileinfo).offset = inoleng_getfleng((*fileinfo).flengptr);
+            (*fileinfo).offset =
+                plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap());
         } else {
             (*fileinfo).offset = offset;
         }
@@ -12991,10 +12987,7 @@ pub unsafe extern "C" fn mfs_int_close(mut fildes: ::core::ffi::c_int) -> uint8_
             write_data_end((*fileinfo).wdata);
             (*fileinfo).wdata = NULL;
         }
-        if !(*fileinfo).flengptr.is_null() {
-            inoleng_release((*fileinfo).flengptr);
-            (*fileinfo).flengptr = NULL;
-        }
+        drop((*fileinfo).flengptr.take());
         if decacnt != 0 {
             fs_dec_acnt((*fileinfo).inode);
         }
@@ -13172,11 +13165,13 @@ pub unsafe extern "C" fn mfs_int_fcntl_locks(
                 start = (*fl).start as uint64_t;
             }
         } else if (*fl).whence as ::core::ffi::c_int == MFS_SEEK_END {
-            if (*fl).start > inoleng_getfleng((*fileinfo).flengptr) as int64_t {
+            if (*fl).start
+                > plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap()) as int64_t
+            {
                 start = 0 as uint64_t;
             } else {
-                start =
-                    inoleng_getfleng((*fileinfo).flengptr).wrapping_add((*fl).start as uint64_t);
+                start = plfsclient::inoleng::get_length((*fileinfo).flengptr.as_ref().unwrap())
+                    .wrapping_add((*fl).start as uint64_t);
             }
         } else {
             return MFS_ERROR_EINVAL as uint8_t;
@@ -13311,7 +13306,7 @@ pub unsafe extern "C" fn mfs_int_opendir(
         }
         *dirdes = mfs_next_fd();
         fileinfo = mfs_get_fi(*dirdes);
-        (*fileinfo).flengptr = NULL;
+        (*fileinfo).flengptr = None;
         (*fileinfo).inode = inode;
         (*fileinfo).mode = MFS_IO_DIRECTORY as ::core::ffi::c_int as uint8_t;
         (*fileinfo).offset = 0 as uint64_t;
@@ -16414,17 +16409,17 @@ pub unsafe extern "C" fn mfs_int_init(
         if stage as ::core::ffi::c_int == 0 as ::core::ffi::c_int
             || stage as ::core::ffi::c_int == 2 as ::core::ffi::c_int
         {
-            inoleng_init();
+            plfsclient::inoleng::init();
             conncache_init(200 as uint32_t);
-            chunkrwlock_init();
-            chunksdatacache_init();
+            plfsclient::chunkrwlock::init();
+            plfsclient::chunksdatacache::init();
             read_init();
             write_init();
             fs_init_threads(
                 (*mcfg).io_try_cnt as uint32_t,
                 (*mcfg).io_timeout as uint32_t,
             );
-            csdb_init();
+            plfsclient::csdb::init();
             delay_init();
             read_data_init(
                 ((*mcfg).read_cache_mb * 1024 as ::core::ffi::c_int * 1024 as ::core::ffi::c_int)
@@ -16975,15 +16970,15 @@ pub unsafe extern "C" fn mfs_int_term() {
         write_data_term();
         read_data_term();
         delay_term();
-        csdb_term();
+        plfsclient::csdb::term();
         fs_term();
         write_term();
         read_term();
-        chunksdatacache_term();
-        chunkrwlock_term();
+        plfsclient::chunksdatacache::term();
+        plfsclient::chunkrwlock::term();
         conncache_term();
-        inoleng_term();
-        stats_term();
+        plfsclient::inoleng::term();
+        plfsclient::stats::term();
         lcache_term();
         mfs_log_term();
     }

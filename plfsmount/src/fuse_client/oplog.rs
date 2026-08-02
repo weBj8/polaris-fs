@@ -23,14 +23,6 @@ unsafe extern "C" {
         __tv: *mut timeval,
         __tz: *mut ::core::ffi::c_void,
     ) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_broadcast(__cond: *mut pthread_cond_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_cond_timedwait(
-        __cond: *mut pthread_cond_t,
-        __mutex: *mut pthread_mutex_t,
-        __abstime: *const timespec,
-    ) -> ::core::ffi::c_int;
 }
 pub type __builtin_va_list = [__va_list_tag; 1];
 #[derive(Copy, Clone)]
@@ -49,7 +41,6 @@ pub type __mode_t = ::core::ffi::c_uint;
 pub type __pid_t = ::core::ffi::c_int;
 pub type __time_t = ::core::ffi::c_long;
 pub type __suseconds_t = ::core::ffi::c_long;
-pub type __syscall_slong_t = ::core::ffi::c_long;
 pub type va_list = __gnuc_va_list;
 pub type gid_t = __gid_t;
 pub type mode_t = __mode_t;
@@ -61,69 +52,6 @@ pub type time_t = __time_t;
 pub struct timeval {
     pub tv_sec: __time_t,
     pub tv_usec: __suseconds_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct timespec {
-    pub tv_sec: __time_t,
-    pub tv_nsec: __syscall_slong_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union __atomic_wide_counter {
-    pub __value64: ::core::ffi::c_ulonglong,
-    pub __value32: C2Rust_Unnamed,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct C2Rust_Unnamed {
-    pub __low: ::core::ffi::c_uint,
-    pub __high: ::core::ffi::c_uint,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_cond_s {
-    pub __wseq: __atomic_wide_counter,
-    pub __g1_start: __atomic_wide_counter,
-    pub __g_size: [::core::ffi::c_uint; 2],
-    pub __g1_orig_size: ::core::ffi::c_uint,
-    pub __wrefs: ::core::ffi::c_uint,
-    pub __g_signals: [::core::ffi::c_uint; 2],
-    pub __unused_initialized_1: ::core::ffi::c_uint,
-    pub __unused_initialized_2: ::core::ffi::c_uint,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_cond_t {
-    pub __data: __pthread_cond_s,
-    pub __size: [::core::ffi::c_char; 48],
-    pub __align: ::core::ffi::c_longlong,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -140,16 +68,6 @@ pub struct tm {
     pub tm_gmtoff: ::core::ffi::c_long,
     pub tm_zone: *const ::core::ffi::c_char,
 }
-pub type C2Rust_Unnamed_0 = ::core::ffi::c_uint;
-pub const PTHREAD_MUTEX_FAST_NP: C2Rust_Unnamed_0 = 0;
-pub const PTHREAD_MUTEX_DEFAULT: C2Rust_Unnamed_0 = 0;
-pub const PTHREAD_MUTEX_ERRORCHECK: C2Rust_Unnamed_0 = 2;
-pub const PTHREAD_MUTEX_RECURSIVE: C2Rust_Unnamed_0 = 1;
-pub const PTHREAD_MUTEX_NORMAL: C2Rust_Unnamed_0 = 0;
-pub const PTHREAD_MUTEX_ADAPTIVE_NP: C2Rust_Unnamed_0 = 3;
-pub const PTHREAD_MUTEX_ERRORCHECK_NP: C2Rust_Unnamed_0 = 2;
-pub const PTHREAD_MUTEX_RECURSIVE_NP: C2Rust_Unnamed_0 = 1;
-pub const PTHREAD_MUTEX_TIMED_NP: C2Rust_Unnamed_0 = 0;
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
@@ -161,54 +79,7 @@ pub struct fuse_ctx {
     pub pid: pid_t,
     pub umask: mode_t,
 }
-pub type fhentry = _fhentry;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _fhentry {
-    pub fh: ::core::ffi::c_ulong,
-    pub readpos: uint64_t,
-    pub refcount: uint32_t,
-    pub next: *mut _fhentry,
-}
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const ETIMEDOUT: ::core::ffi::c_int = 110 as ::core::ffi::c_int;
-pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t {
-    __data: __pthread_cond_s {
-        __wseq: __atomic_wide_counter {
-            __value64: 0 as ::core::ffi::c_ulonglong,
-        },
-        __g1_start: __atomic_wide_counter {
-            __value64: 0 as ::core::ffi::c_ulonglong,
-        },
-        __g_size: [0 as ::core::ffi::c_uint, 0 as ::core::ffi::c_uint],
-        __g1_orig_size: 0 as ::core::ffi::c_uint,
-        __wrefs: 0 as ::core::ffi::c_uint,
-        __g_signals: [0 as ::core::ffi::c_uint, 0 as ::core::ffi::c_uint],
-        __unused_initialized_1: 0 as ::core::ffi::c_uint,
-        __unused_initialized_2: 0 as ::core::ffi::c_uint,
-    },
-};
-static mut nextfh: ::core::ffi::c_ulong = 1 as ::core::ffi::c_ulong;
-static mut fhhead: *mut fhentry = ::core::ptr::null_mut::<fhentry>();
-static mut opbuff: [uint8_t; 16777216] = [0; 16777216];
-static mut writepos: uint64_t = 0 as uint64_t;
-static mut waiting: uint8_t = 0 as uint8_t;
-static mut opbufflock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut nodata: pthread_cond_t = PTHREAD_COND_INITIALIZER;
 static mut convts: time_t = 0 as time_t;
 static mut convtm: tm = tm {
     tm_sec: 0,
@@ -223,24 +94,10 @@ static mut convtm: tm = tm {
     tm_gmtoff: 0,
     tm_zone: ::core::ptr::null::<::core::ffi::c_char>(),
 };
-static mut timelock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
+static TIME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 // ---------------------------------------------------------------------------
 // Safe core (P4 rewrite): ring buffer + handle table, no locking inside —
-// every entry point is called with opbufflock held by the boundary.
+// every entry point is called with the Rust state mutex held.
 // ---------------------------------------------------------------------------
 
 #[deny(unsafe_code)]
@@ -382,24 +239,24 @@ mod imp {
     }
 }
 
-use imp::{LINELENG, OPBUFFSIZE, Oplog};
+use imp::{LINELENG, Oplog};
+use std::cell::RefCell;
+use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
 
-// Global core state. SAFETY: only touched with opbufflock held (the getdata
-// → releasedata pair hands the locked mutex to the caller thread, exactly
-// like the C protocol), so there is no data race despite the static mut.
-static mut OPLOG: Option<Oplog> = None;
+static OPLOG: LazyLock<Mutex<Oplog>> = LazyLock::new(|| Mutex::new(Oplog::new()));
+static NODATA: Condvar = Condvar::new();
+std::thread_local! {
+    // getdata/releasedata run on the same FUSE worker. Keeping the guard in
+    // TLS preserves the C lock-handoff contract without a pthread mutex.
+    static DATA_LEASE: RefCell<Option<MutexGuard<'static, Oplog>>> = const { RefCell::new(None) };
+}
 
-/// SAFETY: caller must hold opbufflock.
-#[allow(clippy::mut_from_ref)]
-unsafe fn core() -> &'static mut Oplog {
-    // SAFETY: guarded by opbufflock per module protocol; init is idempotent.
-    unsafe {
-        let p = &mut *(&raw mut OPLOG);
-        if p.is_none() {
-            *p = Some(Oplog::new());
-        }
-        p.as_mut().unwrap_unchecked()
-    }
+fn hold_data_lease(guard: MutexGuard<'static, Oplog>) {
+    DATA_LEASE.with(|lease| {
+        let mut lease = lease.borrow_mut();
+        assert!(lease.is_none(), "nested oplog data lease");
+        *lease = Some(guard);
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -429,7 +286,7 @@ pub unsafe extern "C" fn oplog_printf(
             tm_gmtoff: 0,
             tm_zone: ::core::ptr::null::<::core::ffi::c_char>(),
         };
-        pthread_mutex_lock(&raw mut timelock);
+        let time_guard = TIME_LOCK.lock().unwrap();
         gettimeofday(&raw mut tv, NULL);
         if convts / 900 as time_t != tv.tv_sec / 900 as __time_t {
             convts = (tv.tv_sec / 900 as __time_t) as time_t;
@@ -442,7 +299,7 @@ pub unsafe extern "C" fn oplog_printf(
             as ::core::ffi::c_int;
         ltime.tm_min = (ltime.tm_min as uint32_t).wrapping_add(leng.wrapping_div(60 as uint32_t))
             as ::core::ffi::c_int;
-        pthread_mutex_unlock(&raw mut timelock);
+        drop(time_guard);
         leng = snprintf(
             &raw mut buff as *mut ::core::ffi::c_char,
             LINELENG as size_t,
@@ -472,16 +329,13 @@ pub unsafe extern "C" fn oplog_printf(
         }
         buff[leng as usize] = '\n' as ::core::ffi::c_char;
         leng = leng.wrapping_add(1);
-        // assemble line then append under opbufflock
         let line = ::core::slice::from_raw_parts(buff.as_ptr() as *const uint8_t, leng as usize);
-        pthread_mutex_lock(&raw mut opbufflock);
-        let c = core();
-        c.put(line);
-        if c.waiting {
-            pthread_cond_broadcast(&raw mut nodata);
-            c.waiting = false;
+        let mut oplog = OPLOG.lock().unwrap();
+        oplog.put(line);
+        if oplog.waiting {
+            NODATA.notify_all();
+            oplog.waiting = false;
         }
-        pthread_mutex_unlock(&raw mut opbufflock);
     }
 }
 
@@ -508,7 +362,7 @@ pub unsafe extern "C" fn oplog_msg(mut format: *const ::core::ffi::c_char, mut c
             tm_gmtoff: 0,
             tm_zone: ::core::ptr::null::<::core::ffi::c_char>(),
         };
-        pthread_mutex_lock(&raw mut timelock);
+        let time_guard = TIME_LOCK.lock().unwrap();
         gettimeofday(&raw mut tv, NULL);
         if convts / 900 as time_t != tv.tv_sec / 900 as __time_t {
             convts = (tv.tv_sec / 900 as __time_t) as time_t;
@@ -521,7 +375,7 @@ pub unsafe extern "C" fn oplog_msg(mut format: *const ::core::ffi::c_char, mut c
             as ::core::ffi::c_int;
         ltime.tm_min = (ltime.tm_min as uint32_t).wrapping_add(leng.wrapping_div(60 as uint32_t))
             as ::core::ffi::c_int;
-        pthread_mutex_unlock(&raw mut timelock);
+        drop(time_guard);
         leng = snprintf(
             &raw mut buff as *mut ::core::ffi::c_char,
             LINELENG as size_t,
@@ -548,34 +402,23 @@ pub unsafe extern "C" fn oplog_msg(mut format: *const ::core::ffi::c_char, mut c
         buff[leng as usize] = '\n' as ::core::ffi::c_char;
         leng = leng.wrapping_add(1);
         let line = ::core::slice::from_raw_parts(buff.as_ptr() as *const uint8_t, leng as usize);
-        pthread_mutex_lock(&raw mut opbufflock);
-        let c = core();
-        c.put(line);
-        if c.waiting {
-            pthread_cond_broadcast(&raw mut nodata);
-            c.waiting = false;
+        let mut oplog = OPLOG.lock().unwrap();
+        oplog.put(line);
+        if oplog.waiting {
+            NODATA.notify_all();
+            oplog.waiting = false;
         }
-        pthread_mutex_unlock(&raw mut opbufflock);
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_newhandle(hflag: ::core::ffi::c_int) -> ::core::ffi::c_ulong {
-    unsafe {
-        pthread_mutex_lock(&raw mut opbufflock);
-        let fh = core().newhandle(hflag != 0);
-        pthread_mutex_unlock(&raw mut opbufflock);
-        fh
-    }
+    OPLOG.lock().unwrap().newhandle(hflag != 0)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_releasehandle(fh: ::core::ffi::c_ulong) {
-    unsafe {
-        pthread_mutex_lock(&raw mut opbufflock);
-        core().releasehandle(fh);
-        pthread_mutex_unlock(&raw mut opbufflock);
-    }
+    OPLOG.lock().unwrap().releasehandle(fh);
 }
 
 #[unsafe(no_mangle)]
@@ -585,50 +428,47 @@ pub unsafe extern "C" fn oplog_getdata(
     leng: *mut uint32_t,
     maxleng: uint32_t,
 ) {
-    unsafe {
-        let mut tv: timeval = timeval {
-            tv_sec: 0,
-            tv_usec: 0,
-        };
-        let mut ts: timespec = timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        pthread_mutex_lock(&raw mut opbufflock);
-        // NOTE: this function intentionally returns with opbufflock HELD;
-        // oplog_releasedata releases it (C lock-handoff protocol).
-        let c = core();
-        if !c.acquire(fh) {
+    let mut oplog = OPLOG.lock().unwrap();
+    if !oplog.acquire(fh) {
+        unsafe {
             *buff = ::core::ptr::null_mut::<uint8_t>();
-            *leng = 0 as uint32_t;
+            *leng = 0;
+        }
+        hold_data_lease(oplog);
+        return;
+    }
+    while !oplog.data_available(fh) {
+        oplog.waiting = true;
+        let (next, timeout) = NODATA
+            .wait_timeout(oplog, std::time::Duration::from_secs(1))
+            .unwrap();
+        oplog = next;
+        if timeout.timed_out() {
+            unsafe {
+                *buff = b"#\n\0".as_ptr() as *mut uint8_t;
+                *leng = 2;
+            }
+            hold_data_lease(oplog);
             return;
         }
-        while !c.data_available(fh) {
-            gettimeofday(&raw mut tv, NULL);
-            ts.tv_sec = tv.tv_sec + 1 as __time_t;
-            ts.tv_nsec = (tv.tv_usec * 1000 as __suseconds_t) as __syscall_slong_t;
-            c.waiting = true;
-            if pthread_cond_timedwait(&raw mut nodata, &raw mut opbufflock, &raw const ts)
-                == ETIMEDOUT
-            {
-                *buff = b"#\n\0".as_ptr() as *const ::core::ffi::c_char as *mut uint8_t;
-                *leng = 2 as uint32_t;
-                return;
-            }
-        }
-        let (bpos, len) = c.getdata(fh, maxleng);
-        *leng = len;
-        *buff = c.opbuff.as_mut_ptr().add(bpos);
     }
+    let (bpos, len) = oplog.getdata(fh, maxleng);
+    unsafe {
+        *leng = len;
+        *buff = oplog.opbuff.as_mut_ptr().add(bpos);
+    }
+    hold_data_lease(oplog);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oplog_releasedata(fh: ::core::ffi::c_ulong) {
-    unsafe {
-        // called with opbufflock held (handed over by oplog_getdata)
-        core().releasehandle(fh);
-        pthread_mutex_unlock(&raw mut opbufflock);
-    }
+    DATA_LEASE.with(|lease| {
+        let mut oplog = lease
+            .borrow_mut()
+            .take()
+            .expect("oplog_releasedata without getdata");
+        oplog.releasehandle(fh);
+    });
 }
 
 #[cfg(test)]
@@ -699,5 +539,19 @@ mod tests {
         o.releasehandle(fh); // drops the acquire
         o.releasehandle(fh); // drops the initial refcount, entry freed
         assert!(!o.acquire(fh)); // gone
+    }
+
+    #[test]
+    fn data_lease_unlocks_on_release() {
+        let mut buff = std::ptr::null_mut();
+        let mut len = 99;
+        // SAFETY: output pointers are valid; unknown handle avoids waiting.
+        unsafe {
+            super::oplog_getdata(u64::MAX, &mut buff, &mut len, 16);
+            assert!(buff.is_null());
+            assert_eq!(len, 0);
+            super::oplog_releasedata(u64::MAX);
+        }
+        assert!(super::OPLOG.try_lock().is_ok());
     }
 }

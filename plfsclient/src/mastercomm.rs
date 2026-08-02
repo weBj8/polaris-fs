@@ -109,15 +109,6 @@ unsafe extern "C" {
         __buflen: size_t,
         __result: *mut *mut group,
     ) -> ::core::ffi::c_int;
-    unsafe fn stats_counter_add(node: *mut ::core::ffi::c_void, delta: uint64_t);
-    unsafe fn stats_counter_inc(node: *mut ::core::ffi::c_void);
-    unsafe fn stats_counter_set(node: *mut ::core::ffi::c_void, value: uint64_t);
-    unsafe fn stats_get_subnode(
-        node: *mut ::core::ffi::c_void,
-        name: *const ::core::ffi::c_char,
-        absolute: uint8_t,
-        printflag: uint8_t,
-    ) -> *mut ::core::ffi::c_void;
     unsafe fn univmakestrip(strip: *mut ::core::ffi::c_char, ip: uint32_t);
     unsafe fn tcpsocket() -> ::core::ffi::c_int;
     unsafe fn tcpresolve(
@@ -165,27 +156,12 @@ unsafe extern "C" {
     unsafe fn heap_pop() -> uint32_t;
     unsafe fn heap_elements() -> uint32_t;
     unsafe fn heap_term();
-    unsafe fn ep_chunk_has_changed(
-        inode: uint32_t,
-        chindx: uint32_t,
-        chunkid: uint64_t,
-        version: uint32_t,
-        fleng: uint64_t,
-        truncflag: uint8_t,
-        offset: uint32_t,
-        size: uint32_t,
-    );
-    unsafe fn ep_fleng_has_changed(inode: uint32_t, fleng: uint64_t);
-    unsafe fn ep_term();
-    unsafe fn ep_init();
     unsafe fn mfs_log(
         mode: ::core::ffi::c_int,
         priority: ::core::ffi::c_int,
         fmt: *const ::core::ffi::c_char,
         ...
     );
-    unsafe fn chunksdatacache_clear_inode(inode: uint32_t, chindx: uint32_t);
-    unsafe fn chunksdatacache_cleanup();
     unsafe fn read_get_total_bytes() -> uint64_t;
     unsafe fn write_get_total_bytes() -> uint64_t;
 }
@@ -907,8 +883,7 @@ unsafe extern "C" fn copy_attr(
         };
     }
 }
-static mut statsptr: [*mut ::core::ffi::c_void; 7] =
-    [::core::ptr::null_mut::<::core::ffi::c_void>(); 7];
+static STATS: std::sync::OnceLock<[crate::stats::StatsHandle; 7]> = std::sync::OnceLock::new();
 static mut connect_args: connect_args_t = connect_args_t {
     bindhostname: ::core::ptr::null_mut::<::core::ffi::c_char>(),
     masterhostname: ::core::ptr::null_mut::<::core::ffi::c_char>(),
@@ -922,80 +897,38 @@ static mut connect_args: connect_args_t = connect_args_t {
 };
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn master_statsptr_init() {
-    unsafe {
-        let mut s: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        s = stats_get_subnode(
-            NULL,
-            b"master\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            0 as uint8_t,
-        );
-        statsptr[MASTER_PACKETSRCVD as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"packets_received\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_PACKETSSENT as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"packets_sent\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_BYTESRCVD as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"bytes_received\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_BYTESSENT as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"bytes_sent\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_CONNECTS as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"reconnects\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_PING as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"usec_ping\0".as_ptr() as *const ::core::ffi::c_char,
-            1 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[MASTER_TIMEDIFF as ::core::ffi::c_int as usize] = stats_get_subnode(
-            s,
-            b"usec_timediff\0".as_ptr() as *const ::core::ffi::c_char,
-            1 as uint8_t,
-            1 as uint8_t,
-        );
+    let root = crate::stats::subnode(None, "master", false, false);
+    assert!(
+        STATS
+            .set([
+                crate::stats::subnode(Some(&root), "packets_received", false, true),
+                crate::stats::subnode(Some(&root), "packets_sent", false, true),
+                crate::stats::subnode(Some(&root), "bytes_received", false, true),
+                crate::stats::subnode(Some(&root), "bytes_sent", false, true),
+                crate::stats::subnode(Some(&root), "reconnects", false, true),
+                crate::stats::subnode(Some(&root), "usec_ping", true, true),
+                crate::stats::subnode(Some(&root), "usec_timediff", true, true),
+            ])
+            .is_ok(),
+        "master stats initialized twice"
+    );
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn master_stats_inc(id: uint8_t) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id as usize)) {
+        crate::stats::counter_inc(node);
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn master_stats_inc(mut id: uint8_t) {
-    unsafe {
-        if (id as ::core::ffi::c_int) < STATNODES as ::core::ffi::c_int {
-            stats_counter_inc(statsptr[id as usize]);
-        }
+pub unsafe extern "C" fn master_stats_add(id: uint8_t, value: uint64_t) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id as usize)) {
+        crate::stats::counter_add(node, value);
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn master_stats_add(mut id: uint8_t, mut s: uint64_t) {
-    unsafe {
-        if (id as ::core::ffi::c_int) < STATNODES as ::core::ffi::c_int {
-            stats_counter_add(statsptr[id as usize], s);
-        }
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn master_stats_set(mut id: uint8_t, mut s: uint64_t) {
-    unsafe {
-        if (id as ::core::ffi::c_int) < STATNODES as ::core::ffi::c_int {
-            stats_counter_set(statsptr[id as usize], s);
-        }
+pub unsafe extern "C" fn master_stats_set(id: uint8_t, value: uint64_t) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id as usize)) {
+        crate::stats::counter_set(node, value);
     }
 }
 #[unsafe(no_mangle)]
@@ -1245,7 +1178,7 @@ unsafe extern "C" fn fs_af_add_to_lru(mut afptr: *mut acquired_file) {
                 }
                 if iafptr == af_lruhead {
                     *afpptr = (*iafptr).next as *mut acquired_file;
-                    chunksdatacache_clear_inode((*iafptr).inode, 0 as uint32_t);
+                    crate::chunksdatacache::clear_inode((*iafptr).inode, 0 as uint32_t);
                     fs_af_remove_from_lru(iafptr);
                     free(iafptr as *mut ::core::ffi::c_void);
                 } else {
@@ -4116,7 +4049,7 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
                     (*afptr).age = (*afptr).age.wrapping_add(1);
                     if (*afptr).age as ::core::ffi::c_int > ACQFILES_MAX_AGE {
                         *afpptr = (*afptr).next as *mut acquired_file;
-                        chunksdatacache_clear_inode((*afptr).inode, 0 as uint32_t);
+                        crate::chunksdatacache::clear_inode((*afptr).inode, 0 as uint32_t);
                         fs_af_remove_from_lru(afptr);
                         free(afptr as *mut ::core::ffi::c_void);
                         continue;
@@ -4505,7 +4438,7 @@ pub unsafe extern "C" fn fs_receive_thread(
                 0 as ::core::ffi::c_int,
             ) != 0
             {
-                chunksdatacache_cleanup();
+                crate::chunksdatacache::cleanup();
                 tcpclose(fd);
                 fd = -1 as ::core::ffi::c_int;
                 pthread_mutex_lock(&raw mut reclock);
@@ -4723,7 +4656,7 @@ pub unsafe extern "C" fn fs_receive_thread(
                                         let mut fleng: uint64_t = 0;
                                         inode = get32bit(&raw mut ptr);
                                         fleng = get64bit(&raw mut ptr);
-                                        ep_fleng_has_changed(inode, fleng);
+                                        crate::extrapackets::file_length_changed(inode, fleng);
                                         continue;
                                     } else if cmd == MATOCL_FUSE_CHUNK_HAS_CHANGED as uint32_t {
                                         let mut inode_0: uint32_t = 0;
@@ -4747,9 +4680,15 @@ pub unsafe extern "C" fn fs_receive_thread(
                                             choffset = 0 as uint32_t;
                                             chsize = MFSCHUNKSIZE as uint32_t;
                                         }
-                                        ep_chunk_has_changed(
-                                            inode_0, chindx, chunkid, version, fleng_0, truncflag,
-                                            choffset, chsize,
+                                        crate::extrapackets::chunk_changed(
+                                            inode_0,
+                                            chindx,
+                                            chunkid,
+                                            version,
+                                            fleng_0,
+                                            truncflag != 0,
+                                            choffset,
+                                            chsize,
                                         );
                                         continue;
                                     } else if cmd == MATOCL_FUSE_TIME_SYNC as uint32_t {
@@ -4826,7 +4765,7 @@ pub unsafe extern "C" fn fs_receive_thread(
                                         continue;
                                     } else if cmd == MATOCL_FUSE_INVALIDATE_CHUNK_CACHE as uint32_t
                                     {
-                                        chunksdatacache_cleanup();
+                                        crate::chunksdatacache::cleanup();
                                         continue;
                                     } else if cmd == ANTOAN_FORCE_TIMEOUT as uint32_t {
                                         sock_timeout = get16bit(&raw mut ptr) as ::core::ffi::c_int;
@@ -5016,7 +4955,7 @@ pub unsafe extern "C" fn fs_init_threads(mut retries: uint32_t, mut timeout: uin
         usectimeout = timeout as uint64_t;
         usectimeout = usectimeout.wrapping_mul(1000000 as uint64_t);
         fterm = 0 as uint8_t;
-        ep_init();
+        crate::extrapackets::init();
         i = 0 as uint32_t;
         while i < AMTIME_HASH_SIZE as uint32_t {
             amtime_hash[i as usize] = ::core::ptr::null_mut::<amtime_file>();
@@ -7153,7 +7092,7 @@ pub unsafe extern "C" fn fs_term() {
             free(connect_args.passworddigest as *mut ::core::ffi::c_void);
         }
         heap_term();
-        ep_term();
+        crate::extrapackets::term();
     }
 }
 #[unsafe(no_mangle)]

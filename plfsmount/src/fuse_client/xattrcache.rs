@@ -7,53 +7,23 @@
 //!
 //! Safe core in `imp`: HashMap + insertion-ordered VecDeque (timestamps
 //! are monotonic so insertion order IS expiry order), values as
-//! Rc<XattrValue> — the C lcnt refcount maps 1:1 onto Rc: get clones into
-//! a raw token (Rc::into_raw), rel drops it (Rc::from_raw), eviction drops
-//! the cache's handle while readers keep theirs. All Rc traffic happens
-//! under the module mutex, so non-atomic refcounts are sound.
+//! Arc<XattrValue> — the C lcnt refcount maps 1:1 onto Arc: get clones into
+//! a raw token (Arc::into_raw), rel drops it (Arc::from_raw), eviction drops
+//! the cache's handle while readers keep theirs. All Arc traffic is thread-safe.
 
 unsafe extern "C" {
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
     unsafe fn monotonic_useconds() -> int64_t;
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
 }
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type int64_t = i64;
-pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
 
 #[deny(unsafe_code)]
 pub mod imp {
     use std::collections::{HashMap, VecDeque};
-    use std::rc::Rc;
+    use std::sync::Arc;
 
-    /// One cached xattr answer; the Rc replaces C's lcnt refcount.
+    /// One cached xattr answer; the Arc replaces C's lcnt refcount.
     pub struct XattrValue {
         pub value: Option<Box<[u8]>>,
         pub vleng: u32,
@@ -61,7 +31,7 @@ pub mod imp {
     }
 
     struct Entry {
-        value: Rc<XattrValue>,
+        value: Arc<XattrValue>,
         utimestamp: i64, // absolute expiry, microseconds
     }
 
@@ -110,10 +80,10 @@ pub mod imp {
             gid: u32,
             name: &[u8],
             now: i64,
-        ) -> Option<Rc<XattrValue>> {
+        ) -> Option<Arc<XattrValue>> {
             self.invalidate(now);
             let key: Key = (node, uid, gid, name.into());
-            self.map.get(&key).map(|e| Rc::clone(&e.value))
+            self.map.get(&key).map(|e| Arc::clone(&e.value))
         }
 
         #[allow(clippy::too_many_arguments)]
@@ -139,7 +109,7 @@ pub mod imp {
             self.map.insert(
                 key.clone(),
                 Entry {
-                    value: Rc::new(v),
+                    value: Arc::new(v),
                     utimestamp: now + self.timeout_us,
                 },
             );
@@ -166,34 +136,13 @@ pub mod imp {
 }
 
 // ---------------------------------------------------------------------------
-// Boundary: module mutex + Rc↔raw-token conversion (C lcnt contract).
+// Boundary: module mutex + Arc↔raw-token conversion (C lcnt contract).
 // ---------------------------------------------------------------------------
 
 use imp::{XattrCache, XattrValue};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
-static mut glock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut CACHE: Option<XattrCache> = None;
-
-/// SAFETY: set in xattr_cache_init before FUSE threads; accessed only with
-/// glock held afterwards.
-unsafe fn cache() -> &'static mut XattrCache {
-    unsafe { (*(&raw mut CACHE)).as_mut().unwrap_unchecked() }
-}
+static CACHE: Mutex<Option<XattrCache>> = Mutex::new(None);
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_get(
@@ -208,10 +157,13 @@ pub unsafe extern "C" fn xattr_cache_get(
 ) -> *mut ::core::ffi::c_void {
     unsafe {
         let now = monotonic_useconds();
-        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        let mut cache = CACHE.lock().unwrap();
         // SAFETY: name points at nleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
-        let hit = cache().get(node, uid, gid, key, now);
+        let hit = cache
+            .as_mut()
+            .expect("xattr cache used before init")
+            .get(node, uid, gid, key, now);
         let token = match hit {
             Some(v) => {
                 if !value.is_null() {
@@ -227,11 +179,10 @@ pub unsafe extern "C" fn xattr_cache_get(
                     *status = v.status;
                 }
                 // hand one ref to the caller (C: lcnt++)
-                Rc::into_raw(v) as *mut ::core::ffi::c_void
+                Arc::into_raw(v) as *mut ::core::ffi::c_void
             }
             None => ::core::ptr::null_mut(),
         };
-        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
         token
     }
 }
@@ -249,7 +200,7 @@ pub unsafe extern "C" fn xattr_cache_set(
 ) {
     unsafe {
         let now = monotonic_useconds();
-        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        let mut cache = CACHE.lock().unwrap();
         // SAFETY: name/value point at nleng/vleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
         let v = if value.is_null() || vleng == 0 {
@@ -257,19 +208,23 @@ pub unsafe extern "C" fn xattr_cache_set(
         } else {
             Some(::core::slice::from_raw_parts(value, vleng as usize))
         };
-        cache().set(node, uid, gid, key, v, status, now);
-        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
+        cache
+            .as_mut()
+            .expect("xattr cache used before init")
+            .set(node, uid, gid, key, v, status, now);
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_del(node: uint32_t, nleng: uint32_t, name: *const uint8_t) {
     unsafe {
-        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
+        let mut cache = CACHE.lock().unwrap();
         // SAFETY: name points at nleng bytes per C contract.
         let key = ::core::slice::from_raw_parts(name, nleng as usize);
-        cache().del(node, key);
-        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
+        cache
+            .as_mut()
+            .expect("xattr cache used before init")
+            .del(node, key);
     }
 }
 
@@ -279,37 +234,29 @@ pub unsafe extern "C" fn xattr_cache_rel(vv: *mut ::core::ffi::c_void) {
         return;
     }
     unsafe {
-        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
-        // SAFETY: token from xattr_cache_get (Rc::into_raw), released at
+        // SAFETY: token from xattr_cache_get (Arc::into_raw), released at
         // most once — the C lcnt-- contract.
-        drop(Rc::<XattrValue>::from_raw(vv as *const XattrValue));
-        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
+        drop(Arc::<XattrValue>::from_raw(vv as *const XattrValue));
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_term() {
-    unsafe {
-        assert_eq!(pthread_mutex_lock(&raw mut glock), 0);
-        if let Some(c) = (&mut *(&raw mut CACHE)).as_mut() {
-            c.term();
-        }
-        assert_eq!(pthread_mutex_unlock(&raw mut glock), 0);
+    if let Some(mut cache) = CACHE.lock().unwrap().take() {
+        cache.term();
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xattr_cache_init(timeout: ::core::ffi::c_double) {
-    unsafe {
-        CACHE = Some(XattrCache::new((1_000_000.0 * timeout) as int64_t));
-    }
+    *CACHE.lock().unwrap() = Some(XattrCache::new((1_000_000.0 * timeout) as int64_t));
 }
 
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::imp::*;
-    use std::rc::Rc;
+    use std::sync::Arc;
     use std::vec;
 
     #[test]
@@ -342,14 +289,14 @@ mod tests {
     fn held_ref_survives_eviction() {
         let mut c = XattrCache::new(1_000_000);
         c.set(1, 0, 0, b"a", Some(b"data"), 0, 1_000_000);
-        let held: Rc<XattrValue> = c.get(1, 0, 0, b"a", 1_000_000).unwrap();
+        let held: Arc<XattrValue> = c.get(1, 0, 0, b"a", 1_000_000).unwrap();
         // overwrite (evicts old entry) then expire everything
         c.set(1, 0, 0, b"a", Some(b"new!"), 0, 1_500_000);
         let _ = c.get(9, 9, 9, b"zz", 9_999_999); // invalidate far future: clears cache
         assert_eq!(c.len(), 0);
         // held ref still valid (C: lcnt>0 kept the value alive)
         assert_eq!(held.value.as_deref(), Some(&b"data"[..]));
-        assert_eq!(Rc::strong_count(&held), 1);
+        assert_eq!(Arc::strong_count(&held), 1);
     }
 
     #[test]

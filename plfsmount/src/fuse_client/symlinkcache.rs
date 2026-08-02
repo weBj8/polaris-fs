@@ -1,12 +1,12 @@
 //! Symlink cache — safe Rust rewrite (P4).
 //!
 //! Original: MooseFS mfsclient/symlinkcache.c (206 lines of C; the c2rust
-//! transpile had ballooned to 1275 lines, ~80% zassert-macro noise around
-//! pthread_mutex_lock). 4-hash × 6257-bucket × 16-slot cache mapping inode
+//! transpile had ballooned to 1275 lines, mostly lock-assert macro noise.
+//! 4-hash × 6257-bucket × 16-slot cache mapping inode
 //! → symlink target path, time-based expiry, oldest-slot eviction.
 //!
 //! All cache logic is safe Rust in `imp` (paths owned as boxed byte strings,
-//! NUL-terminated for C export). The boundary keeps the pthread mutex, the
+//! NUL-terminated for C export). The boundary keeps the global lock, the
 //! stats tree, and C-string ownership: inserted paths are copied in,
 //! search-hit paths are returned as libc-malloc'd copies (caller frees with
 //! free(3), matching the C contract — mfs_fuse does exactly that).
@@ -14,49 +14,12 @@
 unsafe extern "C" {
     unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
     unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn stats_counter_inc(node: *mut ::core::ffi::c_void);
-    unsafe fn stats_counter_dec(node: *mut ::core::ffi::c_void);
-    unsafe fn stats_get_subnode(
-        node: *mut ::core::ffi::c_void,
-        name: *const ::core::ffi::c_char,
-        absolute: uint8_t,
-        printflag: uint8_t,
-    ) -> *mut ::core::ffi::c_void;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
 }
 pub type size_t = usize;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const PTHREAD_MUTEX_TIMED_NP: ::core::ffi::c_uint = 0;
 
 pub const INSERTS: usize = 0;
 pub const SEARCH_HITS: usize = 1;
@@ -182,92 +145,41 @@ pub mod imp {
 }
 
 // ---------------------------------------------------------------------------
-// Boundary: pthread mutex + stats tree + C-string ownership.
+// Boundary: stats tree + C-string ownership.
 // ---------------------------------------------------------------------------
 
 use imp::{Cache, InsertOutcome, SearchOutcome};
 
-static mut slcachelock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-static mut CACHE: Option<Cache> = None;
-static mut statsptr: [*mut ::core::ffi::c_void; STATNODES] =
-    [::core::ptr::null_mut::<::core::ffi::c_void>(); STATNODES];
+static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
+static STATS: std::sync::OnceLock<[plfsclient::stats::StatsHandle; STATNODES]> =
+    std::sync::OnceLock::new();
 
-/// SAFETY: called with slcachelock held (or before threads start, in init).
-unsafe fn cache() -> &'static mut Cache {
-    unsafe {
-        // init runs before FUSE threads; every other call holds the lock.
-        (&raw mut CACHE)
-            .as_mut()
-            .unwrap_unchecked()
-            .as_mut()
-            .unwrap_unchecked()
-    }
-}
-
-unsafe fn symlink_cache_statsptr_init() {
-    unsafe {
-        let s = stats_get_subnode(
-            NULL,
-            b"symlink_cache\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            0 as uint8_t,
-        );
-        statsptr[INSERTS] = stats_get_subnode(
-            s,
-            b"inserts\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[SEARCH_HITS] = stats_get_subnode(
-            s,
-            b"search_hits\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[SEARCH_MISSES] = stats_get_subnode(
-            s,
-            b"search_misses\0".as_ptr() as *const ::core::ffi::c_char,
-            0 as uint8_t,
-            1 as uint8_t,
-        );
-        statsptr[LINKS] = stats_get_subnode(
-            s,
-            b"#links\0".as_ptr() as *const ::core::ffi::c_char,
-            1 as uint8_t,
-            1 as uint8_t,
-        );
-    }
+fn symlink_cache_statsptr_init() {
+    let root = plfsclient::stats::subnode(None, "symlink_cache", false, false);
+    assert!(
+        STATS
+            .set([
+                plfsclient::stats::subnode(Some(&root), "inserts", false, true),
+                plfsclient::stats::subnode(Some(&root), "search_hits", false, true),
+                plfsclient::stats::subnode(Some(&root), "search_misses", false, true),
+                plfsclient::stats::subnode(Some(&root), "#links", true, true),
+            ])
+            .is_ok(),
+        "symlink-cache stats initialized twice"
+    );
 }
 
 /// SAFETY: id < STATNODES checked inline; statsptr valid after init.
-unsafe fn stats_inc(id: usize) {
-    unsafe {
-        if id < STATNODES {
-            stats_counter_inc(statsptr[id]);
-        }
+fn stats_inc(id: usize) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id)) {
+        plfsclient::stats::counter_inc(node);
     }
 }
 
 /// SAFETY: as stats_inc.
-unsafe fn stats_dec(id: usize) {
-    unsafe {
-        if id < STATNODES {
-            stats_counter_dec(statsptr[id]);
-        }
+fn stats_dec(id: usize) {
+    if let Some(node) = STATS.get().and_then(|stats| stats.get(id)) {
+        plfsclient::stats::counter_dec(node);
     }
 }
 
@@ -282,9 +194,12 @@ pub unsafe extern "C" fn symlink_cache_insert(inode: uint32_t, path: *const uint
         let mut owned = Vec::with_capacity(bytes.len() + 1);
         owned.extend_from_slice(bytes);
         owned.push(0);
-        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
-        let outcome = cache().insert(inode, &owned, t);
-        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
+        let outcome = CACHE
+            .lock()
+            .unwrap()
+            .as_mut()
+            .expect("symlink cache used before init")
+            .insert(inode, &owned, t);
         if let InsertOutcome::Virgin = outcome {
             stats_inc(LINKS);
         }
@@ -295,9 +210,12 @@ pub unsafe extern "C" fn symlink_cache_insert(inode: uint32_t, path: *const uint
 pub unsafe extern "C" fn symlink_cache_search(inode: uint32_t) -> *mut uint8_t {
     unsafe {
         let t = monotonic_seconds();
-        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
-        let outcome = cache().search(inode, t);
-        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
+        let outcome = CACHE
+            .lock()
+            .unwrap()
+            .as_mut()
+            .expect("symlink cache used before init")
+            .search(inode, t);
         match outcome {
             SearchOutcome::Hit(path) => {
                 stats_inc(SEARCH_HITS);
@@ -324,19 +242,13 @@ pub unsafe extern "C" fn symlink_cache_search(inode: uint32_t) -> *mut uint8_t {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn symlink_cache_init(to: ::core::ffi::c_double) {
-    unsafe {
-        CACHE = Some(Cache::new(to));
-        symlink_cache_statsptr_init();
-    }
+    *CACHE.lock().unwrap() = Some(Cache::new(to));
+    symlink_cache_statsptr_init();
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn symlink_cache_term() {
-    unsafe {
-        assert_eq!(pthread_mutex_lock(&raw mut slcachelock), 0);
-        CACHE = None; // drops all boxed paths
-        assert_eq!(pthread_mutex_unlock(&raw mut slcachelock), 0);
-    }
+    CACHE.lock().unwrap().take(); // drops all boxed paths
 }
 
 #[cfg(test)]

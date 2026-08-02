@@ -1,397 +1,172 @@
-unsafe extern "C" {
-    unsafe fn snprintf(
-        __s: *mut ::core::ffi::c_char,
-        __maxlen: size_t,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn strcmp(
-        __s1: *const ::core::ffi::c_char,
-        __s2: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    unsafe fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    unsafe fn pthread_mutex_lock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
-    unsafe fn pthread_mutex_unlock(__mutex: *mut pthread_mutex_t) -> ::core::ffi::c_int;
+//! Hierarchical runtime counters.
+//!
+//! Native Rust tree replaces malloc'd intrusive nodes, pthread locking, and
+//! `void *` handles. Nodes are stable `Arc` values shared by producers.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
+
+pub type StatsHandle = Arc<StatsNode>;
+
+pub struct StatsNode {
+    counter: AtomicU64,
+    print: bool,
+    absolute: bool,
+    fullname: String,
+    parent: Weak<StatsNode>,
+    children: Mutex<Vec<StatsHandle>>,
 }
-pub type size_t = usize;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
+
+static ROOTS: LazyLock<Mutex<Vec<StatsHandle>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+pub fn subnode(
+    parent: Option<&StatsHandle>,
+    name: &str,
+    absolute: bool,
+    print: bool,
+) -> StatsHandle {
+    let children: &Mutex<Vec<StatsHandle>> = match parent {
+        Some(node) => &node.children,
+        None => &ROOTS,
+    };
+    let mut children = children.lock().unwrap();
+    if let Some(node) = children.iter().find(|node| {
+        node.fullname
+            .rsplit_once('.')
+            .map_or(node.fullname.as_str(), |(_, name)| name)
+            == name
+    }) {
+        return Arc::clone(node);
+    }
+    let fullname = parent.map_or_else(
+        || name.to_owned(),
+        |parent| format!("{}.{}", parent.fullname, name),
+    );
+    let node = Arc::new(StatsNode {
+        counter: AtomicU64::new(0),
+        print,
+        absolute,
+        fullname,
+        parent: parent.map_or_else(Weak::new, Arc::downgrade),
+        children: Mutex::new(Vec::new()),
+    });
+    // C inserted at list head; preserve traversal/output order.
+    children.insert(0, Arc::clone(&node));
+    node
 }
-pub type __pthread_list_t = __pthread_internal_list;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::core::ffi::c_int,
-    pub __count: ::core::ffi::c_uint,
-    pub __owner: ::core::ffi::c_int,
-    pub __nusers: ::core::ffi::c_uint,
-    pub __kind: ::core::ffi::c_int,
-    pub __spins: ::core::ffi::c_short,
-    pub __glibc_reserved: ::core::ffi::c_short,
-    pub __list: __pthread_list_t,
+
+fn ancestors(node: &StatsHandle) -> impl Iterator<Item = StatsHandle> {
+    std::iter::successors(Some(Arc::clone(node)), |node| node.parent.upgrade())
 }
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::core::ffi::c_char; 40],
-    pub __align: ::core::ffi::c_long,
-}
-pub type C2Rust_Unnamed = ::core::ffi::c_uint;
-pub const PTHREAD_MUTEX_FAST_NP: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_DEFAULT: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ERRORCHECK: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_NORMAL: C2Rust_Unnamed = 0;
-pub const PTHREAD_MUTEX_ADAPTIVE_NP: C2Rust_Unnamed = 3;
-pub const PTHREAD_MUTEX_ERRORCHECK_NP: C2Rust_Unnamed = 2;
-pub const PTHREAD_MUTEX_RECURSIVE_NP: C2Rust_Unnamed = 1;
-pub const PTHREAD_MUTEX_TIMED_NP: C2Rust_Unnamed = 0;
-pub type uint8_t = u8;
-pub type uint32_t = u32;
-pub type uint64_t = u64;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _statsnode {
-    pub counter: uint64_t,
-    pub printflag: uint8_t,
-    pub absolute: uint8_t,
-    pub name: *mut ::core::ffi::c_char,
-    pub fullname: *mut ::core::ffi::c_char,
-    pub nleng: uint32_t,
-    pub fnleng: uint32_t,
-    pub parent: *mut _statsnode,
-    pub firstchild: *mut _statsnode,
-    pub nextsibling: *mut _statsnode,
-}
-pub type statsnode = _statsnode;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-static mut firstnode: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-static mut allactiveplengs: uint32_t = 0 as uint32_t;
-static mut activenodes: uint32_t = 0 as uint32_t;
-static mut glock: pthread_mutex_t = pthread_mutex_t {
-    __data: __pthread_mutex_s {
-        __lock: 0 as ::core::ffi::c_int,
-        __count: 0 as ::core::ffi::c_uint,
-        __owner: 0 as ::core::ffi::c_int,
-        __nusers: 0 as ::core::ffi::c_uint,
-        __kind: PTHREAD_MUTEX_TIMED_NP as ::core::ffi::c_int,
-        __spins: 0 as ::core::ffi::c_short,
-        __glibc_reserved: 0 as ::core::ffi::c_short,
-        __list: __pthread_internal_list {
-            __prev: ::core::ptr::null_mut::<__pthread_internal_list>(),
-            __next: ::core::ptr::null_mut::<__pthread_internal_list>(),
-        },
-    },
-};
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_counter_add(
-    mut node: *mut ::core::ffi::c_void,
-    mut delta: uint64_t,
-) {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        pthread_mutex_lock(&raw mut glock);
-        while !sn.is_null() {
-            (*sn).counter = (*sn).counter.wrapping_add(delta);
-            if (*sn).absolute != 0 {
-                break;
-            }
-            sn = (*sn).parent as *mut statsnode;
+
+pub fn counter_add(node: &StatsHandle, delta: u64) {
+    for node in ancestors(node) {
+        node.counter.fetch_add(delta, Ordering::Relaxed);
+        if node.absolute {
+            break;
         }
-        pthread_mutex_unlock(&raw mut glock);
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_counter_sub(
-    mut node: *mut ::core::ffi::c_void,
-    mut delta: uint64_t,
-) {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        pthread_mutex_lock(&raw mut glock);
-        while !sn.is_null() {
-            (*sn).counter = (*sn).counter.wrapping_sub(delta);
-            if (*sn).absolute != 0 {
-                break;
-            }
-            sn = (*sn).parent as *mut statsnode;
+
+pub fn counter_sub(node: &StatsHandle, delta: u64) {
+    for node in ancestors(node) {
+        node.counter.fetch_sub(delta, Ordering::Relaxed);
+        if node.absolute {
+            break;
         }
-        pthread_mutex_unlock(&raw mut glock);
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_counter_inc(mut node: *mut ::core::ffi::c_void) {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        pthread_mutex_lock(&raw mut glock);
-        while !sn.is_null() {
-            (*sn).counter = (*sn).counter.wrapping_add(1);
-            if (*sn).absolute != 0 {
-                break;
-            }
-            sn = (*sn).parent as *mut statsnode;
-        }
-        pthread_mutex_unlock(&raw mut glock);
+
+pub fn counter_inc(node: &StatsHandle) {
+    counter_add(node, 1);
+}
+
+pub fn counter_dec(node: &StatsHandle) {
+    counter_sub(node, 1);
+}
+
+pub fn counter_set(node: &StatsHandle, value: u64) {
+    if node.absolute {
+        node.counter.store(value, Ordering::Relaxed);
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_counter_dec(mut node: *mut ::core::ffi::c_void) {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        pthread_mutex_lock(&raw mut glock);
-        while !sn.is_null() {
-            (*sn).counter = (*sn).counter.wrapping_sub(1);
-            if (*sn).absolute != 0 {
-                break;
-            }
-            sn = (*sn).parent as *mut statsnode;
-        }
-        pthread_mutex_unlock(&raw mut glock);
+
+fn reset(node: &StatsHandle) {
+    if !node.absolute {
+        node.counter.store(0, Ordering::Relaxed);
+    }
+    for child in node.children.lock().unwrap().clone() {
+        reset(&child);
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_counter_set(
-    mut node: *mut ::core::ffi::c_void,
-    mut value: uint64_t,
-) {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        pthread_mutex_lock(&raw mut glock);
-        if (*sn).absolute != 0 {
-            (*sn).counter = value;
-        }
-        pthread_mutex_unlock(&raw mut glock);
+
+pub fn reset_all() {
+    for root in ROOTS.lock().unwrap().clone() {
+        reset(&root);
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_get_subnode(
-    mut node: *mut ::core::ffi::c_void,
-    mut name: *const ::core::ffi::c_char,
-    mut absolute: uint8_t,
-    mut printflag: uint8_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut sn: *mut statsnode = node as *mut statsnode;
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        pthread_mutex_lock(&raw mut glock);
-        a = (if !sn.is_null() {
-            (*sn).firstchild
+
+fn append_values(node: &StatsHandle, out: &mut Vec<u8>) {
+    if node.print {
+        let value = node.counter.load(Ordering::Relaxed);
+        if node.absolute {
+            out.extend_from_slice(format!("{}: [{}]\n", node.fullname, value).as_bytes());
         } else {
-            firstnode as *mut _statsnode
-        }) as *mut statsnode;
-        while !a.is_null() {
-            if strcmp((*a).name, name) == 0 as ::core::ffi::c_int {
-                pthread_mutex_unlock(&raw mut glock);
-                return a as *mut ::core::ffi::c_void;
-            }
-            a = (*a).nextsibling as *mut statsnode;
-        }
-        a = malloc(::core::mem::size_of::<statsnode>()) as *mut statsnode;
-        (*a).nextsibling = if !sn.is_null() {
-            (*sn).firstchild
-        } else {
-            firstnode as *mut _statsnode
-        };
-        (*a).firstchild = ::core::ptr::null_mut::<_statsnode>();
-        (*a).counter = 0 as uint64_t;
-        (*a).printflag = printflag;
-        (*a).absolute = absolute;
-        (*a).name = strdup(name);
-        (*a).nleng = strlen(name) as uint32_t;
-        if !sn.is_null() {
-            let mut bstr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            (*a).fnleng = (*sn)
-                .fnleng
-                .wrapping_add(1 as uint32_t)
-                .wrapping_add((*a).nleng);
-            bstr = malloc((*a).fnleng.wrapping_add(1 as uint32_t) as size_t)
-                as *mut ::core::ffi::c_char;
-            memcpy(
-                bstr as *mut ::core::ffi::c_void,
-                (*sn).fullname as *const ::core::ffi::c_void,
-                (*sn).fnleng as size_t,
-            );
-            *bstr.offset((*sn).fnleng as isize) = '.' as ::core::ffi::c_char;
-            memcpy(
-                bstr.offset((*sn).fnleng as isize)
-                    .offset(1 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_void,
-                (*a).name as *const ::core::ffi::c_void,
-                (*a).nleng as size_t,
-            );
-            *bstr.offset((*a).fnleng as isize) = 0 as ::core::ffi::c_char;
-            (*a).fullname = bstr;
-        } else {
-            (*a).fullname = (*a).name;
-            (*a).fnleng = (*a).nleng;
-        }
-        if !sn.is_null() {
-            (*sn).firstchild = a as *mut _statsnode;
-        } else {
-            firstnode = a;
-        }
-        (*a).parent = sn as *mut _statsnode;
-        if printflag != 0 {
-            activenodes = activenodes.wrapping_add(1);
-            allactiveplengs = allactiveplengs.wrapping_add((*a).fnleng);
-        }
-        pthread_mutex_unlock(&raw mut glock);
-        return a as *mut ::core::ffi::c_void;
-    }
-}
-#[inline]
-unsafe extern "C" fn stats_reset(mut n: *mut statsnode) {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        if (*n).absolute as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            (*n).counter = 0 as uint64_t;
-        }
-        a = (*n).firstchild as *mut statsnode;
-        while !a.is_null() {
-            stats_reset(a);
-            a = (*a).nextsibling as *mut statsnode;
+            out.extend_from_slice(format!("{}: {}\n", node.fullname, value).as_bytes());
         }
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_reset_all() {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        pthread_mutex_lock(&raw mut glock);
-        a = firstnode;
-        while !a.is_null() {
-            stats_reset(a);
-            a = (*a).nextsibling as *mut statsnode;
-        }
-        pthread_mutex_unlock(&raw mut glock);
+    for child in node.children.lock().unwrap().clone() {
+        append_values(&child, out);
     }
 }
-#[inline]
-unsafe extern "C" fn stats_print_values(
-    mut buff: *mut ::core::ffi::c_char,
-    mut maxleng: uint32_t,
-    mut n: *mut statsnode,
-) -> uint32_t {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        let mut l: uint32_t = 0;
-        if (*n).printflag != 0 {
-            if (*n).absolute != 0 {
-                l = snprintf(
-                    buff,
-                    maxleng as size_t,
-                    b"%s: [%lu]\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    (*n).fullname,
-                    (*n).counter,
-                ) as uint32_t;
-            } else {
-                l = snprintf(
-                    buff,
-                    maxleng as size_t,
-                    b"%s: %lu\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    (*n).fullname,
-                    (*n).counter,
-                ) as uint32_t;
-            }
-        } else {
-            l = 0 as uint32_t;
-        }
-        a = (*n).firstchild as *mut statsnode;
-        while !a.is_null() {
-            if maxleng > l {
-                l = l.wrapping_add(stats_print_values(
-                    buff.offset(l as isize),
-                    maxleng.wrapping_sub(l),
-                    a,
-                ));
-            }
-            a = (*a).nextsibling as *mut statsnode;
-        }
-        return l;
+
+pub fn show_all() -> Vec<u8> {
+    let mut out = Vec::new();
+    for root in ROOTS.lock().unwrap().clone() {
+        append_values(&root, &mut out);
     }
+    out
 }
-#[inline]
-unsafe extern "C" fn stats_print_total(
-    mut buff: *mut ::core::ffi::c_char,
-    mut maxleng: uint32_t,
-) -> uint32_t {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        let mut l: uint32_t = 0;
-        l = 0 as uint32_t;
-        a = firstnode;
-        while !a.is_null() {
-            if maxleng > l {
-                l = l.wrapping_add(stats_print_values(
-                    buff.offset(l as isize),
-                    maxleng.wrapping_sub(l),
-                    a,
-                ));
-            }
-            a = (*a).nextsibling as *mut statsnode;
-        }
-        return l;
+
+pub fn term() {
+    ROOTS.lock().unwrap().clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn hierarchy_propagation_reset_and_output() {
+        let _test = TEST_LOCK.lock().unwrap();
+        term();
+        let root = subnode(None, "root", false, false);
+        let leaf = subnode(Some(&root), "leaf", false, true);
+        counter_add(&leaf, 3);
+        assert_eq!(show_all(), b"root.leaf: 3\n");
+        reset_all();
+        assert_eq!(show_all(), b"root.leaf: 0\n");
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_show_all(
-    mut buff: *mut *mut ::core::ffi::c_char,
-    mut leng: *mut uint32_t,
-) {
-    unsafe {
-        let mut rl: uint32_t = 0;
-        pthread_mutex_lock(&raw mut glock);
-        rl = allactiveplengs.wrapping_add((50 as uint32_t).wrapping_mul(activenodes));
-        *buff = malloc(rl as size_t) as *mut ::core::ffi::c_char;
-        if !(*buff).is_null() {
-            *leng = stats_print_total(*buff, rl);
-        } else {
-            *leng = 0 as uint32_t;
-        }
-        pthread_mutex_unlock(&raw mut glock);
+
+    #[test]
+    fn absolute_counter_stops_propagation() {
+        let _test = TEST_LOCK.lock().unwrap();
+        term();
+        let root = subnode(None, "root", false, true);
+        let gauge = subnode(Some(&root), "gauge", true, true);
+        counter_set(&gauge, 7);
+        counter_inc(&gauge);
+        assert_eq!(show_all(), b"root: 0\nroot.gauge: [8]\n");
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_free(mut n: *mut statsnode) {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        let mut an: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        free((*n).name as *mut ::core::ffi::c_void);
-        if (*n).fullname != (*n).name {
-            free((*n).fullname as *mut ::core::ffi::c_void);
-        }
-        a = (*n).firstchild as *mut statsnode;
-        while !a.is_null() {
-            an = (*a).nextsibling as *mut statsnode;
-            stats_free(a);
-            free(a as *mut ::core::ffi::c_void);
-            a = an;
-        }
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stats_term() {
-    unsafe {
-        let mut a: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        let mut an: *mut statsnode = ::core::ptr::null_mut::<statsnode>();
-        a = firstnode;
-        while !a.is_null() {
-            an = (*a).nextsibling as *mut statsnode;
-            stats_free(a);
-            free(a as *mut ::core::ffi::c_void);
-            a = an;
-        }
+
+    #[test]
+    fn duplicate_subnode_returns_same_handle() {
+        let _test = TEST_LOCK.lock().unwrap();
+        term();
+        let first = subnode(None, "same", false, true);
+        let second = subnode(None, "same", true, false);
+        assert!(Arc::ptr_eq(&first, &second));
     }
 }

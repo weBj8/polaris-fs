@@ -13,12 +13,6 @@
 //! between steps, exactly like C.
 
 unsafe extern "C" {
-    unsafe fn lwt_minthread_create(
-        th: *mut pthread_t,
-        detached: uint8_t,
-        r#fn: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void>,
-        arg: *mut ::core::ffi::c_void,
-    ) -> ::core::ffi::c_int;
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
     unsafe fn fs_isopen(inode: uint32_t) -> ::core::ffi::c_int;
     unsafe fn mfs_dentry_invalidate(
@@ -28,48 +22,9 @@ unsafe extern "C" {
     );
 }
 
-// local copy, mirroring the C static-inline portable_usleep (each TU had
-// its own; cross-module private symbols do not survive clean LTO builds)
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct portable_timespec {
-    tv_sec: ::core::ffi::c_long,
-    tv_nsec: ::core::ffi::c_long,
-}
-unsafe extern "C" {
-    fn nanosleep(
-        __requested_time: *const portable_timespec,
-        __remaining: *mut portable_timespec,
-    ) -> ::core::ffi::c_int;
-}
-#[inline]
-fn portable_usleep(usec: uint64_t) {
-    let mut req = portable_timespec {
-        tv_sec: (usec / 1_000_000) as ::core::ffi::c_long,
-        tv_nsec: ((usec % 1_000_000) * 1000) as ::core::ffi::c_long,
-    };
-    let mut rem = portable_timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: req/rem are valid stack structs.
-    unsafe {
-        loop {
-            let s = nanosleep(&req, &mut rem);
-            if s < 0 {
-                req = rem;
-            } else {
-                break;
-            }
-        }
-    }
-}
-
 pub type uint8_t = u8;
 pub type uint32_t = u32;
 pub type uint64_t = u64;
-pub type pthread_t = ::core::ffi::c_ulong;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 
 #[deny(unsafe_code)]
 pub mod imp {
@@ -209,7 +164,7 @@ pub unsafe extern "C" fn dinval_remove(parent: uint32_t, nleng: uint8_t, name: *
     }
 }
 
-unsafe extern "C" fn dinval_invalthread(arg: *mut ::core::ffi::c_void) -> *mut ::core::ffi::c_void {
+fn dinval_invalthread() {
     unsafe {
         loop {
             let now = monotonic_seconds();
@@ -238,7 +193,7 @@ unsafe extern "C" fn dinval_invalthread(arg: *mut ::core::ffi::c_void) -> *mut :
                     }
                 }
             }
-            portable_usleep(10000);
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }
@@ -250,8 +205,8 @@ pub unsafe extern "C" fn dinval_init(timeout: ::core::ffi::c_double) {
             let mut g = imp::DI.lock().unwrap();
             *g = Some(imp::Dinval::new(timeout));
         }
-        let mut th: pthread_t = 0;
-        lwt_minthread_create(&raw mut th, 1, Some(dinval_invalthread), NULL);
+        plfscommon::lwthread::spawn_min("dentry-invalidator", dinval_invalthread)
+            .unwrap_or_else(|_| std::process::abort());
     }
 }
 
