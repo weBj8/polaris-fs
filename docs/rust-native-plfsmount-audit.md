@@ -91,7 +91,11 @@ Verification for this wave:
 - deployed image `45ff7343310a` digest
   `sha256:18e10073afd52a9d3160c4e32404bc8f626f45cb2fee5d07a4d1178d1b451556`
   (plfsmount-only update; other services not restarted; post-deploy concurrent
-  read/write smoke passed).
+  read/write smoke passed);
+- redeployed image `782bb278208d` digest
+  `sha256:64ca97aad72cd845b97dc689baf8e599394aaf8f89975e7d58aa69f9249982f9`
+  after CI run `30768186487` (plfsmount-only; stale FUSE mount unmounted on
+  host first; concurrent 4-way read/write smoke passed).
 
 The dirbuf wave removed the raw table/free-list, variable-tail malloc blocks,
 per-slot pthread lock/condition protocol, and the internal C ABI exports

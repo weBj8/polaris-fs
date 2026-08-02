@@ -35,7 +35,18 @@ port 9421 beyond a private network.
 The image includes libfuse 3.18.2. Host libfuse version does not affect the
 container.
 
-Latest verified deployment: commit `45ff734`, image tag
+Latest verified deployment: commit `782bb27`, image tag
+`782bb278208d`, digest
+`sha256:64ca97aad72cd845b97dc689baf8e599394aaf8f89975e7d58aa69f9249982f9`.
+CI run for `782bb27` (run `30768186487`) passed gates, release build,
+workspace tests, and cluster smoke before publishing this image. Production
+update was plfsmount-only (`docker compose up -d --no-deps plfsmount`);
+master, metalogger, and GUI were not restarted. A stale FUSE mount from the
+previous container had to be unmounted on the host before the new container
+could start (`fusermount3 -uz` + `umount -l`). Post-deploy concurrent
+4-way read/write smoke passed (`DEPLOY_SMOKE_OK`) with a clean log scan.
+
+Previous verified deployment: commit `45ff734`, image tag
 `45ff7343310a`, digest
 `sha256:18e10073afd52a9d3160c4e32404bc8f626f45cb2fee5d07a4d1178d1b451556`.
 CI run for `45ff734` (run `30764567563`) passed gates, release build,
