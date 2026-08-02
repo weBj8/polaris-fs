@@ -229,8 +229,10 @@ pub struct rrequest_s {
     pub mode: uint8_t,
     pub lcnt: uint16_t,
     pub cond: std::sync::Condvar,
-    pub next: *mut rrequest_s,
-    pub prev: *mut *mut rrequest_s,
+    // C: struct rrequest_s *next, **prev (per-inode reqhead/reqtail chain,
+    // readdata.c:173) — replaced by inodedata_s.reqs below. Raw rrequest
+    // handles escape (JQUEUE jobs, delay_run udata, rlist_s.rreq, the lcnt
+    // protocol), so nodes stay Box::into_raw'd and reqs only enumerates.
 }
 // std::sync primitives replace pthread_cond_t/pthread_mutex_t (see
 // rrequest_s note). Struct is Box-allocated in read_data_new; freed via
@@ -248,13 +250,19 @@ pub struct inodedata_s {
     pub waiting_writers: uint16_t,
     pub readers_cnt: uint16_t,
     pub lcnt: uint16_t,
-    pub reqhead: *mut rrequest,
-    pub reqtail: *mut *mut rrequest,
+    // C: rrequest *reqhead, **reqtail (readdata.c:196). Tail-append FIFO of
+    // raw rrequest handles; push == C's `*(ind->reqtail) = rreq` tail link,
+    // iteration from index 0 == walking from reqhead.
+    pub reqs: Vec<*mut rrequest>,
     pub closecond: std::sync::Condvar,
     pub readerscond: std::sync::Condvar,
     pub writerscond: std::sync::Condvar,
     pub lock: std::sync::Mutex<()>,
-    pub next: *mut inodedata_s,
+    // C: struct inodedata_s *next (indhash bucket chain, readdata.c:202) —
+    // replaced by the indhash Vec buckets below. Raw inodedata handles
+    // escape (read_data_new returns the node as the opaque void* file
+    // handle consumed by mfs_fuse), so nodes stay Box::into_raw'd and
+    // buckets only enumerate.
 }
 pub type inodedata = inodedata_s;
 pub const INQUEUE: C2Rust_Unnamed_0 = 1;
@@ -301,7 +309,9 @@ pub struct rlist_s {
     pub rreq: *mut rrequest,
     pub offsetadd: uint32_t,
     pub reqleng: uint32_t,
-    pub next: *mut rlist_s,
+    // C: struct rlist_s *next (readdata.c:2137) — replaced by the Vec<rlist>
+    // built in read_data and passed across the vrhead void* ABI as a boxed
+    // Vec. Tail-append order preserved (push == C's *rtail link).
 }
 pub type C2Rust_Unnamed_0 = ::core::ffi::c_uint;
 pub const POLLIN: ::core::ffi::c_int = 0x1 as ::core::ffi::c_int;
@@ -610,9 +620,11 @@ static mut erroronlostchunk: uint8_t = 0;
 static mut erroronnospace: uint8_t = 0;
 static mut reqbufftotalsize: uint64_t = 0;
 // Owned fixed-size bucket table; replaces malloc'd `*mut *mut inodedata`.
-// Entries remain raw intrusive-list heads mutated under INODE_LOCK.
-static mut indhash: [*mut inodedata; IDHASHSIZE as usize] =
-    [::core::ptr::null_mut::<inodedata>(); IDHASHSIZE as usize];
+// Buckets enumerate raw handles (nodes escape as the void* file handle);
+// insert(0, ..) preserves C's head-insert in read_data_new. All bucket
+// mutation happens under INODE_LOCK.
+static mut indhash: [Vec<*mut inodedata>; IDHASHSIZE as usize] =
+    [const { Vec::new() }; IDHASHSIZE as usize];
 // Global inode-table lock. std::sync::Mutex is RAII-only, so emulate
 // pthread-style manual lock/unlock by stashing the guard in a thread_local
 // slot: lock() parks the guard, unlock() drops it.
@@ -955,18 +967,15 @@ unsafe extern "C" fn read_new_request(
             mode: NEW as ::core::ffi::c_int as uint8_t,
             lcnt: 0 as uint16_t,
             cond: std::sync::Condvar::new(),
-            next: ::core::ptr::null_mut::<rrequest_s>(),
-            prev: ::core::ptr::null_mut::<*mut rrequest_s>(),
         }));
         if ((*ind).inqueue as ::core::ffi::c_int) < MAXREQINQUEUE {
             (*rreq).mode = INQUEUE as ::core::ffi::c_int as uint8_t;
             read_enqueue(rreq);
             (*ind).inqueue = (*ind).inqueue.wrapping_add(1);
         }
-        (*rreq).next = ::core::ptr::null_mut::<rrequest_s>();
-        (*rreq).prev = (*ind).reqtail as *mut *mut rrequest_s;
-        *(*ind).reqtail = rreq;
-        (*ind).reqtail = &raw mut (*rreq).next as *mut *mut rrequest;
+        // C: rreq->next = NULL; rreq->prev = ind->reqtail;
+        // *(ind->reqtail) = rreq; ind->reqtail = &(rreq->next); — tail append.
+        (&mut (*ind).reqs).push(rreq);
         let c2rust_lhs = &raw mut reqbufftotalsize;
         let c2rust_rhs = chunkleng as uint64_t;
         ::core::intrinsics::atomic_xadd::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
@@ -979,12 +988,16 @@ unsafe extern "C" fn read_new_request(
 #[inline]
 unsafe extern "C" fn read_delete_request(mut rreq: *mut rrequest) {
     unsafe {
-        *(*rreq).prev = (*rreq).next;
-        if !(*rreq).next.is_null() {
-            (*(*rreq).next).prev = (*rreq).prev;
-        } else {
-            (*(*rreq).ind).reqtail = (*rreq).prev as *mut *mut rrequest;
-        }
+        // C: *(rreq->prev) = rreq->next; ... doubly-linked unlink. Scan for
+        // the handle instead. ponytail: O(n) position lookup, n bounded by
+        // requests-per-inode (readahead keeps it small); index-based links
+        // only if profiling flags it.
+        let reqs = &raw mut (*(*rreq).ind).reqs;
+        let pos = (*reqs)
+            .iter()
+            .position(|&p| p == rreq)
+            .expect("read_delete_request: rreq not in ind->reqs");
+        (&mut *reqs).remove(pos);
         let c2rust_lhs = &raw mut reqbufftotalsize;
         let c2rust_rhs = (*rreq).leng as uint64_t;
         ::core::intrinsics::atomic_xsub::<_, _, { ::core::intrinsics::AtomicOrdering::SeqCst }>(
@@ -1046,7 +1059,7 @@ pub unsafe extern "C" fn read_job_end(
         {
             if (*rreq).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 read_delete_request(rreq);
-                if (*ind).closing as ::core::ffi::c_int != 0 && (*ind).reqhead.is_null() {
+                if (*ind).closing as ::core::ffi::c_int != 0 && (&(*ind).reqs).is_empty() {
                     (*ind).closecond.notify_all();
                 }
             } else if breakmode as ::core::ffi::c_int == 0 as ::core::ffi::c_int
@@ -1062,14 +1075,19 @@ pub unsafe extern "C" fn read_job_end(
                 read_delayed_enqueue(rreq, delay);
                 (*ind).inqueue = (*ind).inqueue.wrapping_add(1);
             }
-            rreq = (*ind).reqhead;
-            while !rreq.is_null() && ((*ind).inqueue as ::core::ffi::c_int) < MAXREQINQUEUE {
-                if (*rreq).mode as ::core::ffi::c_int == NEW as ::core::ffi::c_int {
-                    (*rreq).mode = INQUEUE as ::core::ffi::c_int as uint8_t;
-                    read_enqueue(rreq);
+            // C: for (rreq = ind->reqhead ; rreq && ind->inqueue < MAXREQINQUEUE
+            // ; rreq=rreq->next) — head-to-tail scan, no removal inside.
+            let mut ri: usize = 0;
+            while ri < (&(*ind).reqs).len()
+                && ((*ind).inqueue as ::core::ffi::c_int) < MAXREQINQUEUE
+            {
+                let qr: *mut rrequest = (&(*ind).reqs)[ri];
+                if (*qr).mode as ::core::ffi::c_int == NEW as ::core::ffi::c_int {
+                    (*qr).mode = INQUEUE as ::core::ffi::c_int as uint8_t;
+                    read_enqueue(qr);
                     (*ind).inqueue = (*ind).inqueue.wrapping_add(1);
                 }
-                rreq = (*rreq).next as *mut rrequest;
+                ri = ri.wrapping_add(1);
             }
         }
         ind_unlock(ind);
@@ -3572,8 +3590,6 @@ pub unsafe extern "C" fn read_data_init(
 pub unsafe extern "C" fn read_data_term() {
     unsafe {
         let mut i: uint32_t = 0;
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut indn: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         JQUEUE.close();
         let mut st = READ_WORKER_POOL.lock_state();
         while st.total > 0 as uint32_t {
@@ -3591,16 +3607,13 @@ pub unsafe extern "C" fn read_data_term() {
         inode_global_lock();
         i = 0 as uint32_t;
         while i < IDHASHSIZE as uint32_t {
-            ind = indhash[i as usize];
-            // Null the bucket head so a later read_data_init cannot dangle
-            // (C freed and re-malloc'd the table, re-zeroing all heads).
-            indhash[i as usize] = ::core::ptr::null_mut::<inodedata>();
-            while !ind.is_null() {
-                indn = (*ind).next as *mut inodedata;
+            // Drain clears the bucket so a later read_data_init cannot
+            // dangle (C freed and re-malloc'd the table, re-zeroing all
+            // heads).
+            for ind in ::core::mem::take(&mut (*&raw mut indhash)[i as usize]) {
                 ind_lock(ind);
                 ind_unlock(ind);
                 drop(Box::from_raw(ind));
-                ind = indn;
             }
             i = i.wrapping_add(1);
         }
@@ -3707,22 +3720,15 @@ pub unsafe extern "C" fn read_data_offset_cmp(
 #[inline]
 unsafe extern "C" fn read_inode_free(mut indh: uint32_t, mut indf: *mut inodedata) {
     unsafe {
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut indp: *mut *mut inodedata = ::core::ptr::null_mut::<*mut inodedata>();
-        indp = &raw mut indhash[indh as usize];
-        loop {
-            ind = *indp;
-            if ind.is_null() {
-                break;
-            }
-            if ind == indf {
-                *indp = (*ind).next as *mut inodedata;
-                ind_lock(ind);
-                ind_unlock(ind);
-                drop(Box::from_raw(ind));
-                return;
-            }
-            indp = &raw mut (*ind).next as *mut *mut inodedata;
+        // C: pointer-to-pointer bucket walk unlinking indf. Pointer-identity
+        // scan + remove is the same unlink; the node is then destroyed with
+        // the same lock/unlock + Box::from_raw protocol as C.
+        let bucket = &mut (*&raw mut indhash)[indh as usize];
+        if let Some(pos) = bucket.iter().position(|&p| p == indf) {
+            let ind = bucket.remove(pos);
+            ind_lock(ind);
+            ind_unlock(ind);
+            drop(Box::from_raw(ind));
         }
     }
 }
@@ -3739,9 +3745,10 @@ pub unsafe extern "C" fn read_data(
         let mut ind: *mut inodedata = vid as *mut inodedata;
         let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         let mut rreqn: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        let mut rl: *mut rlist = ::core::ptr::null_mut::<rlist>();
-        let mut rhead: *mut rlist = ::core::ptr::null_mut::<rlist>();
-        let mut rtail: *mut *mut rlist = ::core::ptr::null_mut::<*mut rlist>();
+        // C: rlist *rhead, **rtail — built tail-append; crosses the vrhead
+        // void* ABI as a boxed Vec (see rlist_s).
+        let mut rlist_vec: Vec<rlist> = Vec::new();
+        let mut rls: *mut Vec<rlist> = ::core::ptr::null_mut::<Vec<rlist>>();
         let mut rbuffsize: uint64_t = 0;
         let mut blockstart: uint64_t = 0;
         let mut blockend: uint64_t = 0;
@@ -3832,18 +3839,22 @@ pub unsafe extern "C" fn read_data(
             }
             now = monotonic_seconds();
             reqno = 0 as uint32_t;
-            rreq = (*ind).reqhead;
-            while !rreq.is_null() {
+            let mut ri: usize = 0;
+            while ri < (&(*ind).reqs).len() {
+                rreq = (&(*ind).reqs)[ri];
                 if !((*rreq).mode as ::core::ffi::c_int == BREAK as ::core::ffi::c_int
                     || (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int)
                 {
                     reqno = reqno.wrapping_add(1);
                 }
-                rreq = (*rreq).next as *mut rrequest;
+                ri = ri.wrapping_add(1);
             }
-            rreq = (*ind).reqhead;
-            while !rreq.is_null() {
-                rreqn = (*rreq).next as *mut rrequest;
+            // C: rreq = ind->reqhead; while (rreq) { rreqn = rreq->next; ...
+            // rreq = rreqn; } — read_rreq_not_needed may delete the current
+            // node, in which case its successor shifted into slot ri.
+            ri = 0;
+            while ri < (&(*ind).reqs).len() {
+                rreq = (&(*ind).reqs)[ri];
                 if (*rreq).mode as ::core::ffi::c_int == BREAK as ::core::ffi::c_int
                     || (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int
                 {
@@ -3858,7 +3869,9 @@ pub unsafe extern "C" fn read_data(
                     read_rreq_not_needed(rreq);
                     reqno = reqno.wrapping_sub(1);
                 }
-                rreq = rreqn;
+                if (&(*ind).reqs).get(ri).copied() == Some(rreq) {
+                    ri = ri.wrapping_add(1);
+                }
             }
             ranges = get_ranges();
             etab = ranges.offset(1 as ::core::ffi::c_int as isize);
@@ -3869,8 +3882,9 @@ pub unsafe extern "C" fn read_data(
             let c2rust_fresh1 = edges;
             edges = edges.wrapping_add(1);
             *etab.offset(c2rust_fresh1 as isize) = lastbyte;
-            rreq = (*ind).reqhead;
-            while !rreq.is_null() {
+            ri = 0;
+            while ri < (&(*ind).reqs).len() {
+                rreq = (&(*ind).reqs)[ri];
                 if !((*rreq).mode as ::core::ffi::c_int == BREAK as ::core::ffi::c_int
                     || (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int)
                 {
@@ -3911,7 +3925,7 @@ pub unsafe extern "C" fn read_data(
                         }
                     }
                 }
-                rreq = (*rreq).next as *mut rrequest;
+                ri = ri.wrapping_add(1);
             }
             if edges > 2 as uint32_t {
                 qsort(
@@ -3970,13 +3984,14 @@ pub unsafe extern "C" fn read_data(
                 );
                 abort();
             };
-            rhead = ::core::ptr::null_mut::<rlist>();
-            rtail = &raw mut rhead;
             i = 0 as uint32_t;
             while i < edges.wrapping_sub(1 as uint32_t) {
                 added = 0 as uint8_t;
-                rreq = (*ind).reqhead;
-                while !rreq.is_null() && added as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+                ri = 0;
+                while ri < (&(*ind).reqs).len()
+                    && added as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                {
+                    rreq = (&(*ind).reqs)[ri];
                     if !((*rreq).mode as ::core::ffi::c_int == BREAK as ::core::ffi::c_int
                         || (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int)
                     {
@@ -3984,23 +3999,24 @@ pub unsafe extern "C" fn read_data(
                             && (*rreq).offset.wrapping_add((*rreq).leng as uint64_t)
                                 >= *etab.offset(i.wrapping_add(1 as uint32_t) as isize)
                         {
-                            rl = Box::into_raw(Box::new(rlist_s {
+                            // C: malloc rlist + *rtail link — tail append.
+                            rlist_vec.push(rlist_s {
                                 rreq,
                                 offsetadd: (*etab.offset(i as isize)).wrapping_sub((*rreq).offset)
                                     as uint32_t,
                                 reqleng: (*etab.offset(i.wrapping_add(1 as uint32_t) as isize))
                                     .wrapping_sub(*etab.offset(i as isize))
                                     as uint32_t,
-                                next: ::core::ptr::null_mut::<rlist_s>(),
-                            }));
-                            *rtail = rl;
-                            rtail = &raw mut (*rl).next as *mut *mut rlist;
+                            });
                             (*rreq).lcnt = (*rreq).lcnt.wrapping_add(1);
                             added = 1 as uint8_t;
                             if (*ind).readahead as ::core::ffi::c_int != 0
                                 && i == edges.wrapping_sub(2 as uint32_t)
                             {
-                                if (*rreq).next.is_null() && rbuffsize < maxreadaheadsize {
+                                // C: rreq->next == NULL — rreq is the tail.
+                                if ri.wrapping_add(1) == (&(*ind).reqs).len()
+                                    && rbuffsize < maxreadaheadsize
+                                {
                                     blockstart =
                                         (*rreq).offset.wrapping_add((*rreq).leng as uint64_t);
                                     blockend = blockstart.wrapping_add(
@@ -4038,8 +4054,11 @@ pub unsafe extern "C" fn read_data(
                                         abort();
                                     };
                                     raok = 1 as uint8_t;
-                                    rreqn = (*ind).reqhead;
-                                    while !rreqn.is_null() && raok as ::core::ffi::c_int != 0 {
+                                    let mut rj: usize = 0;
+                                    while rj < (&(*ind).reqs).len()
+                                        && raok as ::core::ffi::c_int != 0
+                                    {
+                                        rreqn = (&(*ind).reqs)[rj];
                                         if !((*rreqn).mode as ::core::ffi::c_int
                                             == BREAK as ::core::ffi::c_int
                                             || (*rreqn).mode as ::core::ffi::c_int
@@ -4054,7 +4073,7 @@ pub unsafe extern "C" fn read_data(
                                                 raok = 0 as uint8_t;
                                             }
                                         }
-                                        rreqn = (*rreqn).next as *mut rrequest;
+                                        rj = rj.wrapping_add(1);
                                     }
                                     if raok != 0 {
                                         if blockend <= (*ind).fleng {
@@ -4066,10 +4085,14 @@ pub unsafe extern "C" fn read_data(
                                                 (*ind).fleng,
                                             );
                                         }
+                                        // C: rreq->next != NULL &&
+                                        // rreq->next->next == NULL — rreq is
+                                        // second-to-last. len read live: a
+                                        // read-ahead rreq may have just been
+                                        // appended above.
                                         if blockstart.wrapping_rem(MFSCHUNKSIZE as uint64_t)
                                             == 0 as uint64_t
-                                            && !(*rreq).next.is_null()
-                                            && (*(*rreq).next).next.is_null()
+                                            && ri.wrapping_add(2) == (&(*ind).reqs).len()
                                             && rbuffsize < maxreadaheadsize
                                         {
                                             blockend = blockstart.wrapping_add(
@@ -4112,10 +4135,11 @@ pub unsafe extern "C" fn read_data(
                                                 abort();
                                             };
                                             raok = 1 as uint8_t;
-                                            rreqn = (*ind).reqhead;
-                                            while !rreqn.is_null()
+                                            let mut rj: usize = 0;
+                                            while rj < (&(*ind).reqs).len()
                                                 && raok as ::core::ffi::c_int != 0
                                             {
+                                                rreqn = (&(*ind).reqs)[rj];
                                                 if !((*rreqn).mode as ::core::ffi::c_int
                                                     == BREAK as ::core::ffi::c_int
                                                     || (*rreqn).mode as ::core::ffi::c_int
@@ -4130,7 +4154,7 @@ pub unsafe extern "C" fn read_data(
                                                         raok = 0 as uint8_t;
                                                     }
                                                 }
-                                                rreqn = (*rreqn).next as *mut rrequest;
+                                                rj = rj.wrapping_add(1);
                                             }
                                             if raok != 0 {
                                                 if blockend <= (*ind).fleng {
@@ -4153,21 +4177,18 @@ pub unsafe extern "C" fn read_data(
                             }
                         }
                     }
-                    rreq = (*rreq).next as *mut rrequest;
+                    ri = ri.wrapping_add(1);
                 }
                 if added as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                     blockstart = *etab.offset(i as isize);
                     blockend = *etab.offset(i.wrapping_add(1 as uint32_t) as isize);
                     while blockstart < blockend {
                         rreq = read_new_request(ind, &raw mut blockstart, blockend);
-                        rl = Box::into_raw(Box::new(rlist_s {
+                        rlist_vec.push(rlist_s {
                             rreq,
                             offsetadd: 0 as uint32_t,
                             reqleng: (*rreq).leng,
-                            next: ::core::ptr::null_mut::<rlist_s>(),
-                        }));
-                        *rtail = rl;
-                        rtail = &raw mut (*rl).next as *mut *mut rlist;
+                        });
                         (*rreq).lcnt = (*rreq).lcnt.wrapping_add(1);
                         if !(blockstart == blockend
                             && (*ind).readahead as ::core::ffi::c_int != 0
@@ -4212,8 +4233,9 @@ pub unsafe extern "C" fn read_data(
                             abort();
                         };
                         raok = 1 as uint8_t;
-                        rreqn = (*ind).reqhead;
-                        while !rreqn.is_null() && raok as ::core::ffi::c_int != 0 {
+                        let mut rj: usize = 0;
+                        while rj < (&(*ind).reqs).len() && raok as ::core::ffi::c_int != 0 {
+                            rreqn = (&(*ind).reqs)[rj];
                             if !((*rreqn).mode as ::core::ffi::c_int == BREAK as ::core::ffi::c_int
                                 || (*rreqn).mode as ::core::ffi::c_int
                                     == NOTNEEDED as ::core::ffi::c_int)
@@ -4225,7 +4247,7 @@ pub unsafe extern "C" fn read_data(
                                     raok = 0 as uint8_t;
                                 }
                             }
-                            rreqn = (*rreqn).next as *mut rrequest;
+                            rj = rj.wrapping_add(1);
                         }
                         if raok != 0 {
                             if blockend <= (*ind).fleng {
@@ -4239,13 +4261,20 @@ pub unsafe extern "C" fn read_data(
                 }
                 i = i.wrapping_add(1);
             }
-            *vrhead = rhead as *mut ::core::ffi::c_void;
+            // C: *vrhead = rhead — the list crosses the void* ABI as a
+            // boxed Vec; read_data_free_buff reclaims it. Tail-append build
+            // order above == C's list order, so the data-wait and iovec
+            // walks below see the same sequence.
+            rls = Box::into_raw(Box::new(rlist_vec));
+            *vrhead = rls as *mut ::core::ffi::c_void;
             cnt = 0 as uint32_t;
             *size = 0 as uint32_t;
-            rl = rhead;
-            while !rl.is_null() {
-                while !((*(*rl).rreq).mode as ::core::ffi::c_int == READY as ::core::ffi::c_int
-                    || (*(*rl).rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int)
+            let mut li: usize = 0;
+            while li < (&*rls).len() {
+                while !((*(&mut *rls)[li].rreq).mode as ::core::ffi::c_int
+                    == READY as ::core::ffi::c_int
+                    || (*(&mut *rls)[li].rreq).mode as ::core::ffi::c_int
+                        == NOTNEEDED as ::core::ffi::c_int)
                     && (*ind).status == 0 as ::core::ffi::c_int
                     && (*ind).closing as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                 {
@@ -4253,30 +4282,36 @@ pub unsafe extern "C" fn read_data(
                         // C: pthread_cond_timedwait on gettimeofday+usectimeout
                         // abstime; relative Duration is the identical timeout.
                         if ind_cond_timedwait(
-                            &raw const (*(*rl).rreq).cond,
+                            &raw const (*(&mut *rls)[li].rreq).cond,
                             ind,
                             std::time::Duration::from_micros(usectimeout),
                         ) {
                             (*ind).status = EIO;
                         }
                     } else {
-                        ind_cond_wait(&raw const (*(*rl).rreq).cond, ind);
+                        ind_cond_wait(&raw const (*(&mut *rls)[li].rreq).cond, ind);
                     }
                 }
                 if (*ind).status != 0 as ::core::ffi::c_int {
                     break;
                 }
-                if (*(*rl).rreq).rleng < (*rl).offsetadd.wrapping_add((*rl).reqleng) {
-                    if (*(*rl).rreq).rleng > (*rl).offsetadd {
+                if (*(&mut *rls)[li].rreq).rleng
+                    < (&mut *rls)[li]
+                        .offsetadd
+                        .wrapping_add((&mut *rls)[li].reqleng)
+                {
+                    if (*(&mut *rls)[li].rreq).rleng > (&mut *rls)[li].offsetadd {
                         cnt = cnt.wrapping_add(1);
-                        (*rl).reqleng = (*(*rl).rreq).rleng.wrapping_sub((*rl).offsetadd);
-                        *size = (*size).wrapping_add((*rl).reqleng);
+                        (&mut *rls)[li].reqleng = (*(&mut *rls)[li].rreq)
+                            .rleng
+                            .wrapping_sub((&mut *rls)[li].offsetadd);
+                        *size = (*size).wrapping_add((&mut *rls)[li].reqleng);
                     }
                     break;
                 } else {
                     cnt = cnt.wrapping_add(1);
-                    *size = (*size).wrapping_add((*rl).reqleng);
-                    rl = (*rl).next as *mut rlist;
+                    *size = (*size).wrapping_add((&mut *rls)[li].reqleng);
+                    li = li.wrapping_add(1);
                 }
             }
         }
@@ -4293,64 +4328,17 @@ pub unsafe extern "C" fn read_data(
             // freed by read_data_free_buff with the count passed by callers.
             *iov = Box::into_raw(Box::<[iovec]>::new_uninit_slice(cnt as usize).assume_init())
                 as *mut iovec;
-            rl = rhead;
+            // C: for (rl=rhead, i=0 ; i<cnt ; rl=rl->next, i++) with
+            // passert(rl). cnt <= list length by construction, so Vec
+            // indexing never leaves the list; a bounds violation panics
+            // (abort), matching passert. The mmap -1 branch was c2rust's
+            // passert macro expansion for malloc — Box never yields it.
             i = 0 as uint32_t;
             while i < cnt {
-                if rl.is_null() {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2573 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2573 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                } else if rl
-                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                        -1 as ::core::ffi::c_int as usize,
-                    ) as *mut rlist
-                {
-                    let mut _mfs_errorstring_21: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2573 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_21,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        2573 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_21,
-                    );
-                    abort();
-                }
+                let rl = &(&*rls)[i as usize];
                 (*(*iov).offset(i as isize)).iov_base =
-                    (*(*rl).rreq).data.offset((*rl).offsetadd as isize) as *mut ::core::ffi::c_void;
-                (*(*iov).offset(i as isize)).iov_len = (*rl).reqleng as size_t;
-                rl = (*rl).next as *mut rlist;
+                    (*rl.rreq).data.offset(rl.offsetadd as isize) as *mut ::core::ffi::c_void;
+                (*(*iov).offset(i as isize)).iov_len = rl.reqleng as size_t;
                 i = i.wrapping_add(1);
             }
             *iovcnt = i;
@@ -4372,22 +4360,22 @@ pub unsafe extern "C" fn read_data_free_buff(
 ) {
     unsafe {
         let mut ind: *mut inodedata = vid as *mut inodedata;
-        let mut rl: *mut rlist = ::core::ptr::null_mut::<rlist>();
-        let mut rln: *mut rlist = ::core::ptr::null_mut::<rlist>();
         let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        rl = vrhead as *mut rlist;
         ind_lock(ind);
-        while !rl.is_null() {
-            rln = (*rl).next as *mut rlist;
-            rreq = (*rl).rreq;
-            (*rreq).lcnt = (*rreq).lcnt.wrapping_sub(1);
-            if (*rreq).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                && (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int
-            {
-                read_delete_request(rreq);
+        if !vrhead.is_null() {
+            // C: rl = vrhead; while (rl) { rln = rl->next; ... free(rl);
+            // rl = rln; } — boxed Vec iterates in the same order and frees
+            // itself on drop.
+            let rls = Box::from_raw(vrhead as *mut Vec<rlist>);
+            for rl in rls.iter() {
+                rreq = rl.rreq;
+                (*rreq).lcnt = (*rreq).lcnt.wrapping_sub(1);
+                if (*rreq).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                    && (*rreq).mode as ::core::ffi::c_int == NOTNEEDED as ::core::ffi::c_int
+                {
+                    read_delete_request(rreq);
+                }
             }
-            drop(Box::from_raw(rl));
-            rl = rln;
         }
         if !iov.is_null() {
             // C: free(iov). Box<[iovec]> allocated with iovcnt entries.
@@ -4396,7 +4384,7 @@ pub unsafe extern "C" fn read_data_free_buff(
                 iovcnt as usize,
             )));
         }
-        if (*ind).closing as ::core::ffi::c_int != 0 && (*ind).reqhead.is_null() {
+        if (*ind).closing as ::core::ffi::c_int != 0 && (&(*ind).reqs).is_empty() {
             (*ind).closecond.notify_all();
         }
         (*ind).readers_cnt = (*ind).readers_cnt.wrapping_sub(1);
@@ -4430,17 +4418,18 @@ pub unsafe extern "C" fn read_inode_clear_cache(
         let mut indh: uint32_t = inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        let mut rreqn: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         inode_global_lock();
-        ind = indhash[indh as usize];
-        while !ind.is_null() {
+        let mut bi: usize = 0;
+        while bi < (&(*&raw mut indhash)[indh as usize]).len() {
+            let ind: *mut inodedata = (&(*&raw mut indhash)[indh as usize])[bi];
             if (*ind).inode == inode {
                 ind_lock(ind);
-                rreq = (*ind).reqhead;
-                while !rreq.is_null() {
-                    rreqn = (*rreq).next as *mut rrequest;
+                // C: for (rreq = ind->reqhead ; rreq ; rreq=rreqn) with
+                // rreqn captured pre-call — read_rreq_invalidate may delete
+                // the current node; its successor then shifted into slot ri.
+                let mut ri: usize = 0;
+                while ri < (&(*ind).reqs).len() {
+                    let rreq: *mut rrequest = (&(*ind).reqs)[ri];
                     if leng == 0 as uint64_t
                         && offset < (*rreq).offset.wrapping_add((*rreq).leng as uint64_t)
                         || offset.wrapping_add(leng) > (*rreq).offset
@@ -4448,11 +4437,13 @@ pub unsafe extern "C" fn read_inode_clear_cache(
                     {
                         read_rreq_invalidate(rreq);
                     }
-                    rreq = rreqn;
+                    if (&(*ind).reqs).get(ri).copied() == Some(rreq) {
+                        ri = ri.wrapping_add(1);
+                    }
                 }
                 ind_unlock(ind);
             }
-            ind = (*ind).next as *mut inodedata;
+            bi = bi.wrapping_add(1);
         }
         inode_global_unlock();
     }
@@ -4463,8 +4454,6 @@ pub unsafe extern "C" fn read_data_set_length_active(
     mut newlength: uint64_t,
 ) {
     unsafe {
-        let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        let mut rreqn: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         ind_lock(ind);
         (*ind).waiting_writers = (*ind).waiting_writers.wrapping_add(1);
         while (*ind).readers_cnt as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
@@ -4477,9 +4466,11 @@ pub unsafe extern "C" fn read_data_set_length_active(
         }
         (*ind).waiting_writers = (*ind).waiting_writers.wrapping_sub(1);
         (*ind).fleng = newlength;
-        rreq = (*ind).reqhead;
-        while !rreq.is_null() {
-            rreqn = (*rreq).next as *mut rrequest;
+        // C: for (rreq = ind->reqhead ; rreq ; rreq=rreqn) — same
+        // removal-during-iteration protocol as read_inode_clear_cache.
+        let mut ri: usize = 0;
+        while ri < (&(*ind).reqs).len() {
+            let rreq: *mut rrequest = (&(*ind).reqs)[ri];
             if (*rreq).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
             } else {
                 fprintf(
@@ -4502,9 +4493,11 @@ pub unsafe extern "C" fn read_data_set_length_active(
                 abort();
             };
             read_rreq_invalidate(rreq);
-            rreq = rreqn;
+            if (&(*ind).reqs).get(ri).copied() == Some(rreq) {
+                ri = ri.wrapping_add(1);
+            }
         }
-        if (*ind).closing as ::core::ffi::c_int != 0 && (*ind).reqhead.is_null() {
+        if (*ind).closing as ::core::ffi::c_int != 0 && (&(*ind).reqs).is_empty() {
             (*ind).closecond.notify_all();
         }
         if (*ind).waiting_writers as ::core::ffi::c_int > 0 as ::core::ffi::c_int {
@@ -4524,25 +4517,33 @@ pub unsafe extern "C" fn read_inode_set_length_active(
         let mut indh: uint32_t = inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut indn: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
         inode_global_lock();
-        ind = indhash[indh as usize];
-        while !ind.is_null() {
+        let mut bi: usize = 0;
+        while bi < (&(*&raw mut indhash)[indh as usize]).len() {
+            let ind: *mut inodedata = (&(*&raw mut indhash)[indh as usize])[bi];
             if (*ind).inode == inode {
                 (*ind).lcnt = (*ind).lcnt.wrapping_add(1);
                 inode_global_unlock();
                 read_data_set_length_active(ind, newlength);
                 inode_global_lock();
-                indn = (*ind).next as *mut inodedata;
+                // C: indn = ind->next — re-derived after relock. The bucket
+                // may have changed while unlocked, but ind itself is still
+                // linked: we hold an lcnt ref, and only the lcnt==0 path
+                // unlinks. Re-find ind's slot.
+                bi = (*&raw mut indhash)[indh as usize]
+                    .iter()
+                    .position(|&p| p == ind)
+                    .expect("read_inode_set_length_active: ind unlinked while referenced");
                 (*ind).lcnt = (*ind).lcnt.wrapping_sub(1);
                 if (*ind).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                     read_inode_free(indh, ind);
+                    // Removal shifted the successor into slot bi — rescan it.
+                } else {
+                    bi = bi.wrapping_add(1);
                 }
             } else {
-                indn = (*ind).next as *mut inodedata;
+                bi = bi.wrapping_add(1);
             }
-            ind = indn;
         }
         inode_global_unlock();
     }
@@ -4556,14 +4557,12 @@ pub unsafe extern "C" fn read_inode_set_length_passive(
         let mut indh: uint32_t = inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        let mut rreqn: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         let mut minfleng: uint64_t = 0;
         let mut maxfleng: uint64_t = 0;
         inode_global_lock();
-        ind = indhash[indh as usize];
-        while !ind.is_null() {
+        let mut bi: usize = 0;
+        while bi < (&(*&raw mut indhash)[indh as usize]).len() {
+            let ind: *mut inodedata = (&(*&raw mut indhash)[indh as usize])[bi];
             if (*ind).inode == inode {
                 ind_lock(ind);
                 if (*ind).fleng != newlength {
@@ -4574,21 +4573,26 @@ pub unsafe extern "C" fn read_inode_set_length_passive(
                         minfleng = newlength;
                         maxfleng = (*ind).fleng;
                     }
-                    rreq = (*ind).reqhead;
-                    while !rreq.is_null() {
-                        rreqn = (*rreq).next as *mut rrequest;
+                    // C: for (rreq = ind->reqhead ; rreq ; rreq=rreqn) —
+                    // same removal-during-iteration protocol as
+                    // read_inode_clear_cache.
+                    let mut ri: usize = 0;
+                    while ri < (&(*ind).reqs).len() {
+                        let rreq: *mut rrequest = (&(*ind).reqs)[ri];
                         if (*rreq).offset < maxfleng
                             && (*rreq).offset.wrapping_add((*rreq).leng as uint64_t) > minfleng
                         {
                             read_rreq_invalidate(rreq);
                         }
-                        rreq = rreqn;
+                        if (&(*ind).reqs).get(ri).copied() == Some(rreq) {
+                            ri = ri.wrapping_add(1);
+                        }
                     }
                     (*ind).fleng = newlength;
                 }
                 ind_unlock(ind);
             }
-            ind = (*ind).next as *mut inodedata;
+            bi = bi.wrapping_add(1);
         }
         inode_global_unlock();
     }
@@ -4614,19 +4618,16 @@ pub unsafe extern "C" fn read_data_new(
             waiting_writers: 0 as uint16_t,
             readers_cnt: 0 as uint16_t,
             lcnt: 0 as uint16_t,
-            reqhead: ::core::ptr::null_mut::<rrequest>(),
-            reqtail: ::core::ptr::null_mut::<*mut rrequest>(),
+            reqs: Vec::new(),
             closecond: std::sync::Condvar::new(),
             readerscond: std::sync::Condvar::new(),
             writerscond: std::sync::Condvar::new(),
             lock: std::sync::Mutex::new(()),
-            next: ::core::ptr::null_mut::<inodedata_s>(),
         }));
-        (*ind).reqtail = &raw mut (*ind).reqhead;
         inode_global_lock();
         (*ind).lcnt = 1 as uint16_t;
-        (*ind).next = indhash[indh as usize] as *mut inodedata_s;
-        indhash[indh as usize] = ind;
+        // C: ind->next = indhash[indh]; indhash[indh] = ind; — head insert.
+        (*&raw mut indhash)[indh as usize].insert(0, ind);
         inode_global_unlock();
         return ind as *mut ::core::ffi::c_void;
     }
@@ -4636,8 +4637,6 @@ pub unsafe extern "C" fn read_data_end(mut vid: *mut ::core::ffi::c_void) {
     unsafe {
         let mut indh: uint32_t = 0;
         let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        let mut rreqn: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
         ind = vid as *mut inodedata;
         indh = (*ind)
             .inode
@@ -4645,9 +4644,12 @@ pub unsafe extern "C" fn read_data_end(mut vid: *mut ::core::ffi::c_void) {
             .wrapping_rem(IDHASHSIZE as uint32_t);
         ind_lock(ind);
         (*ind).closing = 1 as uint8_t;
-        rreq = (*ind).reqhead;
-        while !rreq.is_null() {
-            rreqn = (*rreq).next as *mut rrequest;
+        // C: for (rreq = ind->reqhead ; rreq ; rreq=rreqn) with rreqn
+        // captured pre-delete — read_delete_request unlinks the current
+        // node; its successor shifted into slot ri.
+        let mut ri: usize = 0;
+        while ri < (&(*ind).reqs).len() {
+            let rreq: *mut rrequest = (&(*ind).reqs)[ri];
             if (*rreq).lcnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                 && !((*rreq).mode as ::core::ffi::c_int == BUSY as ::core::ffi::c_int
                     || (*rreq).mode as ::core::ffi::c_int == INQUEUE as ::core::ffi::c_int
@@ -4656,13 +4658,17 @@ pub unsafe extern "C" fn read_data_end(mut vid: *mut ::core::ffi::c_void) {
                     || (*rreq).mode as ::core::ffi::c_int == FILLED as ::core::ffi::c_int)
             {
                 read_delete_request(rreq);
+            } else {
+                ri = ri.wrapping_add(1);
             }
-            rreq = rreqn;
         }
-        while !(*ind).reqhead.is_null() {
-            if (*(*ind).reqhead).waitingworker != 0 {
+        // C: while (ind->reqhead != NULL) { wake reqhead->waitingworker;
+        // cond_wait; } — the list head is reqs[0].
+        while !(&(*ind).reqs).is_empty() {
+            let head: *mut rrequest = (&(*ind).reqs)[0];
+            if (*head).waitingworker != 0 {
                 if write(
-                    (*(*ind).reqhead).wakeup_fd,
+                    (*head).wakeup_fd,
                     b" \0".as_ptr() as *const ::core::ffi::c_char as *const ::core::ffi::c_void,
                     1 as size_t,
                 ) != 1 as ssize_t
@@ -4673,8 +4679,8 @@ pub unsafe extern "C" fn read_data_end(mut vid: *mut ::core::ffi::c_void) {
                         b"can't write to pipe !!!\0".as_ptr() as *const ::core::ffi::c_char,
                     );
                 }
-                (*(*ind).reqhead).waitingworker = 0 as uint8_t;
-                (*(*ind).reqhead).wakeup_fd = -1 as ::core::ffi::c_int;
+                (*head).waitingworker = 0 as uint8_t;
+                (*head).wakeup_fd = -1 as ::core::ffi::c_int;
             }
             ind_cond_wait(&raw const (*ind).closecond, ind);
         }
