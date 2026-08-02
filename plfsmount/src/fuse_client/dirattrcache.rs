@@ -267,45 +267,6 @@ unsafe fn namehash_invalidate(
     }
 }
 
-fn registry_find(parent: uint32_t, ctx: *const fuse_ctx) -> Vec<usize> {
-    let g = REGISTRY.lock().unwrap();
-    g.iter()
-        .copied()
-        .filter(|&h| {
-            let d = unsafe { &*(h as *const DirCache) };
-            // SAFETY: handle validity is the caller's contract (dcache_new
-            // → dcache_release); registry holds only live handles.
-            d.parent == parent
-                && imp::ctx_matches(
-                    unsafe { (*ctx).pid },
-                    unsafe { (*ctx).uid },
-                    unsafe { (*ctx).gid },
-                    d.pid,
-                    d.uid,
-                    d.gid,
-                )
-        })
-        .collect()
-}
-
-fn registry_all_ctx(ctx: *const fuse_ctx) -> Vec<usize> {
-    let g = REGISTRY.lock().unwrap();
-    g.iter()
-        .copied()
-        .filter(|&h| {
-            let d = unsafe { &*(h as *const DirCache) };
-            imp::ctx_matches(
-                unsafe { (*ctx).pid },
-                unsafe { (*ctx).uid },
-                unsafe { (*ctx).gid },
-                d.pid,
-                d.uid,
-                d.gid,
-            )
-        })
-        .collect()
-}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dcache_new(
     ctx: *const fuse_ctx,
@@ -399,9 +360,23 @@ pub unsafe extern "C" fn dcache_lookup(
     inode: *mut uint32_t,
     attr: *mut uint8_t,
 ) -> uint8_t {
-    for h in registry_find(parent, ctx) {
-        // SAFETY: live handle; blobs alive.
+    // Keep registry lock while holding each cache lock. dcache_release uses
+    // same lock before freeing a handle; raw handles cannot outlive this walk.
+    let registry = REGISTRY.lock().unwrap();
+    for &h in registry.iter() {
         let d = unsafe { &*(h as *const DirCache) };
+        if d.parent != parent
+            || !imp::ctx_matches(
+                unsafe { (*ctx).pid },
+                unsafe { (*ctx).uid },
+                unsafe { (*ctx).gid },
+                d.pid,
+                d.uid,
+                d.gid,
+            )
+        {
+            continue;
+        }
         let mut inner = d.inner.lock().unwrap();
         if let Some((ino, rec)) = unsafe { namehash_get(&mut inner, d.attrsize, nleng, name) } {
             unsafe {
@@ -420,9 +395,19 @@ pub unsafe extern "C" fn dcache_getattr(
     inode: uint32_t,
     attr: *mut uint8_t,
 ) -> uint8_t {
-    for h in registry_all_ctx(ctx) {
-        // SAFETY: live handle; blobs alive.
+    let registry = REGISTRY.lock().unwrap();
+    for &h in registry.iter() {
         let d = unsafe { &*(h as *const DirCache) };
+        if !imp::ctx_matches(
+            unsafe { (*ctx).pid },
+            unsafe { (*ctx).uid },
+            unsafe { (*ctx).gid },
+            d.pid,
+            d.uid,
+            d.gid,
+        ) {
+            continue;
+        }
         let mut inner = d.inner.lock().unwrap();
         if let Some(rec) = unsafe { inodehash_get(&mut inner, d.attrsize, inode) } {
             unsafe {
@@ -436,9 +421,8 @@ pub unsafe extern "C" fn dcache_getattr(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dcache_setattr(inode: uint32_t, attr: *const uint8_t) {
-    let all: Vec<usize> = REGISTRY.lock().unwrap().clone();
-    for h in all {
-        // SAFETY: live handle; blobs alive.
+    let registry = REGISTRY.lock().unwrap();
+    for &h in registry.iter() {
         let d = unsafe { &*(h as *const DirCache) };
         let mut inner = d.inner.lock().unwrap();
         unsafe {
@@ -449,9 +433,8 @@ pub unsafe extern "C" fn dcache_setattr(inode: uint32_t, attr: *const uint8_t) {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dcache_invalidate_attr(inode: uint32_t) {
-    let all: Vec<usize> = REGISTRY.lock().unwrap().clone();
-    for h in all {
-        // SAFETY: live handle; blobs alive.
+    let registry = REGISTRY.lock().unwrap();
+    for &h in registry.iter() {
         let d = unsafe { &*(h as *const DirCache) };
         let mut inner = d.inner.lock().unwrap();
         unsafe {
@@ -466,20 +449,12 @@ pub unsafe extern "C" fn dcache_invalidate_name(
     nleng: uint8_t,
     name: *const uint8_t,
 ) {
-    let all: Vec<usize> = {
-        let g = REGISTRY.lock().unwrap();
-        g.iter()
-            .copied()
-            .filter(|&h| {
-                // SAFETY: live handle.
-                let d = unsafe { &*(h as *const DirCache) };
-                d.parent == parent
-            })
-            .collect()
-    };
-    for h in all {
-        // SAFETY: live handle; blobs alive.
+    let registry = REGISTRY.lock().unwrap();
+    for &h in registry.iter() {
         let d = unsafe { &*(h as *const DirCache) };
+        if d.parent != parent {
+            continue;
+        }
         let mut inner = d.inner.lock().unwrap();
         unsafe {
             namehash_invalidate(&mut inner, d.attrsize, nleng, name);
