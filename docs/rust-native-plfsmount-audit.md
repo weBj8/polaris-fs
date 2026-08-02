@@ -77,7 +77,7 @@ checked `Arc<FileInfo>` registry with Rust state guards and open waiters.
 Verification for this wave:
 
 - `cargo test --release -p plfsclient`: 12 passed;
-- `cargo test --release -p plfsmount --lib`: 95 passed after dirbuf/finfo/groups waves;
+- `cargo test --release -p plfsmount --lib`: 96 passed after dirbuf/finfo/groups/ACL waves;
 - `cargo test --release -p plfsmount --bin plfsmount`: 2 passed;
 - `cargo test --release -p plfsbdev`: build and 0 tests passed;
 - required-FUSE-path workspace release build: passed;
@@ -119,6 +119,6 @@ The first native-thread wave now uses `std::thread::Builder`, `JoinHandle`,
 
 POSIX signal-mask calls remain at the system boundary. These modules no longer
 use pthread start-routine or pthread join protocols internally. `mfs_fuse` has
-no remaining pthread mutex/condition protocol; its ACL scratch storage still
-uses pthread TLS. Shared IO backends and the separate bdev data path retain
-pthread/raw state for later waves.
+no remaining pthread mutex/condition or pthread TLS protocol; ACL scratch data
+uses Rust thread-local ownership. Shared IO backends and the separate bdev data
+path retain pthread/raw state for later waves.

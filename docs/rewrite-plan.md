@@ -221,8 +221,8 @@ smoke all pass at commit `7e4742d`.
 
 Current continuation: `mfs_fuse` dirbuf and finfo raw registries plus pthread
 lock/condition protocols have been replaced by typed Rust ownership. Not
-complete: ACL pthread TLS, pcqueue boundary ownership, shared
-readdata/writedata backends, and remaining bdev data-path migration. P4 remains
+complete: pcqueue boundary ownership, shared readdata/writedata backends, and
+remaining bdev data-path migration. P4 remains
 partial.
 
 ## Exit criteria per phase
