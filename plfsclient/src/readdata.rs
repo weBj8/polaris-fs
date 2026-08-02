@@ -211,7 +211,8 @@ pub struct _cspri {
 pub type cspri = _cspri;
 pub type rrequest = rrequest_s;
 // std::sync primitives replace pthread_cond_t: futex-based, no heap
-// resources, initialized in place with ptr::write after malloc.
+// resources. Struct is Box-allocated in read_new_request (payload `data`
+// stays libc malloc'd); freed via Box::from_raw in read_delete_request.
 #[repr(C)]
 pub struct rrequest_s {
     pub ind: *mut inodedata_s,
@@ -234,8 +235,8 @@ pub struct rrequest_s {
     pub prev: *mut *mut rrequest_s,
 }
 // std::sync primitives replace pthread_cond_t/pthread_mutex_t (see
-// rrequest_s note). Struct stays malloc'd; lock/conds are ptr::write
-// initialized in read_data_new.
+// rrequest_s note). Struct is Box-allocated in read_data_new; freed via
+// Box::from_raw in read_inode_free / read_data_term.
 #[repr(C)]
 pub struct inodedata_s {
     pub inode: uint32_t,
@@ -846,8 +847,8 @@ impl ReadWorkerPool {
 static JQUEUE: QueueSlot<OwnedJob<rrequest>> = QueueSlot::new();
 
 unsafe fn read_queue_put(rreq: *mut rrequest) {
-    // SAFETY: every enqueue receives one live malloc allocation. Queue owns it
-    // until dequeue; on closed/missing queue it is freed here, matching C where
+    // SAFETY: every enqueue receives one live Box allocation. Queue owns it
+    // until dequeue; on closed/missing queue it is dropped here, matching C where
     // an unbounded queue always enqueued and queue_delete freed leftovers.
     let job = unsafe { OwnedJob::from_raw(rreq) };
     if let Some(queue) = JQUEUE.get() {
@@ -946,70 +947,8 @@ unsafe extern "C" fn read_new_request(
             chunkleng = blockend.wrapping_sub(*offset) as uint32_t;
             *offset = blockend;
         }
-        let mut rreq: *mut rrequest = ::core::ptr::null_mut::<rrequest>();
-        rreq = malloc(::core::mem::size_of::<rrequest>()) as *mut rrequest;
-        if rreq.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                329 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                329 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if rreq
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut rrequest
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                329 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                329 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        (*rreq).ind = ind as *mut inodedata_s;
-        (*rreq).modified = monotonic_seconds();
-        (*rreq).wakeup_fd = -1 as ::core::ffi::c_int;
-        (*rreq).waitingworker = 0 as uint8_t;
-        (*rreq).offset = chunkoffset;
-        (*rreq).leng = chunkleng;
-        (*rreq).chindx = chindx;
-        (*rreq).rleng = 0 as uint32_t;
-        (*rreq).currentpos = (chunkoffset & MFSCHUNKMASK as uint64_t) as uint32_t;
-        memset(
-            &raw mut (*rreq).splitcurrpos as *mut uint32_t as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<[uint32_t; 8]>(),
-        );
-        (*rreq).mode = NEW as ::core::ffi::c_int as uint8_t;
-        (*rreq).trycnt = 0 as uint32_t;
-        (*rreq).refresh = 0 as uint8_t;
-        (*rreq).lcnt = 0 as uint16_t;
-        (*rreq).data = malloc(chunkleng as size_t) as *mut uint8_t;
-        if (*rreq).data.is_null() {
+        let data: *mut uint8_t = malloc(chunkleng as size_t) as *mut uint8_t;
+        if data.is_null() {
             fprintf(
                 stderr,
                 b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
@@ -1026,7 +965,7 @@ unsafe extern "C" fn read_new_request(
                 b"rreq->data\0".as_ptr() as *const ::core::ffi::c_char,
             );
             abort();
-        } else if (*rreq).data
+        } else if data
             == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
                 -1 as ::core::ffi::c_int as usize,
             ) as *mut uint8_t
@@ -1051,7 +990,26 @@ unsafe extern "C" fn read_new_request(
             );
             abort();
         }
-        std::ptr::write(&raw mut (*rreq).cond, std::sync::Condvar::new());
+        let mut rreq: *mut rrequest = Box::into_raw(Box::new(rrequest_s {
+            ind: ind as *mut inodedata_s,
+            wakeup_fd: -1 as ::core::ffi::c_int,
+            waitingworker: 0 as uint8_t,
+            data,
+            offset: chunkoffset,
+            leng: chunkleng,
+            rleng: 0 as uint32_t,
+            currentpos: (chunkoffset & MFSCHUNKMASK as uint64_t) as uint32_t,
+            splitcurrpos: [0 as uint32_t; 8],
+            chindx,
+            trycnt: 0 as uint32_t,
+            modified: monotonic_seconds(),
+            refresh: 0 as uint8_t,
+            mode: NEW as ::core::ffi::c_int as uint8_t,
+            lcnt: 0 as uint16_t,
+            cond: std::sync::Condvar::new(),
+            next: ::core::ptr::null_mut::<rrequest_s>(),
+            prev: ::core::ptr::null_mut::<*mut rrequest_s>(),
+        }));
         if ((*ind).inqueue as ::core::ffi::c_int) < MAXREQINQUEUE {
             (*rreq).mode = INQUEUE as ::core::ffi::c_int as uint8_t;
             read_enqueue(rreq);
@@ -1086,7 +1044,7 @@ unsafe extern "C" fn read_delete_request(mut rreq: *mut rrequest) {
         )
         .wrapping_sub(c2rust_rhs);
         free((*rreq).data as *mut ::core::ffi::c_void);
-        free(rreq as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(rreq));
     }
 }
 #[unsafe(no_mangle)]
@@ -3688,7 +3646,7 @@ pub unsafe extern "C" fn read_data_term() {
                 indn = (*ind).next as *mut inodedata;
                 ind_lock(ind);
                 ind_unlock(ind);
-                free(ind as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(ind));
                 ind = indn;
             }
             i = i.wrapping_add(1);
@@ -3808,7 +3766,7 @@ unsafe extern "C" fn read_inode_free(mut indh: uint32_t, mut indf: *mut inodedat
                 *indp = (*ind).next as *mut inodedata;
                 ind_lock(ind);
                 ind_unlock(ind);
-                free(ind as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(ind));
                 return;
             }
             indp = &raw mut (*ind).next as *mut *mut inodedata;
@@ -4073,65 +4031,15 @@ pub unsafe extern "C" fn read_data(
                             && (*rreq).offset.wrapping_add((*rreq).leng as uint64_t)
                                 >= *etab.offset(i.wrapping_add(1 as uint32_t) as isize)
                         {
-                            rl = malloc(::core::mem::size_of::<rlist>()) as *mut rlist;
-                            if rl.is_null() {
-                                fprintf(
-                                    stderr,
-                                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    2395 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                );
-                                mfs_log(
-                                    MFSLOG_SYSLOG,
-                                    MFSLOG_ERR,
-                                    b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    2395 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                );
-                                abort();
-                            } else if rl
-                                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                    -1 as ::core::ffi::c_int as usize,
-                                ) as *mut rlist
-                            {
-                                let mut _mfs_errorstring_16: *const ::core::ffi::c_char =
-                                    strerr(*__errno_location());
-                                mfs_log(
-                                    MFSLOG_SYSLOG,
-                                    MFSLOG_ERR,
-                                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    2395 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                    _mfs_errorstring_16,
-                                );
-                                fprintf(
-                                    stderr,
-                                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                        as *const ::core::ffi::c_char,
-                                    2395 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                    _mfs_errorstring_16,
-                                );
-                                abort();
-                            }
-                            (*rl).rreq = rreq;
-                            (*rl).offsetadd =
-                                (*etab.offset(i as isize)).wrapping_sub((*rreq).offset) as uint32_t;
-                            (*rl).reqleng = (*etab.offset(i.wrapping_add(1 as uint32_t) as isize))
-                                .wrapping_sub(*etab.offset(i as isize))
-                                as uint32_t;
-                            (*rl).next = ::core::ptr::null_mut::<rlist_s>();
+                            rl = Box::into_raw(Box::new(rlist_s {
+                                rreq,
+                                offsetadd: (*etab.offset(i as isize)).wrapping_sub((*rreq).offset)
+                                    as uint32_t,
+                                reqleng: (*etab.offset(i.wrapping_add(1 as uint32_t) as isize))
+                                    .wrapping_sub(*etab.offset(i as isize))
+                                    as uint32_t,
+                                next: ::core::ptr::null_mut::<rlist_s>(),
+                            }));
                             *rtail = rl;
                             rtail = &raw mut (*rl).next as *mut *mut rlist;
                             (*rreq).lcnt = (*rreq).lcnt.wrapping_add(1);
@@ -4299,62 +4207,12 @@ pub unsafe extern "C" fn read_data(
                     blockend = *etab.offset(i.wrapping_add(1 as uint32_t) as isize);
                     while blockstart < blockend {
                         rreq = read_new_request(ind, &raw mut blockstart, blockend);
-                        rl = malloc(::core::mem::size_of::<rlist>()) as *mut rlist;
-                        if rl.is_null() {
-                            fprintf(
-                                stderr,
-                                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2468 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2468 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            abort();
-                        } else if rl
-                            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                -1 as ::core::ffi::c_int as usize,
-                            ) as *mut rlist
-                        {
-                            let mut _mfs_errorstring_17: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2468 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring_17,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                2468 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"rl\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring_17,
-                            );
-                            abort();
-                        }
-                        (*rl).rreq = rreq;
-                        (*rl).offsetadd = 0 as uint32_t;
-                        (*rl).reqleng = (*rreq).leng;
-                        (*rl).next = ::core::ptr::null_mut::<rlist_s>();
+                        rl = Box::into_raw(Box::new(rlist_s {
+                            rreq,
+                            offsetadd: 0 as uint32_t,
+                            reqleng: (*rreq).leng,
+                            next: ::core::ptr::null_mut::<rlist_s>(),
+                        }));
                         *rtail = rl;
                         rtail = &raw mut (*rl).next as *mut *mut rlist;
                         (*rreq).lcnt = (*rreq).lcnt.wrapping_add(1);
@@ -4619,7 +4477,7 @@ pub unsafe extern "C" fn read_data_free_buff(
             {
                 read_delete_request(rreq);
             }
-            free(rl as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(rl));
             rl = rln;
         }
         if !iov.is_null() {
@@ -4831,65 +4689,26 @@ pub unsafe extern "C" fn read_data_new(
         let mut indh: uint32_t = inode
             .wrapping_mul(0xb239fb71 as uint32_t)
             .wrapping_rem(IDHASHSIZE as uint32_t);
-        let mut ind: *mut inodedata = ::core::ptr::null_mut::<inodedata>();
-        ind = malloc(::core::mem::size_of::<inodedata>()) as *mut inodedata;
-        if ind.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                2769 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                2769 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if ind
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut inodedata
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                2769 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                2769 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        (*ind).inode = inode;
-        (*ind).seqdata = 0 as uint32_t;
-        (*ind).fleng = fleng;
-        (*ind).status = 0 as ::core::ffi::c_int;
-        (*ind).inqueue = 0 as uint8_t;
-        (*ind).readahead = 0 as uint8_t;
-        (*ind).lastoffset = 0 as uint64_t;
-        (*ind).closing = 0 as uint8_t;
-        (*ind).waiting_writers = 0 as uint16_t;
-        (*ind).readers_cnt = 0 as uint16_t;
-        std::ptr::write(&raw mut (*ind).readerscond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).writerscond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).closecond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).lock, std::sync::Mutex::new(()));
-        (*ind).reqhead = ::core::ptr::null_mut::<rrequest>();
+        let mut ind: *mut inodedata = Box::into_raw(Box::new(inodedata_s {
+            inode,
+            seqdata: 0 as uint32_t,
+            fleng,
+            status: 0 as ::core::ffi::c_int,
+            closing: 0 as uint8_t,
+            inqueue: 0 as uint8_t,
+            readahead: 0 as uint8_t,
+            lastoffset: 0 as uint64_t,
+            waiting_writers: 0 as uint16_t,
+            readers_cnt: 0 as uint16_t,
+            lcnt: 0 as uint16_t,
+            reqhead: ::core::ptr::null_mut::<rrequest>(),
+            reqtail: ::core::ptr::null_mut::<*mut rrequest>(),
+            closecond: std::sync::Condvar::new(),
+            readerscond: std::sync::Condvar::new(),
+            writerscond: std::sync::Condvar::new(),
+            lock: std::sync::Mutex::new(()),
+            next: ::core::ptr::null_mut::<inodedata_s>(),
+        }));
         (*ind).reqtail = &raw mut (*ind).reqhead;
         inode_global_lock();
         (*ind).lcnt = 1 as uint16_t;

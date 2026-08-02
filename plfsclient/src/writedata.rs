@@ -757,7 +757,7 @@ impl WriteWorkerPool {
 static JQUEUE: QueueSlot<OwnedJob<chunkdata>> = QueueSlot::new();
 
 unsafe fn write_queue_put(chd: *mut chunkdata) {
-    // SAFETY: every enqueue receives one live malloc allocation. Queue owns it
+    // SAFETY: every enqueue receives one live Box allocation. Queue owns it
     // until dequeue; on closed/missing queue it is freed here, matching C where
     // an unbounded queue always enqueued and queue_delete freed leftovers.
     let job = unsafe { OwnedJob::from_raw(chd) };
@@ -1051,63 +1051,21 @@ pub unsafe extern "C" fn write_new_chunkdata(
     mut chindx: uint32_t,
 ) -> *mut chunkdata {
     unsafe {
-        let mut chd: *mut chunkdata = ::core::ptr::null_mut::<chunkdata>();
-        chd = malloc(::core::mem::size_of::<chunkdata>()) as *mut chunkdata;
-        if chd.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                436 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"chd\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                436 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"chd\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if chd
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut chunkdata
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                436 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"chd\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                436 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"chd\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        (*chd).chindx = chindx;
-        (*chd).wakeup_fd = -1 as ::core::ffi::c_int;
-        (*chd).datachainhead = ::core::ptr::null_mut::<cblock>();
-        (*chd).datachaintail = ::core::ptr::null_mut::<cblock>();
-        (*chd).waitingworker = 0 as uint8_t;
-        (*chd).chunkready = 0 as uint8_t;
-        (*chd).unbreakable = 0 as uint8_t;
-        (*chd).continueop = 0 as uint8_t;
-        (*chd).superuser = 0 as uint8_t;
-        (*chd).trycnt = 0 as uint16_t;
-        (*chd).parent = ind as *mut inodedata_s;
-        (*chd).next = ::core::ptr::null_mut::<chunkdata_s>();
-        (*chd).prev = (*ind).chunkstail as *mut *mut chunkdata_s;
+        let mut chd: *mut chunkdata = Box::into_raw(Box::new(chunkdata_s {
+            chindx,
+            trycnt: 0 as uint16_t,
+            waitingworker: 0 as uint8_t,
+            chunkready: 0 as uint8_t,
+            unbreakable: 0 as uint8_t,
+            continueop: 0 as uint8_t,
+            superuser: 0 as uint8_t,
+            wakeup_fd: -1 as ::core::ffi::c_int,
+            datachainhead: ::core::ptr::null_mut::<cblock>(),
+            datachaintail: ::core::ptr::null_mut::<cblock>(),
+            parent: ind as *mut inodedata_s,
+            next: ::core::ptr::null_mut::<chunkdata_s>(),
+            prev: (*ind).chunkstail as *mut *mut chunkdata_s,
+        }));
         *(*ind).chunkstail = chd;
         (*ind).chunkstail = &raw mut (*chd).next as *mut *mut chunkdata;
         if (*ind).chunksnext.is_null() {
@@ -1127,7 +1085,7 @@ pub unsafe extern "C" fn write_free_chunkdata(mut chd: *mut chunkdata) {
         }
         (*(*chd).parent).chunkscnt = (*(*chd).parent).chunkscnt.wrapping_sub(1);
         write_test_chunkdata((*chd).parent as *mut inodedata);
-        free(chd as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(chd));
     }
 }
 #[unsafe(no_mangle)]

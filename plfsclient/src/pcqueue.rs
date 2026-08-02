@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::ptr::NonNull;
 use std::sync::{Arc, Condvar, Mutex};
 
 struct State<T> {
@@ -58,39 +57,28 @@ impl<T> Default for JobQueue<T> {
     }
 }
 
-/// Owns one allocation created by libc `malloc` without interpreting its contents.
-pub struct OwnedJob<T> {
-    ptr: NonNull<T>,
-}
+/// Owns one allocation created by `Box::into_raw` without interpreting its contents.
+pub struct OwnedJob<T>(Box<T>);
 
 impl<T> OwnedJob<T> {
     /// # Safety
     ///
-    /// `ptr` must be a non-null, uniquely owned allocation from libc `malloc`.
-    /// No other owner may free it until ownership is returned by [`Self::into_raw`].
+    /// `ptr` must be a non-null, uniquely owned allocation from `Box::into_raw`.
+    /// No other owner may drop it until ownership is returned by [`Self::into_raw`].
     pub unsafe fn from_raw(ptr: *mut T) -> Self {
-        Self {
-            ptr: NonNull::new(ptr).expect("queued job pointer must not be null"),
-        }
+        assert!(!ptr.is_null(), "queued job pointer must not be null");
+        // SAFETY: caller guarantees `ptr` came from Box::into_raw and transfers ownership.
+        Self(unsafe { Box::from_raw(ptr) })
     }
 
     pub fn into_raw(self) -> *mut T {
-        let ptr = self.ptr.as_ptr();
-        std::mem::forget(self);
-        ptr
+        Box::into_raw(self.0)
     }
 }
 
 // SAFETY: wrapper transfers unique allocation ownership between threads and never
 // dereferences T. Consumer must uphold T's synchronization protocol after into_raw.
 unsafe impl<T> Send for OwnedJob<T> {}
-
-impl<T> Drop for OwnedJob<T> {
-    fn drop(&mut self) {
-        // SAFETY: from_raw requires a uniquely owned libc allocation.
-        unsafe { libc::free(self.ptr.as_ptr().cast()) };
-    }
-}
 
 pub(crate) struct QueueSlot<T> {
     queue: Mutex<Option<Arc<JobQueue<T>>>>,
