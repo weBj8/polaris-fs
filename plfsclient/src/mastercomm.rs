@@ -220,7 +220,8 @@ pub struct _threc {
     pub receiving: uint8_t,
     pub rcvd_cmd: uint32_t,
     pub packetid: uint32_t,
-    pub next: *mut _threc,
+    // C: struct _threc *next (threchash bucket + threcfree chain) —
+    // replaced by the threchash/threcfree Vec collections below.
 }
 pub type threc = _threc;
 #[derive(Copy, Clone)]
@@ -231,7 +232,8 @@ pub struct _amtime_file {
     pub mtimeage: uint16_t,
     pub atime: uint64_t,
     pub mtime: uint64_t,
-    pub next: *mut _amtime_file,
+    // C: struct _amtime_file *next (amtime_hash bucket chain) — replaced
+    // by per-bucket Vec<Box<amtime_file>>.
 }
 pub type amtime_file = _amtime_file;
 #[derive(Copy, Clone)]
@@ -241,9 +243,10 @@ pub struct _acquired_file {
     pub cnt: uint16_t,
     pub age: uint8_t,
     pub dentry: uint8_t,
-    pub next: *mut _acquired_file,
-    pub lrunext: *mut _acquired_file,
-    pub lruprev: *mut *mut _acquired_file,
+    // C: struct _acquired_file *next (af_hash bucket chain) and
+    // lrunext/lruprev (LRU) — replaced by per-bucket Vec plus the af_lru
+    // VecDeque. in_lru replaces C's `lruprev != NULL` membership test.
+    pub in_lru: bool,
 }
 pub type acquired_file = _acquired_file;
 pub type C2Rust_Unnamed_0 = ::core::ffi::c_uint;
@@ -544,18 +547,39 @@ pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const MFSLOG_SYSLOG_STDERR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 pub const CONNECT_TIMEOUT: ::core::ffi::c_int = 2000 as ::core::ffi::c_int;
 pub const THRECHASHSIZE: ::core::ffi::c_int = 256 as ::core::ffi::c_int;
-static mut threchash: [*mut threc; 256] = [::core::ptr::null_mut::<threc>(); 256];
-static mut threcfree: *mut threc = ::core::ptr::null_mut::<threc>();
+// Intrusive-list conversion (C: threchash buckets + threcfree chained via
+// _threc.next, mastercomm.c:113-114). threc node addresses are stashed raw
+// across the extern "C" ABI (fs_get_my_threc/fs_get_threc_by_id return *mut
+// threc, kept in the MY_THREC TLS slot, passed to every fs_* caller), so
+// nodes stay Box::into_raw'd and these collections only hold raw handles
+// for enumeration. Buckets keep C's head-insert (index 0); threcfree is a
+// LIFO stack exactly as C (head push on free, head pop on alloc).
+static mut threchash: [Vec<*mut threc>; 256] = [const { Vec::new() }; 256];
+static mut threcfree: Vec<*mut threc> = Vec::new();
 static mut threcnextid: uint16_t = 0 as uint16_t;
 pub const AMTIME_HASH_SIZE: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 pub const AMTIME_MAX_AGE: ::core::ffi::c_int = 10 as ::core::ffi::c_int;
-static mut amtime_hash: [*mut amtime_file; 4096] = [::core::ptr::null_mut::<amtime_file>(); 4096];
+// C: amtime_hash buckets chained via _amtime_file.next (mastercomm.c:148).
+// No raw amtime_file handle ever leaves this module (fs_atime/fs_mtime/...
+// all take inode), so buckets own the nodes. insert(0, ..) preserves C's
+// head-insert: fs_send_amtime_inodes emits the AMTIME_INODES packet in
+// bucket order, keeping wire bytes identical. ponytail: insert(0) is
+// O(bucket len); buckets stay short by design (4096 buckets), switch to
+// VecDeque only if a profile says otherwise.
+static mut amtime_hash: [Vec<Box<amtime_file>>; 4096] = [const { Vec::new() }; 4096];
 pub const ACQFILES_HASH_SIZE: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 pub const ACQFILES_LRU_LIMIT: ::core::ffi::c_int = 5000 as ::core::ffi::c_int;
 pub const ACQFILES_MAX_AGE: ::core::ffi::c_int = 10 as ::core::ffi::c_int;
-static mut af_hash: [*mut acquired_file; 4096] = [::core::ptr::null_mut::<acquired_file>(); 4096];
-static mut af_lrutail: *mut *mut acquired_file = ::core::ptr::null_mut::<*mut acquired_file>();
-static mut af_lruhead: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
+// C: af_hash buckets via _acquired_file.next plus af_lruhead/af_lrutail via
+// lrunext/lruprev (mastercomm.c:163-165). No raw acquired_file handle
+// leaves this module either, so buckets own the nodes; af_lru holds raw
+// handles into them (Box pointee addresses never move, and every site
+// removes a node from af_lru before dropping its bucket slot). ponytail:
+// LRU removal is an O(n) retain scan, n <= ACQFILES_LRU_LIMIT (5000);
+// upgrade to index-based links if profiling ever flags it.
+static mut af_hash: [Vec<Box<acquired_file>>; 4096] = [const { Vec::new() }; 4096];
+static mut af_lru: std::collections::VecDeque<*mut acquired_file> =
+    std::collections::VecDeque::new();
 static mut af_lru_cnt: uint32_t = 0;
 static mut timediffusec: int64_t = 0 as int64_t;
 pub const DEFAULT_OUTPUT_BUFFSIZE: ::core::ffi::c_int = 0x1000 as ::core::ffi::c_int;
@@ -990,77 +1014,73 @@ unsafe extern "C" fn mfs_strerror(mut status: uint8_t) -> *const ::core::ffi::c_
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_atime(mut inode: uint32_t) {
     unsafe {
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
         amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
-        amfptr = amtime_hash[amhash as usize];
-        while !amfptr.is_null() {
-            if (*amfptr).inode == inode {
-                (*amfptr).atime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
-                (*amfptr).atimeage = 0 as uint16_t;
+        let bucket = &mut (*&raw mut amtime_hash)[amhash as usize];
+        for amf in bucket.iter_mut() {
+            if amf.inode == inode {
+                amf.atime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
+                amf.atimeage = 0 as uint16_t;
                 amtime_unlock();
                 return;
             }
-            amfptr = (*amfptr).next as *mut amtime_file;
         }
-        amfptr = Box::into_raw(Box::new(_amtime_file {
-            inode,
-            atimeage: 0 as uint16_t,
-            mtimeage: 0 as uint16_t,
-            atime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
-            mtime: 0 as uint64_t,
-            next: amtime_hash[amhash as usize] as *mut _amtime_file,
-        }));
-        amtime_hash[amhash as usize] = amfptr;
+        // C: malloc + head-insert (amfptr->next = amtime_hash[amhash]).
+        bucket.insert(
+            0,
+            Box::new(_amtime_file {
+                inode,
+                atimeage: 0 as uint16_t,
+                mtimeage: 0 as uint16_t,
+                atime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
+                mtime: 0 as uint64_t,
+            }),
+        );
         amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_mtime(mut inode: uint32_t) {
     unsafe {
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
         amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
-        amfptr = amtime_hash[amhash as usize];
-        while !amfptr.is_null() {
-            if (*amfptr).inode == inode {
-                (*amfptr).mtime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
-                (*amfptr).mtimeage = 0 as uint16_t;
+        let bucket = &mut (*&raw mut amtime_hash)[amhash as usize];
+        for amf in bucket.iter_mut() {
+            if amf.inode == inode {
+                amf.mtime = monotonic_useconds().wrapping_add(timediffusec as uint64_t);
+                amf.mtimeage = 0 as uint16_t;
                 amtime_unlock();
                 return;
             }
-            amfptr = (*amfptr).next as *mut amtime_file;
         }
-        amfptr = Box::into_raw(Box::new(_amtime_file {
-            inode,
-            atimeage: 0 as uint16_t,
-            mtimeage: 0 as uint16_t,
-            atime: 0 as uint64_t,
-            mtime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
-            next: amtime_hash[amhash as usize] as *mut _amtime_file,
-        }));
-        amtime_hash[amhash as usize] = amfptr;
+        bucket.insert(
+            0,
+            Box::new(_amtime_file {
+                inode,
+                atimeage: 0 as uint16_t,
+                mtimeage: 0 as uint16_t,
+                atime: 0 as uint64_t,
+                mtime: monotonic_useconds().wrapping_add(timediffusec as uint64_t),
+            }),
+        );
         amtime_unlock();
     }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_no_atime(mut inode: uint32_t) {
     unsafe {
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
         amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
-        amfptr = amtime_hash[amhash as usize];
-        while !amfptr.is_null() {
-            if (*amfptr).inode == inode {
-                (*amfptr).atimeage = 0 as uint16_t;
-                (*amfptr).atime = 0 as uint64_t;
+        for amf in (*&raw mut amtime_hash)[amhash as usize].iter_mut() {
+            if amf.inode == inode {
+                amf.atimeage = 0 as uint16_t;
+                amf.atime = 0 as uint64_t;
                 amtime_unlock();
                 return;
             }
-            amfptr = (*amfptr).next as *mut amtime_file;
         }
         amtime_unlock();
     }
@@ -1068,19 +1088,16 @@ pub unsafe extern "C" fn fs_no_atime(mut inode: uint32_t) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_no_mtime(mut inode: uint32_t) {
     unsafe {
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
         amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
-        amfptr = amtime_hash[amhash as usize];
-        while !amfptr.is_null() {
-            if (*amfptr).inode == inode {
-                (*amfptr).mtimeage = 0 as uint16_t;
-                (*amfptr).mtime = 0 as uint64_t;
+        for amf in (*&raw mut amtime_hash)[amhash as usize].iter_mut() {
+            if amf.inode == inode {
+                amf.mtimeage = 0 as uint16_t;
+                amf.mtime = 0 as uint64_t;
                 amtime_unlock();
                 return;
             }
-            amfptr = (*amfptr).next as *mut amtime_file;
         }
         amtime_unlock();
     }
@@ -1092,17 +1109,15 @@ pub unsafe extern "C" fn fs_fix_amtime(
     mut mtime: *mut uint32_t,
 ) {
     unsafe {
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
         let mut amhash: uint32_t = 0;
         let mut ioatime: uint32_t = 0;
         let mut iomtime: uint32_t = 0;
         amtime_lock();
         amhash = inode.wrapping_rem(AMTIME_HASH_SIZE as uint32_t);
-        amfptr = amtime_hash[amhash as usize];
-        while !amfptr.is_null() {
-            if (*amfptr).inode == inode {
-                ioatime = (*amfptr).atime.wrapping_div(1000000 as uint64_t) as uint32_t;
-                iomtime = (*amfptr).mtime.wrapping_div(1000000 as uint64_t) as uint32_t;
+        for amf in (*&raw mut amtime_hash)[amhash as usize].iter() {
+            if amf.inode == inode {
+                ioatime = amf.atime.wrapping_div(1000000 as uint64_t) as uint32_t;
+                iomtime = amf.mtime.wrapping_div(1000000 as uint64_t) as uint32_t;
                 if ioatime > *atime {
                     *atime = ioatime;
                 }
@@ -1112,7 +1127,6 @@ pub unsafe extern "C" fn fs_fix_amtime(
                 amtime_unlock();
                 return;
             }
-            amfptr = (*amfptr).next as *mut amtime_file;
         }
         amtime_unlock();
     }
@@ -1130,43 +1144,34 @@ pub unsafe extern "C" fn fs_amtime_reference_clock(
 }
 unsafe extern "C" fn fs_af_remove_from_lru(mut afptr: *mut acquired_file) {
     unsafe {
-        if !(*afptr).lrunext.is_null() {
-            (*(*afptr).lrunext).lruprev = (*afptr).lruprev;
-        } else {
-            af_lrutail = (*afptr).lruprev as *mut *mut acquired_file;
-        }
-        *(*afptr).lruprev = (*afptr).lrunext;
+        // C: unlink via lrunext/lruprev, af_lru_cnt--, NULL both links.
+        (*afptr).in_lru = false;
+        (*&raw mut af_lru).retain(|p| *p != afptr);
         af_lru_cnt = af_lru_cnt.wrapping_sub(1);
-        (*afptr).lrunext = ::core::ptr::null_mut::<_acquired_file>();
-        (*afptr).lruprev = ::core::ptr::null_mut::<*mut _acquired_file>();
     }
 }
 unsafe extern "C" fn fs_af_add_to_lru(mut afptr: *mut acquired_file) {
     unsafe {
-        let mut iafptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        let mut afpptr: *mut *mut acquired_file = ::core::ptr::null_mut::<*mut acquired_file>();
         let mut hash: uint32_t = 0;
         if af_lru_cnt > ACQFILES_LRU_LIMIT as uint32_t {
-            hash = (*af_lruhead)
-                .inode
-                .wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-            afpptr = (&raw mut af_hash as *mut *mut acquired_file).offset(hash as isize);
-            loop {
-                iafptr = *afpptr;
-                if iafptr.is_null() {
-                    break;
-                }
-                if iafptr == af_lruhead {
-                    *afpptr = (*iafptr).next as *mut acquired_file;
-                    crate::chunksdatacache::clear_inode((*iafptr).inode, 0 as uint32_t);
-                    fs_af_remove_from_lru(iafptr);
-                    // C: free(iafptr) — pairs with Box::into_raw in
-                    // fs_add_entry/fs_inc_acnt.
-                    drop(Box::from_raw(iafptr));
-                } else {
-                    afpptr = &raw mut (*iafptr).next as *mut *mut acquired_file;
-                }
-            }
+            // C: walk af_lruhead's bucket, unlink it, clear its chunk cache,
+            // remove it from the LRU, free (mastercomm.c:496-509). pop_front
+            // is the LRU unlink; bucket.remove + drop is the unlink + free.
+            let iafptr = (*&raw mut af_lru)
+                .pop_front()
+                .expect("af_lru_cnt > ACQFILES_LRU_LIMIT implies a non-empty LRU");
+            hash = (*iafptr).inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
+            let bucket = &mut (*&raw mut af_hash)[hash as usize];
+            let pos = bucket
+                .iter()
+                .position(|b| std::ptr::eq(&**b, iafptr))
+                .expect("LRU head missing from its af_hash bucket");
+            let node = bucket.remove(pos);
+            crate::chunksdatacache::clear_inode(node.inode, 0 as uint32_t);
+            // C: fs_af_remove_from_lru(iafptr); free(iafptr) — the
+            // pop_front above did the LRU unlink; drop is the free.
+            drop(node);
+            af_lru_cnt = af_lru_cnt.wrapping_sub(1);
         }
         if af_lru_cnt <= 5000 as uint32_t {
         } else {
@@ -1189,10 +1194,10 @@ unsafe extern "C" fn fs_af_add_to_lru(mut afptr: *mut acquired_file) {
             );
             abort();
         };
-        (*afptr).lruprev = af_lrutail as *mut *mut _acquired_file;
-        *af_lrutail = afptr;
-        (*afptr).lrunext = ::core::ptr::null_mut::<_acquired_file>();
-        af_lrutail = &raw mut (*afptr).lrunext as *mut *mut acquired_file;
+        (*afptr).in_lru = true;
+        // C: append at LRU tail (*af_lrutail = afptr; af_lrutail =
+        // &afptr->lrunext).
+        (*&raw mut af_lru).push_back(afptr);
         af_lru_cnt = af_lru_cnt.wrapping_add(1);
     }
 }
@@ -1200,32 +1205,34 @@ unsafe extern "C" fn fs_af_add_to_lru(mut afptr: *mut acquired_file) {
 pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-        afptr = af_hash[afhash as usize];
-        while !afptr.is_null() {
+        let bucket = &mut (*&raw mut af_hash)[afhash as usize];
+        let mut i: usize = 0;
+        while i < bucket.len() {
+            let afptr: *mut acquired_file = &raw mut *bucket[i];
             if (*afptr).inode == inode {
                 (*afptr).dentry = 1 as uint8_t;
-                if !(*afptr).lruprev.is_null() {
+                if (*afptr).in_lru {
                     fs_af_remove_from_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
                 af_unlock();
                 return;
             }
-            afptr = (*afptr).next as *mut acquired_file;
+            i += 1;
         }
-        afptr = Box::into_raw(Box::new(_acquired_file {
-            inode,
-            cnt: 0 as uint16_t,
-            age: 0 as uint8_t,
-            dentry: 1 as uint8_t,
-            next: af_hash[afhash as usize] as *mut _acquired_file,
-            lrunext: ::core::ptr::null_mut::<_acquired_file>(),
-            lruprev: ::core::ptr::null_mut::<*mut _acquired_file>(),
-        }));
-        af_hash[afhash as usize] = afptr;
+        // C: malloc + head-insert (afptr->next = af_hash[afhash]).
+        bucket.insert(
+            0,
+            Box::new(_acquired_file {
+                inode,
+                cnt: 0 as uint16_t,
+                age: 0 as uint8_t,
+                dentry: 1 as uint8_t,
+                in_lru: false,
+            }),
+        );
         af_unlock();
     }
 }
@@ -1233,15 +1240,15 @@ pub unsafe extern "C" fn fs_add_entry(mut inode: uint32_t) {
 pub unsafe extern "C" fn fs_forget_entry(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-        afptr = af_hash[afhash as usize];
-        while !afptr.is_null() {
+        let bucket = &mut (*&raw mut af_hash)[afhash as usize];
+        let mut i: usize = 0;
+        while i < bucket.len() {
+            let afptr: *mut acquired_file = &raw mut *bucket[i];
             if (*afptr).inode == inode {
                 (*afptr).dentry = 0 as uint8_t;
-                if (*afptr).cnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                    && (*afptr).lruprev.is_null()
+                if (*afptr).cnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int && !(*afptr).in_lru
                 {
                     fs_af_add_to_lru(afptr);
                 }
@@ -1249,7 +1256,7 @@ pub unsafe extern "C" fn fs_forget_entry(mut inode: uint32_t) {
                 af_unlock();
                 return;
             }
-            afptr = (*afptr).next as *mut acquired_file;
+            i += 1;
         }
         af_unlock();
     }
@@ -1258,15 +1265,11 @@ pub unsafe extern "C" fn fs_forget_entry(mut inode: uint32_t) {
 pub unsafe extern "C" fn fs_isopen(mut inode: uint32_t) -> ::core::ffi::c_int {
     unsafe {
         let mut afhash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-        afptr = af_hash[afhash as usize];
-        while !afptr.is_null() {
-            if (*afptr).inode == inode {
-                if (*afptr).dentry as ::core::ffi::c_int != 0
-                    || (*afptr).cnt as ::core::ffi::c_int != 0
-                {
+        for af in (*&raw mut af_hash)[afhash as usize].iter() {
+            if af.inode == inode {
+                if af.dentry as ::core::ffi::c_int != 0 || af.cnt as ::core::ffi::c_int != 0 {
                     af_unlock();
                     return 1 as ::core::ffi::c_int;
                 } else {
@@ -1274,7 +1277,6 @@ pub unsafe extern "C" fn fs_isopen(mut inode: uint32_t) -> ::core::ffi::c_int {
                     return 0 as ::core::ffi::c_int;
                 }
             }
-            afptr = (*afptr).next as *mut acquired_file;
         }
         af_unlock();
         return 0 as ::core::ffi::c_int;
@@ -1284,32 +1286,33 @@ pub unsafe extern "C" fn fs_isopen(mut inode: uint32_t) -> ::core::ffi::c_int {
 pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-        afptr = af_hash[afhash as usize];
-        while !afptr.is_null() {
+        let bucket = &mut (*&raw mut af_hash)[afhash as usize];
+        let mut i: usize = 0;
+        while i < bucket.len() {
+            let afptr: *mut acquired_file = &raw mut *bucket[i];
             if (*afptr).inode == inode {
                 (*afptr).cnt = (*afptr).cnt.wrapping_add(1);
-                if !(*afptr).lruprev.is_null() {
+                if (*afptr).in_lru {
                     fs_af_remove_from_lru(afptr);
                 }
                 (*afptr).age = 0 as uint8_t;
                 af_unlock();
                 return;
             }
-            afptr = (*afptr).next as *mut acquired_file;
+            i += 1;
         }
-        afptr = Box::into_raw(Box::new(_acquired_file {
-            inode,
-            cnt: 1 as uint16_t,
-            age: 0 as uint8_t,
-            dentry: 0 as uint8_t,
-            next: af_hash[afhash as usize] as *mut _acquired_file,
-            lrunext: ::core::ptr::null_mut::<_acquired_file>(),
-            lruprev: ::core::ptr::null_mut::<*mut _acquired_file>(),
-        }));
-        af_hash[afhash as usize] = afptr;
+        bucket.insert(
+            0,
+            Box::new(_acquired_file {
+                inode,
+                cnt: 1 as uint16_t,
+                age: 0 as uint8_t,
+                dentry: 0 as uint8_t,
+                in_lru: false,
+            }),
+        );
         af_unlock();
     }
 }
@@ -1317,18 +1320,19 @@ pub unsafe extern "C" fn fs_inc_acnt(mut inode: uint32_t) {
 pub unsafe extern "C" fn fs_dec_acnt(mut inode: uint32_t) {
     unsafe {
         let mut afhash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         af_lock();
         afhash = inode.wrapping_rem(ACQFILES_HASH_SIZE as uint32_t);
-        afptr = af_hash[afhash as usize];
-        while !afptr.is_null() {
+        let bucket = &mut (*&raw mut af_hash)[afhash as usize];
+        let mut i: usize = 0;
+        while i < bucket.len() {
+            let afptr: *mut acquired_file = &raw mut *bucket[i];
             if (*afptr).inode == inode {
                 if (*afptr).cnt as ::core::ffi::c_int > 0 as ::core::ffi::c_int {
                     (*afptr).cnt = (*afptr).cnt.wrapping_sub(1);
                 }
                 if (*afptr).cnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                     && (*afptr).dentry as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                    && (*afptr).lruprev.is_null()
+                    && !(*afptr).in_lru
                 {
                     fs_af_add_to_lru(afptr);
                 }
@@ -1336,7 +1340,7 @@ pub unsafe extern "C" fn fs_dec_acnt(mut inode: uint32_t) {
                 af_unlock();
                 return;
             }
-            afptr = (*afptr).next as *mut acquired_file;
+            i += 1;
         }
         af_unlock();
     }
@@ -1406,46 +1410,37 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
     unsafe {
         let mut drec: *mut threc = vrec as *mut threc;
         let mut rec: *mut threc = ::core::ptr::null_mut::<threc>();
-        let mut recp: *mut *mut threc = ::core::ptr::null_mut::<*mut threc>();
         let mut rechash: uint32_t = 0;
         rec_lock();
         rechash = (*drec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
-        recp = (&raw mut threchash as *mut *mut threc).offset(rechash as isize);
-        loop {
-            rec = *recp;
-            if rec.is_null() {
-                break;
+        let bucket = &mut (*&raw mut threchash)[rechash as usize];
+        if let Some(pos) = bucket.iter().position(|p| *p == drec) {
+            rec = bucket.remove(pos);
+            // C: rec->next = threcfree; threcfree = rec (LIFO head push).
+            (*&raw mut threcfree).push(rec);
+            threc_lock(rec);
+            if !(*rec).obuff.is_null() {
+                // C: free(rec->obuff) — Box<[u8]> from
+                // fs_output_buffer_init, length from obuffsize.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).obuff,
+                    (*rec).obuffsize as usize,
+                )));
+                (*rec).obuff = ::core::ptr::null_mut::<uint8_t>();
+                (*rec).obuffsize = 0 as uint32_t;
             }
-            if rec == drec {
-                *recp = (*rec).next as *mut threc;
-                (*rec).next = threcfree as *mut _threc;
-                threcfree = rec;
-                threc_lock(rec);
-                if !(*rec).obuff.is_null() {
-                    // C: free(rec->obuff) — Box<[u8]> from
-                    // fs_output_buffer_init, length from obuffsize.
-                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                        (*rec).obuff,
-                        (*rec).obuffsize as usize,
-                    )));
-                    (*rec).obuff = ::core::ptr::null_mut::<uint8_t>();
-                    (*rec).obuffsize = 0 as uint32_t;
-                }
-                if !(*rec).ibuff.is_null() {
-                    // C: free(rec->ibuff) — Box<[u8]> from fs_input_buffer_init.
-                    drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                        (*rec).ibuff,
-                        (*rec).ibuffsize as usize,
-                    )));
-                    (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
-                    (*rec).ibuffsize = 0 as uint32_t;
-                }
-                threc_unlock(rec);
-                rec_unlock();
-                return;
-            } else {
-                recp = &raw mut (*rec).next as *mut *mut threc;
+            if !(*rec).ibuff.is_null() {
+                // C: free(rec->ibuff) — Box<[u8]> from fs_input_buffer_init.
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    (*rec).ibuff,
+                    (*rec).ibuffsize as usize,
+                )));
+                (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
+                (*rec).ibuffsize = 0 as uint32_t;
             }
+            threc_unlock(rec);
+            rec_unlock();
+            return;
         }
         rec_unlock();
         mfs_log(
@@ -1465,9 +1460,9 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
             return rec;
         }
         rec_lock();
-        if !threcfree.is_null() {
-            rec = threcfree;
-            threcfree = (*rec).next as *mut threc;
+        if let Some(free_rec) = (*&raw mut threcfree).pop() {
+            // C: rec = threcfree; threcfree = rec->next (LIFO head pop).
+            rec = free_rec;
         } else {
             // C: malloc(sizeof(threc)) + pthread_mutex/cond_init. Box literal
             // sets every field; freed with Box::from_raw in fs_term (Mutex/
@@ -1488,12 +1483,12 @@ pub unsafe extern "C" fn fs_get_my_threc() -> *mut threc {
                 receiving: 0 as uint8_t,
                 rcvd_cmd: 0 as uint32_t,
                 packetid: threcnextid as uint32_t,
-                next: ::core::ptr::null_mut::<_threc>(),
             }));
         }
         rechash = (*rec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
-        (*rec).next = threchash[rechash as usize] as *mut _threc;
-        threchash[rechash as usize] = rec;
+        // C: rec->next = threchash[rechash]; threchash[rechash] = rec
+        // (head insert).
+        (*&raw mut threchash)[rechash as usize].insert(0, rec);
         (*rec).obuff = ::core::ptr::null_mut::<uint8_t>();
         (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
         (*rec).obuffsize = 0 as uint32_t;
@@ -1517,13 +1512,12 @@ pub unsafe extern "C" fn fs_get_threc_by_id(mut packetid: uint32_t) -> *mut thre
         let mut rechash: uint32_t = 0;
         rechash = packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
         rec_lock();
-        rec = threchash[rechash as usize];
-        while !rec.is_null() {
-            if (*rec).packetid == packetid {
+        for recp in (*&raw mut threchash)[rechash as usize].iter() {
+            if (**recp).packetid == packetid {
+                rec = *recp;
                 rec_unlock();
                 return rec;
             }
-            rec = (*rec).next as *mut threc;
         }
         rec_unlock();
         mfs_log(
@@ -3771,8 +3765,6 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
         let mut ptr: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut inodespacket: *mut uint8_t = ::core::ptr::null_mut::<uint8_t>();
         let mut inodesleng: int32_t = 0;
-        let mut amfptr: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
-        let mut amfpptr: *mut *mut amtime_file = ::core::ptr::null_mut::<*mut amtime_file>();
         let mut amhash: uint32_t = 0;
         amtime_lock();
         if masterversion
@@ -3787,13 +3779,11 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
             inodesleng = 0 as ::core::ffi::c_int as int32_t;
             amhash = 0 as uint32_t;
             while amhash < AMTIME_HASH_SIZE as uint32_t {
-                amfptr = amtime_hash[amhash as usize];
-                while !amfptr.is_null() {
-                    if (*amfptr).atime > 0 as uint64_t || (*amfptr).mtime > 0 as uint64_t {
+                for amf in (*&raw mut amtime_hash)[amhash as usize].iter() {
+                    if amf.atime > 0 as uint64_t || amf.mtime > 0 as uint64_t {
                         inodesleng = (inodesleng as ::core::ffi::c_int + 12 as ::core::ffi::c_int)
                             as int32_t;
                     }
-                    amfptr = (*amfptr).next as *mut amtime_file;
                 }
                 amhash = amhash.wrapping_add(1);
             }
@@ -3810,45 +3800,42 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
                 put32bit(&raw mut ptr, (inodesleng - 8 as int32_t) as uint32_t);
                 amhash = 0 as uint32_t;
                 while amhash < AMTIME_HASH_SIZE as uint32_t {
-                    amfpptr =
-                        (&raw mut amtime_hash as *mut *mut amtime_file).offset(amhash as isize);
-                    loop {
-                        amfptr = *amfpptr;
-                        if amfptr.is_null() {
-                            break;
-                        }
-                        if (*amfptr).atime > 0 as uint64_t || (*amfptr).mtime > 0 as uint64_t {
-                            put32bit(&raw mut ptr, (*amfptr).inode);
+                    let bucket = &mut (*&raw mut amtime_hash)[amhash as usize];
+                    // C: afpptr-walk with in-place unlink of aged-out nodes
+                    // (emit, clear second-send values, age, keep-or-free).
+                    let mut i: usize = 0;
+                    while i < bucket.len() {
+                        let amf = &mut bucket[i];
+                        if amf.atime > 0 as uint64_t || amf.mtime > 0 as uint64_t {
+                            put32bit(&raw mut ptr, amf.inode);
                             put32bit(
                                 &raw mut ptr,
-                                (*amfptr).atime.wrapping_div(1000000 as uint64_t) as uint32_t,
+                                amf.atime.wrapping_div(1000000 as uint64_t) as uint32_t,
                             );
                             put32bit(
                                 &raw mut ptr,
-                                (*amfptr).mtime.wrapping_div(1000000 as uint64_t) as uint32_t,
+                                amf.mtime.wrapping_div(1000000 as uint64_t) as uint32_t,
                             );
                         }
-                        if (*amfptr).atimeage as ::core::ffi::c_int >= 1 as ::core::ffi::c_int {
-                            (*amfptr).atime = 0 as uint64_t;
+                        if amf.atimeage as ::core::ffi::c_int >= 1 as ::core::ffi::c_int {
+                            amf.atime = 0 as uint64_t;
                         }
-                        if (*amfptr).mtimeage as ::core::ffi::c_int >= 1 as ::core::ffi::c_int {
-                            (*amfptr).mtime = 0 as uint64_t;
+                        if amf.mtimeage as ::core::ffi::c_int >= 1 as ::core::ffi::c_int {
+                            amf.mtime = 0 as uint64_t;
                         }
-                        if ((*amfptr).atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
-                            || ((*amfptr).mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
+                        if (amf.atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
+                            || (amf.mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
                         {
-                            if ((*amfptr).atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
-                                (*amfptr).atimeage = (*amfptr).atimeage.wrapping_add(1);
+                            if (amf.atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
+                                amf.atimeage = amf.atimeage.wrapping_add(1);
                             }
-                            if ((*amfptr).mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
-                                (*amfptr).mtimeage = (*amfptr).mtimeage.wrapping_add(1);
+                            if (amf.mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
+                                amf.mtimeage = amf.mtimeage.wrapping_add(1);
                             }
-                            amfpptr = &raw mut (*amfptr).next as *mut *mut amtime_file;
+                            i += 1;
                         } else {
-                            *amfpptr = (*amfptr).next as *mut amtime_file;
-                            // C: free(amfptr) — pairs with Box::into_raw in
-                            // fs_atime/fs_mtime.
-                            drop(Box::from_raw(amfptr));
+                            // C: *amfpptr = amfptr->next; free(amfptr).
+                            bucket.remove(i);
                         }
                     }
                     amhash = amhash.wrapping_add(1);
@@ -3883,27 +3870,24 @@ pub unsafe extern "C" fn fs_send_amtime_inodes() {
         }
         amhash = 0 as uint32_t;
         while amhash < AMTIME_HASH_SIZE as uint32_t {
-            amfpptr = (&raw mut amtime_hash as *mut *mut amtime_file).offset(amhash as isize);
-            loop {
-                amfptr = *amfpptr;
-                if amfptr.is_null() {
-                    break;
-                }
-                if ((*amfptr).atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
-                    || ((*amfptr).mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
+            let bucket = &mut (*&raw mut amtime_hash)[amhash as usize];
+            // C: same afpptr-walk as above, aging pass only (no packet).
+            let mut i: usize = 0;
+            while i < bucket.len() {
+                let amf = &mut bucket[i];
+                if (amf.atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
+                    || (amf.mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE
                 {
-                    if ((*amfptr).atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
-                        (*amfptr).atimeage = (*amfptr).atimeage.wrapping_add(1);
+                    if (amf.atimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
+                        amf.atimeage = amf.atimeage.wrapping_add(1);
                     }
-                    if ((*amfptr).mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
-                        (*amfptr).mtimeage = (*amfptr).mtimeage.wrapping_add(1);
+                    if (amf.mtimeage as ::core::ffi::c_int) < AMTIME_MAX_AGE {
+                        amf.mtimeage = amf.mtimeage.wrapping_add(1);
                     }
-                    amfpptr = &raw mut (*amfptr).next as *mut *mut amtime_file;
+                    i += 1;
                 } else {
-                    *amfpptr = (*amfptr).next as *mut amtime_file;
-                    // C: free(amfptr) — pairs with Box::into_raw in
-                    // fs_atime/fs_mtime.
-                    drop(Box::from_raw(amfptr));
+                    // C: *amfpptr = amfptr->next; free(amfptr).
+                    bucket.remove(i);
                 }
             }
             amhash = amhash.wrapping_add(1);
@@ -3919,34 +3903,32 @@ pub unsafe extern "C" fn fs_send_open_inodes() {
         let mut i: uint32_t = 0;
         let mut inodes: uint32_t = 0;
         let mut hash: uint32_t = 0;
-        let mut afptr: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        let mut afpptr: *mut *mut acquired_file = ::core::ptr::null_mut::<*mut acquired_file>();
         af_lock();
         crate::heapsorter::heap_cleanup();
         hash = 0 as uint32_t;
         while hash < ACQFILES_HASH_SIZE as uint32_t {
-            afpptr = (&raw mut af_hash as *mut *mut acquired_file).offset(hash as isize);
-            loop {
-                afptr = *afpptr;
-                if afptr.is_null() {
-                    break;
-                }
-                if (*afptr).cnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                    && (*afptr).dentry as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+            let bucket = &mut (*&raw mut af_hash)[hash as usize];
+            // C: afpptr-walk with in-place unlink of over-aged nodes
+            // (mastercomm.c:1966-1983).
+            let mut j: usize = 0;
+            while j < bucket.len() {
+                let af = &mut bucket[j];
+                if af.cnt as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+                    && af.dentry as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                 {
-                    (*afptr).age = (*afptr).age.wrapping_add(1);
-                    if (*afptr).age as ::core::ffi::c_int > ACQFILES_MAX_AGE {
-                        *afpptr = (*afptr).next as *mut acquired_file;
+                    af.age = af.age.wrapping_add(1);
+                    if af.age as ::core::ffi::c_int > ACQFILES_MAX_AGE {
+                        // C: *afpptr = afptr->next; clear_inode;
+                        // fs_af_remove_from_lru(afptr); free(afptr).
+                        let afptr: *mut acquired_file = &raw mut **af;
                         crate::chunksdatacache::clear_inode((*afptr).inode, 0 as uint32_t);
                         fs_af_remove_from_lru(afptr);
-                        // C: free(afptr) — pairs with Box::into_raw in
-                        // fs_add_entry/fs_inc_acnt.
-                        drop(Box::from_raw(afptr));
+                        bucket.remove(j);
                         continue;
                     }
                 }
-                afpptr = &raw mut (*afptr).next as *mut *mut acquired_file;
-                crate::heapsorter::heap_push((*afptr).inode);
+                crate::heapsorter::heap_push(af.inode);
+                j += 1;
             }
             hash = hash.wrapping_add(1);
         }
@@ -4343,8 +4325,8 @@ pub unsafe extern "C" fn fs_receive_thread(
                 rec_lock();
                 rechash = 0 as uint32_t;
                 while rechash < THRECHASHSIZE as uint32_t {
-                    rec = threchash[rechash as usize];
-                    while !rec.is_null() {
+                    for recp in (*&raw mut threchash)[rechash as usize].iter() {
+                        rec = *recp;
                         threc_lock(rec);
                         if (*rec).sent != 0 {
                             (*rec).status = 1 as uint8_t;
@@ -4352,7 +4334,6 @@ pub unsafe extern "C" fn fs_receive_thread(
                             (*rec).cond.notify_one();
                         }
                         threc_unlock(rec);
-                        rec = (*rec).next as *mut threc;
                     }
                     rechash = rechash.wrapping_add(1);
                 }
@@ -4876,16 +4857,17 @@ pub unsafe extern "C" fn fs_init_threads(mut retries: uint32_t, mut timeout: uin
         crate::extrapackets::init();
         i = 0 as uint32_t;
         while i < AMTIME_HASH_SIZE as uint32_t {
-            amtime_hash[i as usize] = ::core::ptr::null_mut::<amtime_file>();
+            // C: amtime_hash[i] = NULL (post-fork reset; old nodes leak in
+            // C, here clear() drops them — same net state).
+            (*&raw mut amtime_hash)[i as usize].clear();
             i = i.wrapping_add(1);
         }
         i = 0 as uint32_t;
         while i < ACQFILES_HASH_SIZE as uint32_t {
-            af_hash[i as usize] = ::core::ptr::null_mut::<acquired_file>();
+            (*&raw mut af_hash)[i as usize].clear();
             i = i.wrapping_add(1);
         }
-        af_lruhead = ::core::ptr::null_mut::<acquired_file>();
-        af_lrutail = &raw mut af_lruhead;
+        (*&raw mut af_lru).clear();
         af_lru_cnt = 0 as uint32_t;
         gettimeofday(&raw mut tv, NULL);
         usectime = tv.tv_sec as uint64_t;
@@ -4938,14 +4920,8 @@ pub unsafe extern "C" fn fs_init_threads(mut retries: uint32_t, mut timeout: uin
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fs_term() {
     unsafe {
-        let mut rec: *mut threc = ::core::ptr::null_mut::<threc>();
-        let mut recn: *mut threc = ::core::ptr::null_mut::<threc>();
         let mut i: uint32_t = 0;
         let mut rechash: uint32_t = 0;
-        let mut amf: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
-        let mut amfn: *mut amtime_file = ::core::ptr::null_mut::<amtime_file>();
-        let mut af: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
-        let mut afn: *mut acquired_file = ::core::ptr::null_mut::<acquired_file>();
         fd_lock();
         fterm = 1 as uint8_t;
         fd_unlock();
@@ -4963,8 +4939,8 @@ pub unsafe extern "C" fn fs_term() {
         rec_lock();
         rechash = 0 as uint32_t;
         while rechash < THRECHASHSIZE as uint32_t {
-            rec = threchash[rechash as usize];
-            while !rec.is_null() {
+            let bucket = std::mem::take(&mut (*&raw mut threchash)[rechash as usize]);
+            for rec in bucket {
                 mfs_log(
                     MFSLOG_SYSLOG,
                     MFSLOG_WARNING,
@@ -4972,7 +4948,6 @@ pub unsafe extern "C" fn fs_term() {
                         as *const ::core::ffi::c_char,
                     (*rec).packetid,
                 );
-                recn = (*rec).next as *mut threc;
                 if !(*rec).obuff.is_null() {
                     drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                         (*rec).obuff,
@@ -4986,13 +4961,11 @@ pub unsafe extern "C" fn fs_term() {
                     )));
                 }
                 drop(Box::from_raw(rec));
-                rec = recn;
             }
             rechash = rechash.wrapping_add(1);
         }
-        rec = threcfree;
-        while !rec.is_null() {
-            recn = (*rec).next as *mut threc;
+        let free_list = std::mem::take(&mut (*&raw mut threcfree));
+        for rec in free_list {
             if !(*rec).obuff.is_null() {
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
                     (*rec).obuff,
@@ -5006,7 +4979,6 @@ pub unsafe extern "C" fn fs_term() {
                 )));
             }
             drop(Box::from_raw(rec));
-            rec = recn;
         }
         rec_unlock();
         // C: pthread_key_delete(reckey) — mainrec was freed explicitly
@@ -5015,22 +4987,13 @@ pub unsafe extern "C" fn fs_term() {
         MY_THREC.with(|slot| slot.0.set(::core::ptr::null_mut::<threc>()));
         i = 0 as uint32_t;
         while i < ACQFILES_HASH_SIZE as uint32_t {
-            af = af_hash[i as usize];
-            while !af.is_null() {
-                afn = (*af).next as *mut acquired_file;
-                drop(Box::from_raw(af));
-                af = afn;
-            }
+            // C: walk each bucket freeing nodes — clear() drops the Boxes.
+            (*&raw mut af_hash)[i as usize].clear();
             i = i.wrapping_add(1);
         }
         i = 0 as uint32_t;
         while i < AMTIME_HASH_SIZE as uint32_t {
-            amf = amtime_hash[i as usize];
-            while !amf.is_null() {
-                amfn = (*amf).next as *mut amtime_file;
-                drop(Box::from_raw(amf));
-                amf = amfn;
-            }
+            (*&raw mut amtime_hash)[i as usize].clear();
             i = i.wrapping_add(1);
         }
         if fd >= 0 as ::core::ffi::c_int {
