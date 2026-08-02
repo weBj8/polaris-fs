@@ -920,8 +920,7 @@ pub unsafe extern "C" fn topology_reload() {
         }
         if cfg_isdefined(b"TOPOLOGY_FILENAME\0".as_ptr() as *const ::core::ffi::c_char) == 0 {
             TopologyFileName = strdup(
-                b"/usr/local/etc/mfs/mfstopology.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
+                b"/usr/local/etc/mfs/mfstopology.cfg\0".as_ptr() as *const ::core::ffi::c_char
             );
             if TopologyFileName.is_null() {
                 fprintf(
@@ -975,8 +974,7 @@ pub unsafe extern "C" fn topology_reload() {
                 let mut tmpname: *mut ::core::ffi::c_char =
                     ::core::ptr::null_mut::<::core::ffi::c_char>();
                 tmpname = strdup(
-                    b"/usr/local/etc/mfstopology.cfg\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
+                    b"/usr/local/etc/mfstopology.cfg\0".as_ptr() as *const ::core::ffi::c_char
                 );
                 fd = open(tmpname, O_RDONLY);
                 if fd >= 0 as ::core::ffi::c_int {
@@ -1002,8 +1000,7 @@ pub unsafe extern "C" fn topology_reload() {
         } else {
             TopologyFileName = cfg_getstr(
                 b"TOPOLOGY_FILENAME\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/usr/local/etc/mfs/mfstopology.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
+                b"/usr/local/etc/mfs/mfstopology.cfg\0".as_ptr() as *const ::core::ffi::c_char,
             );
         }
         topology_load();

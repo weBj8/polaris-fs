@@ -2788,8 +2788,7 @@ pub unsafe extern "C" fn exports_reload() {
         }
         if cfg_isdefined(b"EXPORTS_FILENAME\0".as_ptr() as *const ::core::ffi::c_char) == 0 {
             ExportsFileName = strdup(
-                b"/usr/local/etc/mfs/mfsexports.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
+                b"/usr/local/etc/mfs/mfsexports.cfg\0".as_ptr() as *const ::core::ffi::c_char
             );
             if ExportsFileName.is_null() {
                 fprintf(
@@ -2843,8 +2842,7 @@ pub unsafe extern "C" fn exports_reload() {
                 let mut tmpname: *mut ::core::ffi::c_char =
                     ::core::ptr::null_mut::<::core::ffi::c_char>();
                 tmpname = strdup(
-                    b"/usr/local/etc/mfsexports.cfg\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
+                    b"/usr/local/etc/mfsexports.cfg\0".as_ptr() as *const ::core::ffi::c_char
                 );
                 fd = open(tmpname, O_RDONLY);
                 if fd >= 0 as ::core::ffi::c_int {
@@ -2870,8 +2868,7 @@ pub unsafe extern "C" fn exports_reload() {
         } else {
             ExportsFileName = cfg_getstr(
                 b"EXPORTS_FILENAME\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/usr/local/etc/mfs/mfsexports.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
+                b"/usr/local/etc/mfs/mfsexports.cfg\0".as_ptr() as *const ::core::ffi::c_char,
             );
         }
         exports_loadexports();

@@ -470,8 +470,7 @@ pub unsafe extern "C" fn multilan_reload() {
         }
         ipmapfname = cfg_getstr(
             b"MULTILAN_IPMAP_FILENAME\0".as_ptr() as *const ::core::ffi::c_char,
-            b"/usr/local/etc/mfs/mfsipmap.cfg\0"
-                .as_ptr() as *const ::core::ffi::c_char,
+            b"/usr/local/etc/mfs/mfsipmap.cfg\0".as_ptr() as *const ::core::ffi::c_char,
         );
         csipmap_loadmap(ipmapfname);
         free(ipmapfname as *mut ::core::ffi::c_void);

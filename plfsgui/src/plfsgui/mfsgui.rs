@@ -377,12 +377,7 @@ pub struct httphandle_str {
 }
 pub type httphandle = httphandle_str;
 pub const DEFAULT_CGIDIR: [::core::ffi::c_char; 25] = unsafe {
-    ::core::mem::transmute::<
-        [u8; 25],
-        [::core::ffi::c_char; 25],
-    >(
-        *b"/usr/local/share/plfscgi\0",
-    )
+    ::core::mem::transmute::<[u8; 25], [::core::ffi::c_char; 25]>(*b"/usr/local/share/plfscgi\0")
 };
 pub const DEFAULT_GUI_HTTP_PORT: [::core::ffi::c_char; 5] =
     unsafe { ::core::mem::transmute::<[u8; 5], [::core::ffi::c_char; 5]>(*b"9425\0") };

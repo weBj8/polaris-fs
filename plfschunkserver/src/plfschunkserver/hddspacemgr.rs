@@ -43138,10 +43138,8 @@ pub unsafe extern "C" fn hdd_folders_reinit() -> ::core::ffi::c_int {
         let mut ret: ::core::ffi::c_int = 0;
         let mut datadef: ::core::ffi::c_int = 0;
         if cfg_isdefined(b"HDD_CONF_FILENAME\0".as_ptr() as *const ::core::ffi::c_char) == 0 {
-            hddfname = strdup(
-                b"/usr/local/etc/mfs/mfshdd.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
-            );
+            hddfname =
+                strdup(b"/usr/local/etc/mfs/mfshdd.cfg\0".as_ptr() as *const ::core::ffi::c_char);
             if hddfname.is_null() {
                 fprintf(
                     stderr,
@@ -43192,10 +43190,8 @@ pub unsafe extern "C" fn hdd_folders_reinit() -> ::core::ffi::c_int {
             fd = fopen(hddfname, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
             if fd.is_null() && *__errno_location() == ENOENT {
                 free(hddfname as *mut ::core::ffi::c_void);
-                hddfname = strdup(
-                    b"/usr/local/etc/mfshdd.cfg\0"
-                        .as_ptr() as *const ::core::ffi::c_char,
-                );
+                hddfname =
+                    strdup(b"/usr/local/etc/mfshdd.cfg\0".as_ptr() as *const ::core::ffi::c_char);
                 fd = fopen(hddfname, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
                 if !fd.is_null() {
                     mfs_log(
@@ -43209,8 +43205,7 @@ pub unsafe extern "C" fn hdd_folders_reinit() -> ::core::ffi::c_int {
         } else {
             hddfname = cfg_getstr(
                 b"HDD_CONF_FILENAME\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/usr/local/etc/mfs/mfshdd.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
+                b"/usr/local/etc/mfs/mfshdd.cfg\0".as_ptr() as *const ::core::ffi::c_char,
             );
             fd = fopen(hddfname, b"r\0".as_ptr() as *const ::core::ffi::c_char) as *mut FILE;
         }

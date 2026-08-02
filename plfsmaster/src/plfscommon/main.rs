@@ -635,9 +635,7 @@ pub static mut id: [::core::ffi::c_char; 72] = unsafe {
     )
 };
 pub const DATA_PATH: [::core::ffi::c_char; 19] = unsafe {
-    ::core::mem::transmute::<[u8; 19], [::core::ffi::c_char; 19]>(
-        *b"/usr/local/var/mfs\0",
-    )
+    ::core::mem::transmute::<[u8; 19], [::core::ffi::c_char; 19]>(*b"/usr/local/var/mfs\0")
 };
 pub const DEFAULT_GROUP: [::core::ffi::c_char; 1] =
     unsafe { ::core::mem::transmute::<[u8; 1], [::core::ffi::c_char; 1]>(*b"\0") };
@@ -3494,10 +3492,8 @@ unsafe fn main_0(
         strerr_init();
         mycrc32_init();
         movewarning = 0 as uint8_t;
-        cfgfile = strdup(
-            b"/usr/local/etc/mfs/mfsmaster.cfg\0"
-                .as_ptr() as *const ::core::ffi::c_char,
-        );
+        cfgfile =
+            strdup(b"/usr/local/etc/mfs/mfsmaster.cfg\0".as_ptr() as *const ::core::ffi::c_char);
         if cfgfile.is_null() {
             fprintf(
                 stderr,
@@ -3546,10 +3542,8 @@ unsafe fn main_0(
         }
         fd = open(cfgfile, O_RDONLY);
         if fd < 0 as ::core::ffi::c_int && *__errno_location() == ENOENT {
-            ocfgfile = strdup(
-                b"/usr/local/etc/mfsmaster.cfg\0"
-                    .as_ptr() as *const ::core::ffi::c_char,
-            );
+            ocfgfile =
+                strdup(b"/usr/local/etc/mfsmaster.cfg\0".as_ptr() as *const ::core::ffi::c_char);
             if ocfgfile.is_null() {
                 fprintf(
                     stderr,
