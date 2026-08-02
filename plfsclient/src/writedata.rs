@@ -32,8 +32,6 @@ unsafe extern "C" {
         __format: *const ::core::ffi::c_char,
         ...
     ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn abort() -> !;
     unsafe fn memcpy(
         __dest: *mut ::core::ffi::c_void,
@@ -217,9 +215,9 @@ pub struct cblock_s {
 }
 pub type cblock = cblock_s;
 // std::sync primitives replace pthread_cond_t/pthread_mutex_t: futex-based,
-// no heap resources, initialized in place with ptr::write after malloc in
-// write_get_inodedata. Struct stays malloc'd; Drop never runs (free()
-// releases the block), which is fine for futex primitives.
+// no heap resources. Struct is Box-allocated in write_get_inodedata; freed
+// via Box::from_raw (Drop runs, replacing pthread_cond/mutex_destroy) in
+// write_free_inodedata/write_data_term.
 #[repr(C)]
 pub struct inodedata_s {
     pub inode: uint32_t,
@@ -883,65 +881,30 @@ pub unsafe extern "C" fn write_get_inodedata(
             }
             ind = (*ind).next as *mut inodedata;
         }
-        ind = malloc(::core::mem::size_of::<inodedata>()) as *mut inodedata;
-        if ind.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                356 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                356 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if ind
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut inodedata
-        {
-            let mut _mfs_errorstring_3: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                356 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_3,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/writedata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                356 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"ind\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_3,
-            );
-            abort();
-        }
-        (*ind).inode = inode;
-        (*ind).cacheblockcount = 0 as uint32_t;
-        (*ind).maxfleng = fleng;
-        (*ind).status = 0 as ::core::ffi::c_int;
-        (*ind).chunkscnt = 0 as uint16_t;
-        (*ind).chunks = ::core::ptr::null_mut::<chunkdata>();
-        (*ind).chunksnext = ::core::ptr::null_mut::<chunkdata>();
+        // C: malloc(sizeof(inodedata)) + passert; Box::new aborts on OOM.
+        // chunkstail is self-referential, patched after into_raw (C assigns
+        // it before the cond inits; all of this is inside hashlock, so the
+        // reordering is unobservable).
+        ind = Box::into_raw(Box::new(inodedata_s {
+            inode,
+            maxfleng: fleng,
+            cacheblockcount: 0 as uint32_t,
+            status: 0 as ::core::ffi::c_int,
+            flushwaiting: 0 as uint16_t,
+            writewaiting: 0 as uint16_t,
+            chunkwaiting: 0 as uint16_t,
+            lcnt: 1 as uint16_t,
+            chunkscnt: 0 as uint16_t,
+            chunks: ::core::ptr::null_mut::<chunkdata>(),
+            chunkstail: ::core::ptr::null_mut::<*mut chunkdata>(),
+            chunksnext: ::core::ptr::null_mut::<chunkdata>(),
+            flushcond: std::sync::Condvar::new(),
+            writecond: std::sync::Condvar::new(),
+            chunkcond: std::sync::Condvar::new(),
+            lock: std::sync::Mutex::new(()),
+            next: ::core::ptr::null_mut::<inodedata_s>(),
+        }));
         (*ind).chunkstail = &raw mut (*ind).chunks;
-        (*ind).flushwaiting = 0 as uint16_t;
-        (*ind).chunkwaiting = 0 as uint16_t;
-        (*ind).writewaiting = 0 as uint16_t;
-        (*ind).lcnt = 1 as uint16_t;
-        std::ptr::write(&raw mut (*ind).flushcond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).writecond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).chunkcond, std::sync::Condvar::new());
-        std::ptr::write(&raw mut (*ind).lock, std::sync::Mutex::new(()));
         (*ind).next = idhash[indh as usize] as *mut inodedata_s;
         idhash[indh as usize] = ind;
         hashlock_unlock();
@@ -1000,7 +963,7 @@ pub unsafe extern "C" fn write_free_inodedata(mut fid: *mut inodedata) {
                         abort();
                     };
                     ind_unlock(ind);
-                    free(ind as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(ind));
                 }
                 hashlock_unlock();
                 return;
@@ -2779,7 +2742,7 @@ pub unsafe extern "C" fn write_data_term() {
                     chd = chdn;
                 }
                 ind_unlock(ind);
-                free(ind as *mut ::core::ffi::c_void);
+                drop(Box::from_raw(ind));
                 ind = indn;
             }
             i = i.wrapping_add(1);

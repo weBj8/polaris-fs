@@ -212,7 +212,8 @@ pub type cspri = _cspri;
 pub type rrequest = rrequest_s;
 // std::sync primitives replace pthread_cond_t: futex-based, no heap
 // resources. Struct is Box-allocated in read_new_request (payload `data`
-// stays libc malloc'd); freed via Box::from_raw in read_delete_request.
+// is a Box<[u8]> leaked as a raw ptr); freed via Box::from_raw in
+// read_delete_request.
 #[repr(C)]
 pub struct rrequest_s {
     pub ind: *mut inodedata_s,
@@ -947,49 +948,12 @@ unsafe extern "C" fn read_new_request(
             chunkleng = blockend.wrapping_sub(*offset) as uint32_t;
             *offset = blockend;
         }
-        let data: *mut uint8_t = malloc(chunkleng as size_t) as *mut uint8_t;
-        if data.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                351 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq->data\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                351 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq->data\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if data
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut uint8_t
-        {
-            let mut _mfs_errorstring_0: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                351 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq->data\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsclient/readdata.c\0".as_ptr() as *const ::core::ffi::c_char,
-                351 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"rreq->data\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring_0,
-            );
-            abort();
-        }
+        // C: malloc(chunkleng) + passert. Box<[u8]> leaked as raw ptr;
+        // new_uninit_slice matches C's uninitialized payload (workers fill
+        // it from the network before any read) and skips the zero-fill.
+        let data: *mut uint8_t =
+            Box::into_raw(Box::<[u8]>::new_uninit_slice(chunkleng as usize).assume_init())
+                as *mut uint8_t;
         let mut rreq: *mut rrequest = Box::into_raw(Box::new(rrequest_s {
             ind: ind as *mut inodedata_s,
             wakeup_fd: -1 as ::core::ffi::c_int,
@@ -1043,7 +1007,12 @@ unsafe extern "C" fn read_delete_request(mut rreq: *mut rrequest) {
             c2rust_lhs, c2rust_rhs,
         )
         .wrapping_sub(c2rust_rhs);
-        free((*rreq).data as *mut ::core::ffi::c_void);
+        // C: free(rreq->data) with leng == chunkleng at alloc time
+        // (rreq->leng is never reassigned after read_new_request).
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            (*rreq).data,
+            (*rreq).leng as usize,
+        )));
         drop(Box::from_raw(rreq));
     }
 }
