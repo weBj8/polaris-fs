@@ -145,8 +145,34 @@ use pthread start-routine or pthread join protocols internally. `mfs_fuse` has
 no remaining pthread mutex/condition or pthread TLS protocol; ACL scratch data
 uses Rust thread-local ownership. readdata/writedata/mastercomm no longer use
 pthread mutexes, condition variables, thread-spawn/join, or pthread-key TLS;
-their structs and buffers are Box/arena/thread-local owned, and the only
-surviving libc allocation in the mount closure is the ABI-bound iovec pair.
+their structs and buffers are Box/arena/thread-local owned, and the iovec
+array is now a leaked `Box<[iovec]>` consumed by the fixed 3-arg
+`read_data_free_buff` ABI.
+
+## plfsbdev (NBD daemon) wave
+
+The same ownership migration was completed across the plfsbdev runtime
+closure (`squeue`/`workers`/NBD session threads, `mfsioint` synchronization
+and buffers, `mfsioint_lookupcache`, `plfsbdev` daemon allocations, `mfsio`,
+`strerr`):
+
+- `SQueue<T>` typed queue with RAII job wrappers; dead transpiled pcqueue copy
+  deleted; NBD control/send/recv threads and the worker pool use std threads
+  with JoinHandle/Mutex/Condvar.
+- `mfsioint` fdtab/usemask are owned Vecs with C doubling growth; per-file
+  locks and rwcond are std Mutex/Condvar with guard-slot emulation
+  (index/pointer-match misuse panics); dbuff is a leaked Box with
+  length-tracked free; lookup-cache bucket locks are a const-init std Mutex
+  array with entry Condvars; daemon config strings and packet buffers are
+  CString/Vec/Box owned.
+- Verified libc retention with in-code comments: variable-size protocol
+  structs (`nbdrequest`, `mfsacl`), `getline`/`__getdelim` internally
+  realloc'd buffers, and the `mfs_set_defaults` strdup ↔ takeover pairing.
+- C quirk frozen: `password_read` rejects passwords of exactly one
+  non-newline character (C strip-loop decrements before testing).
+- plfsbdev has no runtime NBD test harness; verification is `cargo test -p
+  plfsbdev` (16 unit tests), clean rebuild, and gates. Baseline re-frozen to
+  `wrapping_ops plfsbdev ge 186`.
 
 ## External boundary ledger (mount runtime closure)
 
