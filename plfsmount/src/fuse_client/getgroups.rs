@@ -1,444 +1,537 @@
-//! Supplementary-groups cache — safe Rust rewrite (P4).
+//! Supplementary-groups cache with direct Rust ownership.
 //!
-//! Original: MooseFS mfsclient/getgroups.c. Cache of /proc/<pid>/status
-//! "Groups:" lookups keyed by (pid,uid,gid), entries expiring after a
-//! timeout, a reaper thread, and a cacheonly "emergency mode" that may
-//! return stale entries. Results are handed out as C-layout `groups`
-//! blobs (lcnt/gidcnt/gidtab, gids inline after the header) that the
-//! caller frees via groups_rel.
-//!
-//! Safe core in `imp`: the /proc line parser (pure, reference-tested) and
-//! the cache decision tree. The boundary keeps the C blob ABI, the lcnt
-//! refcount protocol and the reaper thread. Two deliberate deviations,
-//! externally invisible: C swept expired same-bucket neighbors during a
-//! lookup (here only the reaper sweeps), and C stored the blob pointer in
-//! the cache entry (here the entry stores it as `usize` so `imp` stays
-//! free of unsafe) — the refcounting itself is behavior and is preserved
-//! exactly: caller ref (lcnt=1 at make), +1 while cached, free at 0.
-//! mfs_fuse RELIES on the cache ref: it reads a groups blob after
-//! groups_rel (opendir gidtab copy), valid only because the cache keeps
-//! the blob alive.
+//! Original: MooseFS mfsclient/getgroups.c. Cache entries are keyed by
+//! (pid, uid, gid), expire after a configured timeout, and own shared group
+//! slices through `Arc`. `/proc` access and the monotonic clock are the only
+//! external boundaries.
 
-use std::sync::Mutex as StdMutex;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 unsafe extern "C" {
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
     unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
 }
-pub type size_t = usize;
-pub type uint8_t = u8;
-pub type uint32_t = u32;
-pub type uint64_t = u64;
-pub type pid_t = ::core::ffi::c_int;
-pub type uid_t = ::core::ffi::c_uint;
-pub type gid_t = ::core::ffi::c_uint;
 
-/// C-layout result blob (getgroups.h); gidtab points right after header.
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct groups {
-    pub lcnt: uint32_t,
-    pub gidcnt: uint32_t,
-    pub gidtab: *mut uint32_t,
-}
+mod imp {
+    #![deny(unsafe_code)]
 
-#[deny(unsafe_code)]
-pub mod imp {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
-    /// Parse a /proc/<pid>/status "Groups:" line with the C ptr-walk
-    /// semantics: skip blanks, strtoul each number, stop at the first
-    /// non-blank non-digit. Returns [gid, ...supplementary] (gid first,
-    /// duplicates of gid excluded), or None if the line doesn't parse
-    /// (caller falls back to [gid]).
+    const HASH_SIZE: u32 = 65_536;
+    const REAPER_BUCKETS: u32 = 16;
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub(super) struct Key {
+        pid: i32,
+        uid: u32,
+        gid: u32,
+    }
+
+    impl Key {
+        pub(super) fn new(pid: i32, uid: u32, gid: u32) -> Self {
+            Self { pid, uid, gid }
+        }
+
+        pub(super) fn bucket(self) -> u32 {
+            (self
+                .pid
+                .cast_unsigned()
+                .wrapping_mul(0x74BF_4863)
+                .wrapping_add(self.uid)
+                .wrapping_mul(0xB435_C489)
+                .wrapping_add(self.gid))
+                % HASH_SIZE
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct GroupSet(Arc<[u32]>);
+
+    impl GroupSet {
+        pub(super) fn from_vec(groups: Vec<u32>) -> Self {
+            Self(groups.into())
+        }
+
+        pub(super) fn primary(gid: u32) -> Self {
+            Self(Arc::from([gid]))
+        }
+
+        pub fn as_slice(&self) -> &[u32] {
+            &self.0
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        #[cfg(test)]
+        pub(super) fn strong_count(&self) -> usize {
+            Arc::strong_count(&self.0)
+        }
+    }
+
+    /// Parse a /proc/<pid>/status "Groups:" line with C ptr-walk semantics:
+    /// skip blanks, strtoul each number, stop at first non-blank non-digit.
+    /// Result starts with primary gid and excludes that gid from remainder.
     pub fn parse_groups_line(line: &str, gid: u32) -> Vec<u32> {
-        let mut out = Vec::new();
-        let b = line.as_bytes();
+        let mut supplementary = Vec::new();
+        let bytes = line.as_bytes();
         let mut i = 0usize;
         loop {
-            while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
                 i += 1;
             }
-            if i < b.len() && b[i].is_ascii_digit() {
-                let mut g: u64 = 0;
-                while i < b.len() && b[i].is_ascii_digit() {
-                    g = g * 10 + (b[i] - b'0') as u64; // strtoul semantics
+            if i < bytes.len() && bytes[i].is_ascii_digit() {
+                let mut group: u64 = 0;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    group = group
+                        .saturating_mul(10)
+                        .saturating_add((bytes[i] - b'0') as u64);
                     i += 1;
                 }
-                if g as u32 != gid {
-                    out.push(g as u32);
+                if group as u32 != gid {
+                    supplementary.push(group as u32);
                 }
             } else {
                 break;
             }
         }
-        let mut ret = Vec::with_capacity(out.len() + 1);
-        ret.push(gid);
-        ret.extend(out);
-        ret
+        let mut groups = Vec::with_capacity(supplementary.len() + 1);
+        groups.push(gid);
+        groups.extend(supplementary);
+        groups
     }
 
-    /// Cache entry. `blob` is a `*mut groups` stored as usize (imp is
-    /// unsafe-free); the cache holds ONE refcount of the blob, released
-    /// on replace/sweep/term via the boundary's blob_decref.
     struct Entry {
         time: f64,
-        blob: usize,
+        groups: GroupSet,
     }
 
-    /// Outcome of the groups_get_common decision tree. Refcount side
-    /// effects happen at the boundary under the same lock:
-    /// - Cached(blob): caller must incref before use.
-    /// - Emergency: cacheonly miss — caller builds an UNCACHED [gid] blob.
-    /// - Fetched(new, old): new blob from `fetch` (lcnt=1, caller ref) was
-    ///   stored; caller must incref for the cache and decref `old` (the
-    ///   replaced entry's cache ref), C-order.
-    pub enum GetResult {
-        Cached(usize),
-        Emergency,
-        Fetched(usize, Option<usize>),
+    pub(super) enum Lookup {
+        Return(GroupSet),
+        Fetch(Option<GroupSet>),
     }
 
     pub struct GroupCache {
-        map: HashMap<(i32, u32, u32), Entry>,
-        pub timeout: f64,
+        buckets: HashMap<u32, HashMap<Key, Entry>>,
+        timeout: f64,
+        reaper_cursor: u32,
     }
 
     impl GroupCache {
         pub fn new(timeout: f64) -> Self {
-            GroupCache {
-                map: HashMap::new(),
+            Self {
+                buckets: HashMap::new(),
                 timeout,
+                reaper_cursor: 0,
             }
         }
 
-        /// The groups_get_common decision tree. `fetch` (boundary) reads
-        /// /proc and returns a fresh blob with lcnt=1 as usize.
-        pub fn get_common(
-            &mut self,
-            pid: i32,
-            uid: u32,
-            gid: u32,
-            cacheonly: bool,
-            now: f64,
-            fetch: &dyn Fn(i32, u32) -> usize,
-        ) -> GetResult {
-            let key = (pid, uid, gid);
-            let fresh = self
-                .map
-                .get(&key)
-                .map(|e| e.time + self.timeout >= now)
+        fn sweep_bucket(&mut self, bucket_index: u32, now: f64) {
+            let empty = self
+                .buckets
+                .get_mut(&bucket_index)
+                .map(|bucket| {
+                    let timeout = self.timeout;
+                    bucket.retain(|_, entry| entry.time + timeout >= now);
+                    bucket.is_empty()
+                })
                 .unwrap_or(false);
-            if cacheonly {
-                // emergency mode: any cached entry (even stale) wins
-                return match self.map.get(&key) {
-                    Some(e) => GetResult::Cached(e.blob),
-                    None => GetResult::Emergency,
-                };
+            if empty {
+                self.buckets.remove(&bucket_index);
             }
-            // expired entries are treated as missing (reaper sweeps them)
-            if uid != 0 && fresh {
-                return GetResult::Cached(self.map.get(&key).unwrap().blob);
-            }
-            // root always refetches; non-root refetches on miss/stale
-            let blob = fetch(pid, gid);
-            let old = self
-                .map
-                .insert(key, Entry { time: now, blob }) // C stamps pre-fetch time
-                .map(|e| e.blob);
-            GetResult::Fetched(blob, old)
         }
 
-        /// reaper sweep: drop expired entries, returning their blobs so
-        /// the boundary can release the cache refs.
-        pub fn sweep(&mut self, now: f64) -> Vec<usize> {
-            let to = self.timeout;
-            let mut out = Vec::new();
-            self.map.retain(|_, e| {
-                let keep = e.time + to >= now;
-                if !keep {
-                    out.push(e.blob);
+        pub(super) fn lookup(&mut self, key: Key, cache_only: bool, now: f64) -> Lookup {
+            let bucket_index = key.bucket();
+            if cache_only {
+                return self
+                    .buckets
+                    .get(&bucket_index)
+                    .and_then(|bucket| bucket.get(&key))
+                    .map(|entry| entry.groups.clone())
+                    .map(Lookup::Return)
+                    .unwrap_or_else(|| Lookup::Return(GroupSet::primary(key.gid)));
+            }
+
+            self.sweep_bucket(bucket_index, now);
+            let cached = self
+                .buckets
+                .get(&bucket_index)
+                .and_then(|bucket| bucket.get(&key))
+                .map(|entry| entry.groups.clone());
+            if key.uid != 0 {
+                if let Some(groups) = cached {
+                    return Lookup::Return(groups);
                 }
-                keep
-            });
-            out
+            }
+            Lookup::Fetch(cached)
         }
 
-        pub fn term(&mut self) -> Vec<usize> {
-            self.map.drain().map(|(_, e)| e.blob).collect()
+        pub(super) fn store(&mut self, key: Key, groups: GroupSet, before_fetch: f64) {
+            let bucket = self.buckets.entry(key.bucket()).or_default();
+            if let Some(entry) = bucket.get_mut(&key) {
+                entry.groups = groups;
+            } else {
+                bucket.insert(
+                    key,
+                    Entry {
+                        time: before_fetch,
+                        groups,
+                    },
+                );
+            }
+        }
+
+        pub fn sweep_next(&mut self, now: f64) {
+            for _ in 0..REAPER_BUCKETS {
+                self.sweep_bucket(self.reaper_cursor, now);
+                self.reaper_cursor = (self.reaper_cursor + 1) % HASH_SIZE;
+            }
+        }
+
+        pub fn term(&mut self) {
+            self.buckets.clear();
         }
 
         #[cfg(test)]
         pub fn len(&self) -> usize {
-            self.map.len()
+            self.buckets.values().map(HashMap::len).sum()
+        }
+
+        #[cfg(test)]
+        pub fn set_reaper_cursor(&mut self, cursor: u32) {
+            self.reaper_cursor = cursor;
+        }
+
+        #[cfg(test)]
+        pub fn reaper_cursor(&self) -> u32 {
+            self.reaper_cursor
+        }
+
+        #[cfg(test)]
+        pub fn entry_time(&self, key: Key) -> Option<f64> {
+            self.buckets
+                .get(&key.bucket())
+                .and_then(|bucket| bucket.get(&key))
+                .map(|entry| entry.time)
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Boundary: C blob ABI, /proc IO, reaper thread.
-// ---------------------------------------------------------------------------
+pub use imp::GroupSet;
+use imp::{GroupCache, Key, Lookup};
 
-use imp::{GetResult, GroupCache};
+static CACHE: Mutex<Option<GroupCache>> = Mutex::new(None);
+static KEEP_ALIVE: AtomicBool = AtomicBool::new(false);
+static THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+static DEBUG_MODE: AtomicI32 = AtomicI32::new(0);
 
-static CACHE: StdMutex<Option<GroupCache>> = StdMutex::new(None);
-static KEEP_ALIVE: ::core::sync::atomic::AtomicU8 = ::core::sync::atomic::AtomicU8::new(0);
-static THREAD: StdMutex<Option<std::thread::JoinHandle<()>>> = StdMutex::new(None);
-static DEBUG_MODE: ::core::sync::atomic::AtomicI32 = ::core::sync::atomic::AtomicI32::new(0);
+fn monotonic_now() -> f64 {
+    // SAFETY: monotonic_seconds takes no pointers and has no preconditions.
+    unsafe { monotonic_seconds() }
+}
 
-/// Fetch supplementary groups from /proc (Linux path of the C original).
-/// Fallback [gid] when unreadable/unparseable, exactly like C.
-fn fetch_groups(pid: pid_t, gid: gid_t) -> Vec<u32> {
+/// Fetch supplementary groups from Linux procfs. Unreadable or missing group
+/// data falls back to primary gid, matching original behavior.
+fn fetch_groups(pid: i32, gid: u32) -> GroupSet {
     let path = format!("/proc/{pid}/status");
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return vec![gid],
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return GroupSet::primary(gid),
     };
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("Groups:") {
-            return imp::parse_groups_line(rest, gid);
+            return GroupSet::from_vec(imp::parse_groups_line(rest, gid));
         }
     }
-    vec![gid]
+    GroupSet::primary(gid)
 }
 
-/// Build the C-layout blob: header + inline gid array, libc-malloc'd
-/// (caller releases with groups_rel → free(3)).
-/// SAFETY: gids non-empty (always at least the primary gid).
-unsafe fn make_blob(gids: &[u32]) -> *mut groups {
-    unsafe {
-        let n = gids.len();
-        let bytes = ::core::mem::size_of::<groups>() + n * 4;
-        let p = malloc(bytes) as *mut groups;
-        if p.is_null() {
-            return ::core::ptr::null_mut();
+fn get_common_with(
+    cache: &Mutex<Option<GroupCache>>,
+    pid: i32,
+    uid: u32,
+    gid: u32,
+    cache_only: bool,
+    before_fetch: f64,
+    fetch: impl FnOnce(i32, u32) -> GroupSet,
+) -> GroupSet {
+    let key = Key::new(pid, uid, gid);
+    let lookup = cache
+        .lock()
+        .unwrap()
+        .as_mut()
+        .map(|cache| cache.lookup(key, cache_only, before_fetch));
+    match lookup {
+        Some(Lookup::Return(groups)) => groups,
+        Some(Lookup::Fetch(cached)) => {
+            let groups = fetch(pid, gid);
+            let mut cache = cache.lock().unwrap();
+            drop(cached);
+            if let Some(cache) = cache.as_mut() {
+                cache.store(key, groups.clone(), before_fetch);
+            }
+            groups
         }
-        (*p).lcnt = 1;
-        (*p).gidcnt = n as uint32_t;
-        let tab = (p as *mut uint8_t).add(::core::mem::size_of::<groups>()) as *mut uint32_t;
-        ::core::ptr::copy_nonoverlapping(gids.as_ptr(), tab, n);
-        (*p).gidtab = tab;
-        p
-    }
-}
-
-/// C groups_decref: lcnt-- (guarded), free at 0. Under CACHE lock at
-/// every call site, mirroring C's glock.
-/// SAFETY: b is a live groups blob from make_blob.
-unsafe fn blob_decref(b: *mut groups) {
-    unsafe {
-        if (*b).lcnt > 0 {
-            (*b).lcnt -= 1;
-        }
-        if (*b).lcnt == 0 {
-            free(b as *mut ::core::ffi::c_void);
-        }
+        None => GroupSet::primary(gid),
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn groups_get_common(
-    pid: pid_t,
-    uid: uid_t,
-    gid: gid_t,
-    cacheonly: uint8_t,
-) -> *mut groups {
-    unsafe {
-        let now = monotonic_seconds();
-        let mut g = CACHE.lock().unwrap();
-        let res = match g.as_mut() {
-            Some(c) => c.get_common(pid, uid, gid, cacheonly != 0, now, &|p, gg| {
-                let gids = fetch_groups(p, gg);
-                make_blob(&gids) as usize
-            }),
-            None => GetResult::Emergency,
+pub fn get_common(pid: i32, uid: u32, gid: u32, cache_only: bool) -> GroupSet {
+    let groups = get_common_with(
+        &CACHE,
+        pid,
+        uid,
+        gid,
+        cache_only,
+        monotonic_now(),
+        fetch_groups,
+    );
+    if DEBUG_MODE.load(Ordering::Relaxed) != 0 {
+        eprintln!(
+            "groups_get(pid={pid},uid={uid},gid={gid}):{:?}",
+            groups.as_slice()
+        );
+    }
+    groups
+}
+
+fn cleanup_thread() {
+    loop {
+        let keep_alive = {
+            let mut cache = CACHE.lock().unwrap();
+            if let Some(cache) = cache.as_mut() {
+                cache.sweep_next(monotonic_now());
+            }
+            KEEP_ALIVE.load(Ordering::SeqCst)
         };
-        let blob = match res {
-            GetResult::Cached(b) => {
-                let b = b as *mut groups;
-                (*b).lcnt += 1; // caller ref
-                b
-            }
-            GetResult::Emergency => make_blob(&[gid]),
-            GetResult::Fetched(b, old) => {
-                let b = b as *mut groups;
-                (*b).lcnt += 1; // cache ref
-                if let Some(o) = old {
-                    blob_decref(o as *mut groups);
-                }
-                b
-            }
-        };
-        if DEBUG_MODE.load(::core::sync::atomic::Ordering::Relaxed) != 0 {
-            eprintln!(
-                "groups_get(pid={pid},uid={uid},gid={gid}): gidcnt={} lcnt={}",
-                (*blob).gidcnt,
-                (*blob).lcnt
-            );
-        }
-        blob
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn groups_rel(g: *mut groups) {
-    if !g.is_null() {
-        // C protocol: decref under glock; the blob dies only when the
-        // cache AND all callers released it. Callers (mfs_fuse opendir)
-        // legally read the blob after rel via the surviving cache ref.
-        let _lock = CACHE.lock().unwrap();
-        // SAFETY: blob from groups_get_common, decref'd at most once per
-        // get (mfs_fuse get→use→rel pattern).
-        unsafe {
-            blob_decref(g);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if !keep_alive {
+            return;
         }
     }
 }
 
-fn groups_cleanup_thread() {
-    unsafe {
-        loop {
-            {
-                let now = monotonic_seconds();
-                let mut g = CACHE.lock().unwrap();
-                if let Some(c) = g.as_mut() {
-                    // C swept 16 of 65536 buckets per 10ms; a whole-map
-                    // retain each 10ms is the same work amortized — only
-                    // memory-reclamation timing differs, never a decision.
-                    for b in c.sweep(now) {
-                        blob_decref(b as *mut groups);
-                    }
-                }
-            }
-            if KEEP_ALIVE.load(::core::sync::atomic::Ordering::SeqCst) == 0 {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn groups_term() {
-    unsafe {
-        KEEP_ALIVE.store(0, ::core::sync::atomic::Ordering::SeqCst);
-        if let Some(thread) = THREAD.lock().unwrap().take() {
-            thread.join().expect("groups reaper panicked");
-        }
-        let mut g = CACHE.lock().unwrap();
-        if let Some(c) = g.as_mut() {
-            for b in c.term() {
-                blob_decref(b as *mut groups);
-            }
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn groups_init(to: ::core::ffi::c_double, dm: ::core::ffi::c_int) {
-    DEBUG_MODE.store(dm, ::core::sync::atomic::Ordering::Relaxed);
+pub fn term() {
     {
-        let mut g = CACHE.lock().unwrap();
-        *g = Some(GroupCache::new(to));
+        let _cache = CACHE.lock().unwrap();
+        KEEP_ALIVE.store(false, Ordering::SeqCst);
     }
-    KEEP_ALIVE.store(1, ::core::sync::atomic::Ordering::SeqCst);
-    let thread = plfscommon::lwthread::spawn_min("groups-reaper", groups_cleanup_thread)
+    if let Some(thread) = THREAD.lock().unwrap().take() {
+        thread.join().expect("groups reaper panicked");
+    }
+    if let Some(cache) = CACHE.lock().unwrap().as_mut() {
+        cache.term();
+    }
+}
+
+pub fn init(timeout: f64, debug: i32) {
+    DEBUG_MODE.store(debug, Ordering::Relaxed);
+    *CACHE.lock().unwrap() = Some(GroupCache::new(timeout));
+    KEEP_ALIVE.store(true, Ordering::SeqCst);
+    let thread = plfscommon::lwthread::spawn_min("groups-reaper", cleanup_thread)
         .unwrap_or_else(|_| std::process::abort());
     *THREAD.lock().unwrap() = Some(thread);
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
+    use super::get_common_with;
     use super::imp::*;
-    use std::vec;
-    use std::vec::Vec;
+    use std::sync::Mutex;
+
+    fn group_set(groups: &[u32]) -> GroupSet {
+        GroupSet::from_vec(groups.to_vec())
+    }
+
+    fn local_cache(timeout: f64) -> Mutex<Option<GroupCache>> {
+        Mutex::new(Some(GroupCache::new(timeout)))
+    }
+
+    fn key_in_bucket(target: u32) -> Key {
+        (0..65_536)
+            .map(|pid| Key::new(pid, 7, 9))
+            .find(|key| key.bucket() == target)
+            .expect("pid hash must cover every bucket")
+    }
+
+    fn lookup_groups(cache: &mut GroupCache, key: Key, cache_only: bool, now: f64) -> GroupSet {
+        match cache.lookup(key, cache_only, now) {
+            Lookup::Return(groups) => groups,
+            Lookup::Fetch(_) => panic!("unexpected fetch"),
+        }
+    }
 
     #[test]
     fn parse_groups_line_reference() {
-        // real /proc format: "Groups: 4 24 27 30 46 100 114 1000"
         assert_eq!(
             parse_groups_line(" 4 24 27 30 46 100 114 1000", 1000),
             vec![1000, 4, 24, 27, 30, 46, 100, 114]
         );
-        // gid duplicated in list → excluded from supplementary
         assert_eq!(parse_groups_line(" 1000 4", 1000), vec![1000, 4]);
-        // tabs as separators
         assert_eq!(parse_groups_line("\t27\t30", 27), vec![27, 30]);
-        // empty list
         assert_eq!(parse_groups_line("", 1000), vec![1000]);
         assert_eq!(parse_groups_line(" ", 1000), vec![1000]);
-        // trailing junk stops the walk (C: *ptr not blank/digit)
         assert_eq!(parse_groups_line(" 4 5x 6", 1000), vec![1000, 4, 5]);
-    }
-
-    // imp never dereferences blobs; tests use fake pointer values.
-    fn fetch_blob(v: usize) -> impl Fn(i32, u32) -> usize {
-        move |_, _| v
+        // strtoul overflow saturates ULONG_MAX; gid_t keeps low 32 bits.
+        assert_eq!(
+            parse_groups_line(" 184467440737095516160", 1000),
+            vec![1000, u32::MAX]
+        );
     }
 
     #[test]
-    fn cache_tree_nonroot() {
-        let mut c = GroupCache::new(10.0);
-        let g = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
-        assert!(matches!(g, GetResult::Fetched(0x1000, None)));
-        // cached hit within timeout (fetch would panic if called)
-        let g2 = c.get_common(111, 1000, 1000, false, 105.0, &|_, _| {
+    fn nonroot_fresh_hit_and_expiry_boundary() {
+        let cache = local_cache(10.0);
+        let first = get_common_with(&cache, 111, 1000, 1000, false, 100.0, |_, _| {
+            group_set(&[1000, 4])
+        });
+        assert_eq!(first.as_slice(), &[1000, 4]);
+        let hit = get_common_with(&cache, 111, 1000, 1000, false, 105.0, |_, _| {
             panic!("must not fetch")
         });
-        assert!(matches!(g2, GetResult::Cached(0x1000)));
-        // expired → refetch, old blob handed back for decref
-        let g3 = c.get_common(111, 1000, 1000, false, 111.0, &fetch_blob(0x2000));
-        assert!(matches!(g3, GetResult::Fetched(0x2000, Some(0x1000))));
-        // strict-< : time+to == now is still fresh
-        let g4 = c.get_common(111, 1000, 1000, false, 121.0, &|_, _| {
+        assert_eq!(hit.as_slice(), &[1000, 4]);
+        let boundary = get_common_with(&cache, 111, 1000, 1000, false, 110.0, |_, _| {
             panic!("must not fetch")
         });
-        assert!(matches!(g4, GetResult::Cached(0x2000)));
-    }
-
-    #[test]
-    fn root_always_refetches() {
-        let mut c = GroupCache::new(1000.0);
-        let _ = c.get_common(111, 0, 0, false, 100.0, &fetch_blob(0x1000));
-        let g = c.get_common(111, 0, 0, false, 101.0, &fetch_blob(0x2000));
-        assert!(matches!(g, GetResult::Fetched(0x2000, Some(0x1000))));
-    }
-
-    #[test]
-    fn cacheonly_returns_stale_but_never_fetches() {
-        let mut c = GroupCache::new(10.0);
-        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
-        // stale but cacheonly → still returned, no fetch
-        let g = c.get_common(111, 1000, 1000, true, 1000.0, &|_, _| {
-            panic!("must not fetch")
+        assert_eq!(boundary.as_slice(), &[1000, 4]);
+        let replacement = get_common_with(&cache, 111, 1000, 1000, false, 110.1, |_, _| {
+            group_set(&[1000, 8])
         });
-        assert!(matches!(g, GetResult::Cached(0x1000)));
-        // cacheonly miss → Emergency (uncached [gid] at boundary), not stored
-        let g = c.get_common(222, 1000, 1000, true, 1000.0, &|_, _| {
-            panic!("must not fetch")
+        assert_eq!(replacement.as_slice(), &[1000, 8]);
+    }
+
+    #[test]
+    fn root_refresh_preserves_existing_timestamp() {
+        let cache = local_cache(10.0);
+        let key = Key::new(111, 0, 0);
+        let _ = get_common_with(&cache, 111, 0, 0, false, 100.0, |_, _| group_set(&[0, 1]));
+        let refreshed = get_common_with(&cache, 111, 0, 0, false, 105.0, |_, _| group_set(&[0, 2]));
+        assert_eq!(refreshed.as_slice(), &[0, 2]);
+        assert_eq!(
+            cache.lock().unwrap().as_ref().unwrap().entry_time(key),
+            Some(100.0)
+        );
+    }
+
+    #[test]
+    fn fetch_runs_without_cache_lock() {
+        let cache = local_cache(10.0);
+        let groups = get_common_with(&cache, 111, 1000, 1000, false, 100.0, |_, _| {
+            assert!(cache.try_lock().is_ok());
+            group_set(&[1000, 4])
         });
-        assert!(matches!(g, GetResult::Emergency));
-        assert_eq!(c.len(), 1);
+        assert_eq!(groups.as_slice(), &[1000, 4]);
     }
 
     #[test]
-    fn sweep_drops_expired_and_returns_blobs() {
-        let mut c = GroupCache::new(10.0);
-        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
-        let _ = c.get_common(222, 1000, 1000, false, 105.0, &fetch_blob(0x2000));
-        let mut dead = c.sweep(120.0); // both stale (110/115 < 120)
-        dead.sort();
-        assert_eq!(dead, vec![0x1000, 0x2000]);
-        assert_eq!(c.len(), 0);
+    fn cacheonly_keeps_stale_entry_before_its_bucket_sweep() {
+        let mut cache = GroupCache::new(10.0);
+        let key = key_in_bucket(16);
+        cache.store(key, group_set(&[9, 40]), 100.0);
+
+        cache.sweep_next(1000.0);
+
+        assert_eq!(cache.reaper_cursor(), 16);
+        assert_eq!(
+            lookup_groups(&mut cache, key, true, 1000.0).as_slice(),
+            &[9, 40]
+        );
     }
 
     #[test]
-    fn term_drains_all_blobs() {
-        let mut c = GroupCache::new(10.0);
-        let _ = c.get_common(111, 1000, 1000, false, 100.0, &fetch_blob(0x1000));
-        assert_eq!(c.term(), vec![0x1000]);
-        assert_eq!(c.len(), 0);
+    fn normal_lookup_sweeps_expired_same_bucket_neighbor() {
+        let mut cache = GroupCache::new(10.0);
+        let stale = Key::new(111, 1000, 1000);
+        let neighbor = Key::new(111 + 65_536, 1000, 1000);
+        assert_eq!(stale.bucket(), neighbor.bucket());
+        cache.store(stale, group_set(&[1000, 4]), 100.0);
+        cache.store(neighbor, group_set(&[1000, 8]), 105.0);
+
+        assert_eq!(
+            lookup_groups(&mut cache, neighbor, false, 111.0).as_slice(),
+            &[1000, 8]
+        );
+        assert_eq!(
+            lookup_groups(&mut cache, stale, true, 111.0).as_slice(),
+            &[1000]
+        );
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn reaper_sweeps_exactly_16_buckets_and_wraps() {
+        let mut cache = GroupCache::new(10.0);
+        let before = key_in_bucket(65_527);
+        let first = key_in_bucket(65_528);
+        let last = key_in_bucket(7);
+        let after = key_in_bucket(8);
+        for key in [before, first, last, after] {
+            cache.store(key, group_set(&[9, 40]), 0.0);
+        }
+        cache.set_reaper_cursor(65_528);
+
+        cache.sweep_next(20.0);
+
+        assert_eq!(cache.reaper_cursor(), 8);
+        assert_eq!(lookup_groups(&mut cache, before, true, 20.0).len(), 2);
+        assert_eq!(lookup_groups(&mut cache, first, true, 20.0).len(), 1);
+        assert_eq!(lookup_groups(&mut cache, last, true, 20.0).len(), 1);
+        assert_eq!(lookup_groups(&mut cache, after, true, 20.0).len(), 2);
+    }
+
+    #[test]
+    fn concurrent_store_order_preserves_first_timestamp_and_last_groups() {
+        let mut cache = GroupCache::new(10.0);
+        let key = Key::new(111, 0, 0);
+        assert!(matches!(
+            cache.lookup(key, false, 100.0),
+            Lookup::Fetch(None)
+        ));
+        assert!(matches!(
+            cache.lookup(key, false, 101.0),
+            Lookup::Fetch(None)
+        ));
+
+        cache.store(key, group_set(&[0, 2]), 101.0);
+        cache.store(key, group_set(&[0, 1]), 100.0);
+
+        assert_eq!(cache.entry_time(key), Some(101.0));
+        assert_eq!(
+            lookup_groups(&mut cache, key, true, 101.0).as_slice(),
+            &[0, 1]
+        );
+    }
+
+    #[test]
+    fn replacement_preserves_live_arc() {
+        let cache = local_cache(10.0);
+        let old = get_common_with(&cache, 111, 1000, 1000, false, 100.0, |_, _| {
+            group_set(&[1000, 4])
+        });
+        assert_eq!(old.strong_count(), 2);
+        let new = get_common_with(&cache, 111, 1000, 1000, false, 111.0, |_, _| {
+            group_set(&[1000, 8])
+        });
+        assert_eq!(old.as_slice(), &[1000, 4]);
+        assert_eq!(old.strong_count(), 1);
+        assert_eq!(new.strong_count(), 2);
+    }
+
+    #[test]
+    fn term_releases_cache_but_not_caller_arc() {
+        let cache = local_cache(10.0);
+        let groups = get_common_with(&cache, 111, 1000, 1000, false, 100.0, |_, _| {
+            group_set(&[1000, 4])
+        });
+        assert_eq!(groups.strong_count(), 2);
+        let mut cache = cache.lock().unwrap();
+        let cache = cache.as_mut().unwrap();
+        cache.term();
+        assert_eq!(groups.strong_count(), 1);
+        assert_eq!(groups.as_slice(), &[1000, 4]);
+        assert_eq!(cache.len(), 0);
     }
 }

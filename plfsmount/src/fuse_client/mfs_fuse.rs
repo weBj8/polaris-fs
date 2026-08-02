@@ -20,6 +20,7 @@ use crate::src::fuse_client::dirattrcache as dcache;
 use crate::src::fuse_client::dirbuf;
 use crate::src::fuse_client::fdcache;
 use crate::src::fuse_client::finfo as finfo_core;
+use crate::src::fuse_client::getgroups;
 use ::c2rust_bitfields;
 unsafe extern "C" {
     unsafe fn fuse_reply_err(req: fuse_req_t, err: ::core::ffi::c_int) -> ::core::ffi::c_int;
@@ -425,15 +426,6 @@ unsafe extern "C" {
     unsafe fn master_version() -> uint32_t;
     unsafe fn master_attrsize() -> uint8_t;
     unsafe fn masterproxy_getlocation(masterinfo: *mut uint8_t);
-    unsafe fn groups_get_common(
-        pid: pid_t,
-        uid: uid_t,
-        gid: gid_t,
-        cacheonly: uint8_t,
-    ) -> *mut groups;
-    unsafe fn groups_rel(g: *mut groups);
-    unsafe fn groups_term();
-    unsafe fn groups_init(_to: ::core::ffi::c_double, dm: ::core::ffi::c_int);
     unsafe fn read_data(
         vid: *mut ::core::ffi::c_void,
         offset: uint64_t,
@@ -707,13 +699,6 @@ pub type FILE = _IO_FILE;
 pub type C2Rust_Unnamed_1 = ::core::ffi::c_uint;
 pub const XATTR_REPLACE: C2Rust_Unnamed_1 = 2;
 pub const XATTR_CREATE: C2Rust_Unnamed_1 = 1;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct groups {
-    pub lcnt: uint32_t,
-    pub gidcnt: uint32_t,
-    pub gidtab: *mut uint32_t,
-}
 struct Sinfo {
     buff: Vec<u8>,
     reset: bool,
@@ -2694,7 +2679,6 @@ pub unsafe extern "C" fn mfs_access(
             umask: 0,
         };
         let mut attr: [uint8_t; 36] = [0; 36];
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut mmode: ::core::ffi::c_int = 0;
         let mut lflags: uint16_t = 0;
         let mut force_mode: ::core::ffi::c_int = 0;
@@ -2748,15 +2732,14 @@ pub unsafe extern "C" fn mfs_access(
                 };
             }
         } else if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_access(
                 ino as uint32_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 mmode as uint16_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_access(
@@ -2813,15 +2796,14 @@ pub unsafe extern "C" fn mfs_access(
                     );
                 }
                 if full_permissions != 0 {
-                    gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                    let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                     status = mfs_access_test(
                         &raw mut attr as *mut uint8_t as *const uint8_t,
                         mmode,
                         ctx.uid as uint32_t,
-                        (*gids).gidcnt,
-                        (*gids).gidtab,
+                        gids.len() as u32,
+                        gids.as_slice().as_ptr() as *mut u32,
                     );
-                    groups_rel(gids);
                 } else {
                     let mut gidtmp_0: uint32_t = ctx.gid as uint32_t;
                     status = mfs_access_test(
@@ -2916,7 +2898,6 @@ pub unsafe extern "C" fn mfs_lookup(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         if debug_mode != 0 {
             oplog_printf(
@@ -3242,14 +3223,14 @@ pub unsafe extern "C" fn mfs_lookup(
                 return;
             }
             if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_lookup(
                     parent as uint32_t,
                     nleng as uint8_t,
                     name as *const uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     &raw mut inode,
                     &raw mut attr as *mut uint8_t,
                     &raw mut lflags,
@@ -3259,7 +3240,6 @@ pub unsafe extern "C" fn mfs_lookup(
                     &raw mut csdata,
                     &raw mut csdatasize,
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp: uint32_t = ctx.gid as uint32_t;
                 status = fs_lookup(
@@ -4018,7 +3998,6 @@ pub unsafe extern "C" fn mfs_setattr(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut setmask: uint8_t = 0 as uint8_t;
         ctx = *fuse_req_ctx(req);
         mfs_make_setattr_str(
@@ -4226,7 +4205,7 @@ pub unsafe extern "C" fn mfs_setattr(
             == 0 as ::core::ffi::c_int
         {
             if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_setattr(
                     ino as uint32_t,
                     (if !fi.is_null() || fs_isopen(ino as uint32_t) != 0 {
@@ -4235,8 +4214,8 @@ pub unsafe extern "C" fn mfs_setattr(
                         0 as ::core::ffi::c_int
                     }) as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     0 as uint8_t,
                     0 as uint16_t,
                     0 as uint32_t,
@@ -4247,7 +4226,6 @@ pub unsafe extern "C" fn mfs_setattr(
                     0 as uint8_t,
                     &raw mut attr as *mut uint8_t,
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp: uint32_t = ctx.gid as uint32_t;
                 status = fs_setattr(
@@ -4417,7 +4395,7 @@ pub unsafe extern "C" fn mfs_setattr(
             }
             write_data_flush_inode(ino as uint32_t);
             if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = do_truncate(
                     ino as uint32_t,
                     (if !fi.is_null() {
@@ -4426,13 +4404,12 @@ pub unsafe extern "C" fn mfs_setattr(
                         0 as ::core::ffi::c_int
                     }) as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     (*stbuf).st_size as uint64_t,
                     &raw mut attr as *mut uint8_t,
                     ::core::ptr::null_mut::<uint64_t>(),
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp_0: uint32_t = ctx.gid as uint32_t;
                 status = do_truncate(
@@ -4562,7 +4539,7 @@ pub unsafe extern "C" fn mfs_setattr(
                 fs_no_mtime(ino as uint32_t);
             }
             if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_setattr(
                     ino as uint32_t,
                     (if !fi.is_null() || fs_isopen(ino as uint32_t) != 0 {
@@ -4571,8 +4548,8 @@ pub unsafe extern "C" fn mfs_setattr(
                         0 as ::core::ffi::c_int
                     }) as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     setmask,
                     ((*stbuf).st_mode & 0o7777 as __mode_t) as uint16_t,
                     (*stbuf).st_uid as uint32_t,
@@ -4583,7 +4560,6 @@ pub unsafe extern "C" fn mfs_setattr(
                     sugid_clear_mode as uint8_t,
                     &raw mut attr as *mut uint8_t,
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp_1: uint32_t = ctx.gid as uint32_t;
                 status = fs_setattr(
@@ -4794,7 +4770,6 @@ pub unsafe extern "C" fn mfs_mknod(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_makemodestr(
             &raw mut modestr as *mut ::core::ffi::c_char,
@@ -4901,7 +4876,7 @@ pub unsafe extern "C" fn mfs_mknod(
         }
         cumask = ctx.umask as uint16_t;
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_mknod(
                 parent as uint32_t,
                 nleng as uint8_t,
@@ -4910,13 +4885,12 @@ pub unsafe extern "C" fn mfs_mknod(
                 (mode & 0o7777 as mode_t) as uint16_t,
                 cumask,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 rdev as uint32_t,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_mknod(
@@ -5012,7 +4986,6 @@ pub unsafe extern "C" fn mfs_unlink(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_stats_inc(OP_UNLINK as ::core::ffi::c_int as uint8_t);
         if debug_mode != 0 {
@@ -5063,17 +5036,16 @@ pub unsafe extern "C" fn mfs_unlink(
             return;
         }
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_unlink(
                 parent as uint32_t,
                 nleng as uint8_t,
                 name as *const uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 &raw mut inode,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_unlink(
@@ -5168,7 +5140,6 @@ pub unsafe extern "C" fn mfs_mkdir(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_makemodestr(
             &raw mut modestr as *mut ::core::ffi::c_char,
@@ -5247,7 +5218,7 @@ pub unsafe extern "C" fn mfs_mkdir(
         }
         cumask = ctx.umask as uint16_t;
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_mkdir(
                 parent as uint32_t,
                 nleng as uint8_t,
@@ -5255,13 +5226,12 @@ pub unsafe extern "C" fn mfs_mkdir(
                 mode as uint16_t,
                 cumask,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 mkdir_copy_sgid as uint8_t,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_mkdir(
@@ -5377,7 +5347,6 @@ pub unsafe extern "C" fn mfs_rmdir(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_stats_inc(OP_RMDIR as ::core::ffi::c_int as uint8_t);
         if debug_mode != 0 {
@@ -5428,17 +5397,16 @@ pub unsafe extern "C" fn mfs_rmdir(
             return;
         }
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_rmdir(
                 parent as uint32_t,
                 nleng as uint8_t,
                 name as *const uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 &raw mut inode,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_rmdir(
@@ -5533,7 +5501,6 @@ pub unsafe extern "C" fn mfs_symlink(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_stats_inc(OP_SYMLINK as ::core::ffi::c_int as uint8_t);
         if debug_mode != 0 {
@@ -5590,19 +5557,18 @@ pub unsafe extern "C" fn mfs_symlink(
             return;
         }
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_symlink(
                 parent as uint32_t,
                 nleng as uint8_t,
                 name as *const uint8_t,
                 path as *const uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_symlink(
@@ -5759,7 +5725,6 @@ pub unsafe extern "C" fn mfs_rename(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut mfsflags: uint8_t = 0;
         let mut mask: ::core::ffi::c_int = 0;
         ctx = *fuse_req_ctx(req);
@@ -5897,7 +5862,7 @@ pub unsafe extern "C" fn mfs_rename(
             mfsflags = (mfsflags as ::core::ffi::c_int | MFS_RENAME_NOREPLACE) as uint8_t;
         }
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_rename(
                 parent as uint32_t,
                 nleng as uint8_t,
@@ -5906,13 +5871,12 @@ pub unsafe extern "C" fn mfs_rename(
                 newnleng as uint8_t,
                 newname as *const uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 mfsflags,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_rename(
@@ -6053,7 +6017,6 @@ pub unsafe extern "C" fn mfs_link(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         ctx = *fuse_req_ctx(req);
         mfs_stats_inc(OP_LINK as ::core::ffi::c_int as uint8_t);
         if debug_mode != 0 {
@@ -6120,19 +6083,18 @@ pub unsafe extern "C" fn mfs_link(
             return;
         }
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_link(
                 ino as uint32_t,
                 newparent as uint32_t,
                 newnleng as uint8_t,
                 newname as *const uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_link(
@@ -6219,14 +6181,9 @@ unsafe fn snapshot_dir_groups(ctx: &fuse_ctx) -> Vec<u32> {
         if full_permissions == 0 {
             return Vec::new();
         }
-        let gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0);
-        let groups = if (*gids).gidcnt == 0 {
-            Vec::new()
-        } else {
-            std::slice::from_raw_parts((*gids).gidtab, (*gids).gidcnt as usize).to_vec()
-        };
-        groups_rel(gids);
-        groups
+        getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false)
+            .as_slice()
+            .to_vec()
     }
 }
 
@@ -6328,15 +6285,14 @@ pub unsafe extern "C" fn mfs_opendir(req: fuse_req_t, ino: fuse_ino_t, fi: *mut 
         let mut status = if mfs_disables & DISABLE_READDIR as u32 != 0 {
             MFS_ERROR_EPERM
         } else if full_permissions != 0 {
-            let gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             let status = fs_access(
                 ino as u32,
                 ctx.uid,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 MODE_MASK_R as u16,
             ) as i32;
-            groups_rel(gids);
             status
         } else {
             let mut gid = ctx.gid;
@@ -6347,15 +6303,14 @@ pub unsafe extern "C" fn mfs_opendir(req: fuse_req_t, ino: fuse_ino_t, fi: *mut 
             && sstats_get(ino as u32, attr.as_mut_ptr(), 0) == MFS_STATUS_OK
         {
             status = if full_permissions != 0 {
-                let gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 let status = mfs_access_test(
                     attr.as_ptr(),
                     MODE_MASK_R,
                     ctx.uid,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                 );
-                groups_rel(gids);
                 status
             } else {
                 let mut gid = ctx.gid;
@@ -7115,7 +7070,6 @@ pub unsafe extern "C" fn mfs_create(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut findex: uint32_t = 0;
         let mut oflags: uint8_t = 0;
         let mut flagsstr: [::core::ffi::c_char; 512] = [0; 512];
@@ -7206,7 +7160,7 @@ pub unsafe extern "C" fn mfs_create(
         }
         cumask = ctx.umask as uint16_t;
         if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_create(
                 parent as uint32_t,
                 nleng as uint8_t,
@@ -7214,13 +7168,12 @@ pub unsafe extern "C" fn mfs_create(
                 (mode & 0o7777 as mode_t) as uint16_t,
                 cumask,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 &raw mut inode,
                 &raw mut attr as *mut uint8_t,
                 &raw mut oflags,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_create(
@@ -7522,7 +7475,6 @@ pub unsafe extern "C" fn mfs_open(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut findex: uint32_t = 0;
         let mut flagsstr: [::core::ffi::c_char; 512] = [0; 512];
         ctx = *fuse_req_ctx(req);
@@ -7815,12 +7767,12 @@ pub unsafe extern "C" fn mfs_open(
         } else {
             write_data_flush_inode(ino as uint32_t);
             if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_opencheck(
                     ino as uint32_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     flags,
                     &raw mut attr as *mut uint8_t,
                     &raw mut oflags,
@@ -7833,14 +7785,13 @@ pub unsafe extern "C" fn mfs_open(
                         ino as uint32_t,
                         TRUNCATE_FLAG_OPENED as uint8_t,
                         ctx.uid as uint32_t,
-                        (*gids).gidcnt,
-                        (*gids).gidtab,
+                        gids.len() as u32,
+                        gids.as_slice().as_ptr() as *mut u32,
                         0 as uint64_t,
                         &raw mut attr as *mut uint8_t,
                         ::core::ptr::null_mut::<uint64_t>(),
                     ) as ::core::ffi::c_int;
                 }
-                groups_rel(gids);
             } else {
                 let mut gidtmp: uint32_t = ctx.gid as uint32_t;
                 status = fs_opencheck(
@@ -9304,7 +9255,6 @@ pub unsafe extern "C" fn mfs_flush(
         let mut fileinfo: Option<std::sync::Arc<FileInfo>> = None;
         let mut err: ::core::ffi::c_int = 0;
         let mut uselocks: uint8_t = 0;
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut ctx: fuse_ctx = fuse_ctx {
             uid: 0,
             gid: 0,
@@ -9404,18 +9354,17 @@ pub unsafe extern "C" fn mfs_flush(
             {
                 err = write_data_flush(write_ptr);
             } else {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 do_truncate(
                     ino as uint32_t,
                     (TRUNCATE_FLAG_OPENED | TRUNCATE_FLAG_UPDATE) as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     write_data_getmaxfleng(write_ptr),
                     ::core::ptr::null_mut::<uint8_t>(),
                     ::core::ptr::null_mut::<uint64_t>(),
                 );
-                groups_rel(gids);
                 err = write_data_chunk_wait(write_ptr);
             }
         }
@@ -10820,7 +10769,6 @@ pub unsafe extern "C" fn mfs_setxattr(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut aclxattr: uint8_t = 0;
         if no_xattrs != 0 {
             fuse_reply_err(req, ENOSYS);
@@ -10968,20 +10916,19 @@ pub unsafe extern "C" fn mfs_setxattr(
                 size as uint32_t,
             );
         } else if full_permissions != 0 {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
             status = fs_setxattr(
                 ino as uint32_t,
                 0 as uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 nleng as uint8_t,
                 name as *const uint8_t,
                 size as uint32_t,
                 value as *const uint8_t,
                 mode,
             ) as ::core::ffi::c_int;
-            groups_rel(gids);
         } else {
             let mut gidtmp: uint32_t = ctx.gid as uint32_t;
             status = fs_setxattr(
@@ -11053,7 +11000,6 @@ pub unsafe extern "C" fn mfs_getxattr(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut xattr_value_release: *mut ::core::ffi::c_void =
             ::core::ptr::null_mut::<::core::ffi::c_void>();
         let mut aclxattr: uint8_t = 0;
@@ -11164,14 +11110,14 @@ pub unsafe extern "C" fn mfs_getxattr(
         } else {
             xattr_value_release = NULL;
         }
-        if aclxattr as ::core::ffi::c_int == POSIX_ACL_NONE
+        let gids = if aclxattr as ::core::ffi::c_int == POSIX_ACL_NONE
             && full_permissions != 0
             && xattr_value_release.is_null()
         {
-            gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+            Some(getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false))
         } else {
-            gids = ::core::ptr::null_mut::<groups>();
-        }
+            None
+        };
         use_cache = 0 as uint8_t;
         if xattr_cache_on != 0 {
             if xattr_value_release.is_null() {
@@ -11195,13 +11141,13 @@ pub unsafe extern "C" fn mfs_getxattr(
                     }
                 } else if aclxattr as ::core::ffi::c_int != POSIX_ACL_NONE {
                     status = mfs_getfacl(req, ino, aclxattr, &raw mut buff, &raw mut leng);
-                } else if !gids.is_null() {
+                } else if let Some(gids) = gids.as_ref() {
                     status = fs_getxattr(
                         ino as uint32_t,
                         0 as uint8_t,
                         ctx.uid as uint32_t,
-                        (*gids).gidcnt,
-                        (*gids).gidtab,
+                        gids.len() as u32,
+                        gids.as_slice().as_ptr() as *mut u32,
                         nleng as uint8_t,
                         name as *const uint8_t,
                         MFS_XATTR_GETA_DATA as uint8_t,
@@ -11263,13 +11209,13 @@ pub unsafe extern "C" fn mfs_getxattr(
             }
         } else if aclxattr as ::core::ffi::c_int != POSIX_ACL_NONE {
             status = mfs_getfacl(req, ino, aclxattr, &raw mut buff, &raw mut leng);
-        } else if !gids.is_null() {
+        } else if let Some(gids) = gids.as_ref() {
             status = fs_getxattr(
                 ino as uint32_t,
                 0 as uint8_t,
                 ctx.uid as uint32_t,
-                (*gids).gidcnt,
-                (*gids).gidtab,
+                gids.len() as u32,
+                gids.as_slice().as_ptr() as *mut u32,
                 nleng as uint8_t,
                 name as *const uint8_t,
                 mode,
@@ -11290,9 +11236,6 @@ pub unsafe extern "C" fn mfs_getxattr(
                 &raw mut buff,
                 &raw mut leng,
             ) as ::core::ffi::c_int;
-        }
-        if !gids.is_null() {
-            groups_rel(gids);
         }
         status = mfs_errorconv(status);
         if status != 0 as ::core::ffi::c_int {
@@ -11396,7 +11339,6 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut xattr_value_release: *mut ::core::ffi::c_void =
             ::core::ptr::null_mut::<::core::ffi::c_void>();
         if no_xattrs != 0 {
@@ -11508,18 +11450,17 @@ pub unsafe extern "C" fn mfs_listxattr(mut req: fuse_req_t, mut ino: fuse_ino_t,
                     }
                 }
                 if full_permissions != 0 {
-                    gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                    let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                     status = fs_listxattr(
                         ino as uint32_t,
                         0 as uint8_t,
                         ctx.uid as uint32_t,
-                        (*gids).gidcnt,
-                        (*gids).gidtab,
+                        gids.len() as u32,
+                        gids.as_slice().as_ptr() as *mut u32,
                         mode,
                         &raw mut buff,
                         &raw mut leng,
                     ) as ::core::ffi::c_int;
-                    groups_rel(gids);
                 } else {
                     let mut gidtmp: uint32_t = ctx.gid as uint32_t;
                     status = fs_listxattr(
@@ -11765,7 +11706,6 @@ pub unsafe extern "C" fn mfs_removexattr(
             pid: 0,
             umask: 0,
         };
-        let mut gids: *mut groups = ::core::ptr::null_mut::<groups>();
         let mut aclxattr: uint8_t = 0;
         let mut xattr_value_release: *mut ::core::ffi::c_void =
             ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -11886,17 +11826,16 @@ pub unsafe extern "C" fn mfs_removexattr(
                     0 as uint32_t,
                 ) as ::core::ffi::c_int;
             } else if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_removexattr(
                     ino as uint32_t,
                     0 as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     nleng as uint8_t,
                     name as *const uint8_t,
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp: uint32_t = ctx.gid as uint32_t;
                 status = fs_removexattr(
@@ -11967,17 +11906,16 @@ pub unsafe extern "C" fn mfs_removexattr(
                     0 as uint32_t,
                 ) as ::core::ffi::c_int;
             } else if full_permissions != 0 {
-                gids = groups_get_common(ctx.pid, ctx.uid, ctx.gid, 0 as uint8_t);
+                let gids = getgroups::get_common(ctx.pid, ctx.uid, ctx.gid, false);
                 status = fs_removexattr(
                     ino as uint32_t,
                     0 as uint8_t,
                     ctx.uid as uint32_t,
-                    (*gids).gidcnt,
-                    (*gids).gidtab,
+                    gids.len() as u32,
+                    gids.as_slice().as_ptr() as *mut u32,
                     nleng as uint8_t,
                     name as *const uint8_t,
                 ) as ::core::ffi::c_int;
-                groups_rel(gids);
             } else {
                 let mut gidtmp_0: uint32_t = ctx.gid as uint32_t;
                 status = fs_removexattr(
@@ -12101,7 +12039,7 @@ pub unsafe extern "C" fn mfs_term() {
         finfo_freeall();
         xattr_cache_term();
         if full_permissions != 0 {
-            groups_term();
+            getgroups::term();
         }
     }
 }
@@ -12166,7 +12104,7 @@ pub unsafe extern "C" fn mfs_init(
         no_posix_locks = no_posix_locks_in;
         no_bsd_locks = no_bsd_locks_in;
         if groups_cache_timeout > 0.0f64 {
-            groups_init(groups_cache_timeout, debug_mode);
+            getgroups::init(groups_cache_timeout, debug_mode);
             full_permissions = 1 as ::core::ffi::c_int;
         } else {
             full_permissions = 0 as ::core::ffi::c_int;

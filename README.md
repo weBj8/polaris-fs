@@ -59,7 +59,7 @@ backup, upgrade, and rollback: [deployment guide](docs/deployment.md).
 | P1 | Shared `plfscommon` | **Done** — 12/14 modules migrated |
 | P2 | `plfsmetalogger`, `plfsgui` | Pending |
 | P3 | `plfschunkserver` | Pending |
-| P4 | `plfsmount`, shared `plfsclient`, `plfsbdev` | **Partial** — dirbuf/finfo ownership and thread waves migrated; mount has 91 lib tests + 2 bin tests; ACL TLS, groups/queue boundaries, shared IO backends, and bdev data path remain |
+| P4 | `plfsmount`, shared `plfsclient`, `plfsbdev` | **Partial** — dirbuf/finfo ownership and thread waves migrated; mount has 91 lib tests + 2 bin tests; ACL TLS, queue ownership, shared IO backends, and bdev data path remain |
 | P5 | `plfsmaster` | Pending |
 | P6 | Stable toolchain and remaining boundaries | Pending |
 
