@@ -49,6 +49,13 @@ punch-list).
 | D6 | UB-preserving-semantics | `transmute` sites (ungrepped at P0) | layout invariants unasserted; Bun shipped 148 layout asserts, we ship ~0 | LOW (class) |
 | D7 | UB-preserving-semantics | variadic leaves (`mfslog`, `oplog`, `mfsio`, `changelog`, `plfsgui`) | `VaList` misuse is UB; nightly `c_variadic` API drift already bit once (`arg` → `next_arg` rename) | LOW |
 
+P2 re-audit (2026-08-04): `plfsmetalogger` and `plfsgui` class-A mutable
+globals moved into owned/atomic/mutex/thread-local state. Callback registries
+and packet/request ownership no longer use intrusive raw-pointer globals.
+`mfscgiserv_printf` remains the single GUI variadic leaf; fixed-signature logic
+stays outside it. C-required wrapping remains explicit and is frozen at 15
+(metalogger), 13 (GUI), and 854 (shared `plfscommon` sources).
+
 ---
 
 ## H1. `static mut` aliasing across the poll loop — the systemic class
