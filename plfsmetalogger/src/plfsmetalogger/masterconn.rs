@@ -5,7 +5,8 @@
 #[path = "masterconn_core.rs"]
 mod core;
 
-use self::core::{Connection, Control, Mode, Packet};
+use self::core::{Connection, Control, Mode, Packet, ProtocolError};
+use crate::mfslog::{MFSLOG_ERR, MFSLOG_INFO, MFSLOG_NOTICE, MFSLOG_WARNING};
 use libc::{c_char, c_double, c_int, c_void};
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, OpenOptions};
@@ -34,6 +35,9 @@ pub const MATOAN_DOWNLOAD_INFO: u32 = 61;
 pub const ANTOMA_DOWNLOAD_REQUEST: c_int = 62;
 pub const MATOAN_DOWNLOAD_DATA: u32 = 63;
 pub const ANTOMA_DOWNLOAD_END: c_int = 64;
+const MFSLOG_SYSLOG: c_int = 0;
+const MFSLOG_SYSLOG_STDERR: c_int = 2;
+const MFSLOG_ERRNO_SYSLOG_STDERR: c_int = 3;
 
 unsafe extern "C" {
     fn cfg_getstr(name: *const c_char, default: *const c_char) -> *mut c_char;
@@ -76,7 +80,13 @@ unsafe extern "C" {
     fn monotonic_seconds() -> c_double;
     fn monotonic_useconds() -> u64;
     fn mycrc32(crc: u32, block: *const c_void, length: u32) -> u32;
+    fn mfs_log(mode: c_int, priority: c_int, format: *const c_char, ...);
     fn fprintf(stream: *mut FILE, format: *const c_char, ...) -> c_int;
+}
+
+fn log_message(mode: c_int, priority: c_int, message: &CStr) {
+    // SAFETY: Message is a static or owned NUL-terminated format without operands.
+    unsafe { mfs_log(mode, priority, message.as_ptr()) };
 }
 
 struct Config {
@@ -267,6 +277,11 @@ fn download_end(rt: &mut Runtime) -> c_int {
     if let Some(file) = rt.meta_file.take() {
         // SAFETY: Category 8 (FFI). into_raw_fd transfers sole descriptor ownership to close.
         if unsafe { libc::close(file.into_raw_fd()) } < 0 {
+            log_message(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_WARNING,
+                c"error closing metafile",
+            );
             return -1;
         }
     }
@@ -287,6 +302,29 @@ fn download_next(rt: &mut Runtime) {
     if download_end(rt) < 0 {
         return;
     }
+    // SAFETY: Monotonic clock takes no arguments and returns a value.
+    let elapsed = unsafe { monotonic_useconds() }
+        .wrapping_sub(rt.download_started)
+        .max(1);
+    let file_name = match file_number {
+        1 => c"metadata",
+        11 => c"changelog_0",
+        12 => c"changelog_1",
+        _ => c"???",
+    };
+    // SAFETY: Static format matches file name, byte/time values, and throughput double.
+    unsafe {
+        mfs_log(
+            MFSLOG_SYSLOG,
+            MFSLOG_INFO,
+            c"%s downloaded %luB/%lu.%06us (%.3lf MB/s)".as_ptr(),
+            file_name.as_ptr(),
+            rt.file_size,
+            elapsed / 1_000_000,
+            (elapsed % 1_000_000) as u32,
+            rt.file_size as f64 / elapsed as f64,
+        )
+    };
     match file_number {
         1 => {
             if metadata_valid(Path::new("metadata_ml.tmp")) {
@@ -318,6 +356,11 @@ fn download_next(rt: &mut Runtime) {
 
 fn before_close(rt: &mut Runtime) {
     if matches!(rt.downloading, 11 | 12) {
+        log_message(
+            MFSLOG_SYSLOG,
+            MFSLOG_WARNING,
+            c"old master detected - please upgrade your master server and then restart metalogger",
+        );
         rt.old_mode = true;
     }
     if rt.meta_file.take().is_some() {
@@ -328,12 +371,23 @@ fn before_close(rt: &mut Runtime) {
 }
 
 fn dispatch_packet(rt: &mut Runtime, packet: Packet) {
-    if !matches!(
-        rt.connection
-            .apply_control(packet.packet_type, &packet.payload),
-        Ok(Control::Dispatch)
-    ) {
-        return;
+    match rt
+        .connection
+        .apply_control(packet.packet_type, &packet.payload)
+    {
+        Ok(Control::Handled) => return,
+        Err(error) => {
+            let message = match (error, packet.packet_type) {
+                (ProtocolError::WrongSize, MATOAN_MASTER_ACK) => {
+                    c"MATOAN_MASTER_ACK - wrong size"
+                }
+                (ProtocolError::WrongSize, _) => c"master packet - wrong size",
+                (ProtocolError::UnknownCommand, _) => c"unknown packet from master",
+            };
+            log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_WARNING, message);
+            return;
+        }
+        Ok(Control::Dispatch) => {}
     }
     match packet.packet_type {
         MATOAN_METACHANGES_LOG => metachange(rt, &packet.payload),
@@ -355,11 +409,26 @@ fn metachange(rt: &mut Runtime, payload: &[u8]) {
         return;
     }
     if payload.len() < 10 || payload[0] != 0xff || payload.last() != Some(&0) {
+        log_message(
+            MFSLOG_SYSLOG_STDERR,
+            MFSLOG_WARNING,
+            c"MATOAN_METACHANGES_LOG - wrong size",
+        );
         rt.connection.mode = Mode::Kill;
         return;
     }
     let version = u64::from_be_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
     if rt.last_log_version > 0 && version != rt.last_log_version.wrapping_add(1) {
+        // SAFETY: Static format matches inclusive lost-version bounds.
+        unsafe {
+            mfs_log(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_WARNING,
+                c"some changes lost: [%lu-%lu], download metadata again".as_ptr(),
+                rt.last_log_version,
+                version.wrapping_sub(1),
+            )
+        };
         rt.log_file.take();
         for index in 0..=rt.config.back_logs {
             let _ = fs::remove_file(format!("changelog_ml.{index}.mfs"));
@@ -391,6 +460,11 @@ fn download_info(rt: &mut Runtime, payload: &[u8]) {
         return;
     }
     if payload.len() != 8 {
+        log_message(
+            MFSLOG_SYSLOG_STDERR,
+            MFSLOG_WARNING,
+            c"MATOAN_DOWNLOAD_INFO - wrong size",
+        );
         rt.connection.mode = Mode::Kill;
         return;
     }
@@ -414,6 +488,11 @@ fn download_info(rt: &mut Runtime, payload: &[u8]) {
         .open(path)
         .ok();
     if rt.meta_file.is_none() {
+        log_message(
+            MFSLOG_ERRNO_SYSLOG_STDERR,
+            MFSLOG_ERR,
+            c"can't open metadata download file",
+        );
         download_end(rt);
     } else {
         download_next(rt);
@@ -748,12 +827,22 @@ fn read_runtime(rt: &mut Runtime, now: c_double) {
             )
         };
         if count == 0 {
+            log_message(
+                MFSLOG_SYSLOG,
+                MFSLOG_NOTICE,
+                c"connection was reset by Master",
+            );
             rt.connection.input_end = true;
             break;
         }
         if count < 0 {
             let error = std::io::Error::last_os_error().raw_os_error();
             if !matches!(error, Some(code) if code == libc::EAGAIN || code == libc::EINTR) {
+                log_message(
+                    MFSLOG_SYSLOG_STDERR,
+                    MFSLOG_WARNING,
+                    c"read from Master error",
+                );
                 rt.connection.input_end = true;
             }
             break;

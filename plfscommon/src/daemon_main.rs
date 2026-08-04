@@ -24,6 +24,14 @@ const MFSLOG_NOTICE: c_int = 2;
 const MFSLOG_WARNING: c_int = 3;
 const MFSLOG_ERR: c_int = 4;
 
+#[cfg(target_os = "linux")]
+const DEFAULT_DISABLE_OOM_KILLER: u8 = 1;
+#[cfg(target_os = "linux")]
+const OOM_ADJUSTMENTS: [(&CStr, c_int); 2] = [
+    (c"/proc/self/oom_score_adj", -1_000),
+    (c"/proc/self/oom_adj", -17),
+];
+
 const RM_RESTART: u8 = 0;
 const RM_START: u8 = 1;
 const RM_STOP: u8 = 2;
@@ -35,6 +43,7 @@ const RM_TRY_RESTART: u8 = 7;
 const RM_RESTORE: u8 = 8;
 
 unsafe extern "C" {
+    static mut stdout: *mut FILE;
     static mut stderr: *mut FILE;
     static mut optarg: *mut c_char;
     static mut optind: c_int;
@@ -46,6 +55,7 @@ unsafe extern "C" {
     fn cfg_term();
     fn cfg_getstr(name: *const c_char, def: *const c_char) -> *mut c_char;
     fn cfg_getnum(name: *const c_char, def: c_int) -> c_int;
+    fn cfg_getuint8(name: *const c_char, def: u8) -> u8;
     fn cfg_getuint32(name: *const c_char, def: u32) -> u32;
     fn cfg_getint32(name: *const c_char, def: i32) -> i32;
     fn cfg_getdouble(name: *const c_char, def: c_double) -> c_double;
@@ -143,6 +153,37 @@ fn config_string(name: &CStr, default: &CStr) -> *mut c_char {
     unsafe { cfg_getstr(name.as_ptr(), default.as_ptr()) }
 }
 
+fn parse_c_ulong_prefix(value: &CStr) -> Option<libc::c_ulong> {
+    let start = value.as_ptr();
+    let mut end = core::ptr::null_mut();
+    // SAFETY: `value` is NUL-terminated; `end` is writable and inspected only after strtoul.
+    let parsed = unsafe { libc::strtoul(start, &mut end, 10) };
+    (end.cast_const() != start).then_some(parsed)
+}
+
+fn parse_c_uint_prefix(value: &CStr) -> Option<u32> {
+    u32::try_from(parse_c_ulong_prefix(value)?).ok()
+}
+
+fn parse_c_timeout_prefix(value: &CStr) -> u32 {
+    parse_c_ulong_prefix(value).unwrap_or(0) as u32
+}
+
+fn anchor_config_path(value: &CStr) -> CString {
+    let path = Path::new(OsStr::from_bytes(value.to_bytes()));
+    if path.is_absolute() {
+        return value.to_owned();
+    }
+    std::env::current_dir()
+        .ok()
+        .and_then(|directory| CString::new(directory.join(path).as_os_str().as_bytes()).ok())
+        .unwrap_or_else(|| value.to_owned())
+}
+
+const fn next_open_files_limit(limit: u32) -> u32 {
+    limit.wrapping_mul(3).wrapping_div(4)
+}
+
 #[derive(Clone, Copy)]
 enum ResourceLimit {
     OpenFiles,
@@ -170,6 +211,57 @@ fn set_resource_limit(
     unsafe { libc::setrlimit(resource, &limit) }
 }
 
+fn set_open_files_limit() {
+    let requested = MFSMAXFILES as libc::rlim_t;
+    if set_resource_limit(ResourceLimit::OpenFiles, requested, requested) >= 0 {
+        // SAFETY: Static format matches unsigned limit argument.
+        unsafe {
+            mfs_log(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_INFO,
+                c"open files limit has been set to: %u".as_ptr(),
+                MFSMAXFILES as u32,
+            )
+        };
+        return;
+    }
+    // SAFETY: Static format matches unsigned limit argument.
+    unsafe {
+        mfs_log(
+            MFSLOG_SYSLOG,
+            MFSLOG_NOTICE,
+            c"can't change open files limit to: %u (trying to set smaller value)".as_ptr(),
+            MFSMAXFILES as u32,
+        )
+    };
+    let mut current = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `current` is initialized writable RLIMIT_NOFILE storage.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut current) } < 0 {
+        return;
+    }
+    let mut limit = current.rlim_max.min(requested) as u32;
+    while limit > 1_024 {
+        current.rlim_cur = libc::rlim_t::from(limit);
+        // SAFETY: `current` came from getrlimit; only soft limit is reduced.
+        if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &current) } >= 0 {
+            // SAFETY: Static format matches unsigned limit argument.
+            unsafe {
+                mfs_log(
+                    MFSLOG_SYSLOG_STDERR,
+                    MFSLOG_INFO,
+                    c"open files limit has been set to: %u".as_ptr(),
+                    limit,
+                )
+            };
+            break;
+        }
+        limit = next_open_files_limit(limit);
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn memory_lock_limit() -> Option<libc::rlimit> {
     let mut limit = libc::rlimit {
@@ -188,6 +280,36 @@ fn memory_lock_limit() -> Option<libc::rlimit> {
 fn lock_all_memory() -> c_int {
     // SAFETY: Category 8 (FFI). Flags are documented Linux mlockall options.
     unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) }
+}
+
+#[cfg(target_os = "linux")]
+fn try_oom_adjustments(mut attempt: impl FnMut(&CStr, c_int) -> Option<bool>) -> bool {
+    OOM_ADJUSTMENTS
+        .into_iter()
+        .find_map(|(path, value)| attempt(path, value))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn disable_oom_killer() {
+    let disabled = try_oom_adjustments(|path, value| {
+        // SAFETY: Static path/mode/format are valid; each opened FILE is closed exactly once.
+        unsafe {
+            let file = libc::fopen(path.as_ptr(), c"w".as_ptr());
+            if file.is_null() {
+                None
+            } else {
+                libc::fprintf(file, c"%d\n".as_ptr(), value);
+                Some(libc::fclose(file) >= 0)
+            }
+        }
+    });
+    let (priority, message) = if disabled {
+        (MFSLOG_INFO, c"out of memory killer disabled")
+    } else {
+        (MFSLOG_WARNING, c"can't disable out of memory killer")
+    };
+    log_message(MFSLOG_SYSLOG, priority, message);
 }
 
 pub mod imp {
@@ -1072,11 +1194,10 @@ pub unsafe extern "C" fn changeugid() {
         unsafe { CStr::from_ptr(group) }.to_bytes()
     };
     let mut gid = u32::MAX;
-    if let Some(number) = group_bytes.strip_prefix(b"#") {
-        gid = std::str::from_utf8(number)
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(u32::MAX);
+    if group_bytes.starts_with(b"#") {
+        // SAFETY: Non-null cfg string starts with `#`; remaining suffix stays NUL-terminated.
+        gid = parse_c_uint_prefix(unsafe { CStr::from_ptr(group.add(1)) })
+            .unwrap_or_else(|| std::process::exit(1));
     } else if !group_bytes.is_empty() {
         // SAFETY: Category 8 (FFI). `group` is a valid NUL-terminated cfg string.
         let entry = unsafe { libc::getgrnam(group) };
@@ -1087,11 +1208,10 @@ pub unsafe extern "C" fn changeugid() {
         gid = unsafe { (*entry).gr_gid };
     }
     let uid;
-    if let Some(number) = user_bytes.strip_prefix(b"#") {
-        uid = std::str::from_utf8(number)
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(u32::MAX);
+    if user_bytes.starts_with(b"#") {
+        // SAFETY: Non-null cfg string starts with `#`; remaining suffix stays NUL-terminated.
+        uid = parse_c_uint_prefix(unsafe { CStr::from_ptr(user.add(1)) })
+            .unwrap_or_else(|| std::process::exit(1));
         if gid == u32::MAX {
             // SAFETY: Category 8 (FFI). libc account database owns returned entry.
             let entry = unsafe { libc::getpwuid(uid) };
@@ -1167,20 +1287,57 @@ pub unsafe extern "C" fn wdlock(run_mode: u8, timeout: u32) -> u8 {
     // SAFETY: Category 8 (FFI). Path is NUL-terminated; mode is supplied for O_CREAT.
     let fd = unsafe { libc::open(name.as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o666) };
     if fd < 0 {
+        log_message(
+            MFSLOG_ERRNO_SYSLOG_STDERR,
+            MFSLOG_ERR,
+            c"can't create lockfile in working directory",
+        );
         return 1;
     }
     LOCK_FD.store(fd, Ordering::Relaxed);
     // SAFETY: Category 8 (FFI). fd is open lock file.
     let mut owner = unsafe { mylock(fd) };
     if owner < 0 {
+        log_message(MFSLOG_ERRNO_SYSLOG_STDERR, MFSLOG_ERR, c"fcntl error");
         return 1;
     }
     if owner > 0 {
         match run_mode {
-            RM_TEST => return 0,
-            RM_START => return 1,
-            RM_RELOAD => return u8::from(!send_signal(owner, DaemonSignal::Reload)),
-            RM_INFO => return u8::from(!send_signal(owner, DaemonSignal::Info)),
+            RM_TEST => {
+                let message = CString::new(format!("{} pid: {owner}", daemon_config().app_name))
+                    .unwrap_or_default();
+                log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_INFO, &message);
+                return 0;
+            }
+            RM_START => {
+                log_message(
+                    MFSLOG_SYSLOG_STDERR,
+                    MFSLOG_ERR,
+                    c"can't start: lockfile is already locked by another process",
+                );
+                return 1;
+            }
+            RM_RELOAD | RM_INFO => {
+                let (signal, failure, success) = if run_mode == RM_RELOAD {
+                    (
+                        DaemonSignal::Reload,
+                        c"can't send reload signal to lock owner",
+                        c"reload signal has been sent",
+                    )
+                } else {
+                    (
+                        DaemonSignal::Info,
+                        c"can't send info signal to lock owner",
+                        c"info signal has been sent",
+                    )
+                };
+                if !send_signal(owner, signal) {
+                    log_message(MFSLOG_ERRNO_SYSLOG_STDERR, MFSLOG_ERR, failure);
+                    return 1;
+                }
+                log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_INFO, success);
+                return 0;
+            }
             _ => {}
         }
         let signal = if run_mode == RM_KILL {
@@ -1188,21 +1345,75 @@ pub unsafe extern "C" fn wdlock(run_mode: u8, timeout: u32) -> u8 {
         } else {
             DaemonSignal::Terminate
         };
+        // SAFETY: stderr is live during command handling; format matches pid argument.
+        unsafe {
+            libc::fprintf(
+                stderr,
+                if run_mode == RM_KILL {
+                    c"sending SIGKILL to lock owner (pid:%ld)\n".as_ptr()
+                } else {
+                    c"sending SIGTERM to lock owner (pid:%ld)\n".as_ptr()
+                },
+                owner as libc::c_long,
+            );
+            libc::fflush(stderr);
+        }
         if !send_signal(owner, signal) {
+            log_message(
+                MFSLOG_ERRNO_SYSLOG_STDERR,
+                MFSLOG_ERR,
+                c"can't kill lock owner",
+            );
             return 1;
+        }
+        // SAFETY: stderr is live during command handling; static format has no operands.
+        unsafe {
+            libc::fprintf(stderr, c"waiting for termination ...".as_ptr());
+            libc::fflush(stderr);
         }
         let mut elapsed = 0;
         loop {
             let new_owner = unsafe { mylock(fd) };
             if new_owner == 0 {
+                // SAFETY: stderr is live during command handling; static format has no operands.
+                unsafe { libc::fprintf(stderr, c" terminated\n".as_ptr()) };
                 return 0;
             }
             if new_owner < 0 {
+                log_message(MFSLOG_ERRNO_SYSLOG_STDERR, MFSLOG_ERR, c"fcntl error");
                 return 1;
             }
             elapsed += 1;
             if elapsed >= timeout {
+                // SAFETY: Static format matches unsigned elapsed argument.
+                unsafe {
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_ERR,
+                        c"about %u seconds passed and lockfile is still locked - giving up"
+                            .as_ptr(),
+                        elapsed,
+                    );
+                    libc::fprintf(stderr, c":giving up\n".as_ptr());
+                }
                 return 1;
+            }
+            if elapsed % 10 == 0 {
+                // SAFETY: Static format matches unsigned elapsed argument; stderr is live.
+                unsafe {
+                    mfs_log(
+                        MFSLOG_SYSLOG,
+                        MFSLOG_WARNING,
+                        c"about %u seconds passed and lock still exists".as_ptr(),
+                        elapsed,
+                    );
+                    libc::fprintf(stderr, c".".as_ptr());
+                    libc::fflush(stderr);
+                }
+            }
+            if new_owner != owner {
+                // SAFETY: stderr is live during command handling; static format has no operands.
+                unsafe { libc::fprintf(stderr, c"\nnew lock owner detected\n".as_ptr()) };
             }
             owner = match imp::handoff_lock_owner(owner, new_owner, |pid| send_signal(pid, signal))
             {
@@ -1215,15 +1426,54 @@ pub unsafe extern "C" fn wdlock(run_mode: u8, timeout: u32) -> u8 {
     match run_mode {
         RM_START | RM_RESTART => {
             let pid = format!("{}\n", unsafe { libc::getpid() });
-            // SAFETY: Category 8 (FFI). fd is owned lock file; byte slice is valid for write duration.
-            unsafe {
-                libc::ftruncate(fd, 0);
-                libc::write(fd, pid.as_ptr().cast(), pid.len());
+            // SAFETY: fd is owned lock file and offset 0 is valid for truncation.
+            if unsafe { libc::ftruncate(fd, 0) } < 0 {
+                log_message(
+                    MFSLOG_SYSLOG_STDERR,
+                    MFSLOG_WARNING,
+                    c"can't truncate pidfile",
+                );
             }
+            // SAFETY: fd is owned lock file; pid byte slice is readable for write duration.
+            if unsafe { libc::write(fd, pid.as_ptr().cast(), pid.len()) } != pid.len() as isize {
+                log_message(
+                    MFSLOG_SYSLOG_STDERR,
+                    MFSLOG_WARNING,
+                    c"can't write pid to pidfile",
+                );
+            }
+            log_message(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_INFO,
+                c"lockfile created and locked",
+            );
             0
         }
-        RM_TRY_RESTART | RM_RELOAD | RM_INFO | RM_TEST => 1,
-        RM_STOP | RM_KILL => 0,
+        RM_TRY_RESTART | RM_RELOAD | RM_INFO => {
+            let message = if run_mode == RM_TRY_RESTART {
+                c"can't find process to restart"
+            } else if run_mode == RM_RELOAD {
+                c"can't find process to send reload signal"
+            } else {
+                c"can't find process to send info signal"
+            };
+            log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_ERR, message);
+            1
+        }
+        RM_TEST => {
+            let message = CString::new(format!("{} is not running", daemon_config().app_name))
+                .unwrap_or_default();
+            log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_NOTICE, &message);
+            1
+        }
+        RM_STOP | RM_KILL => {
+            log_message(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_ERR,
+                c"can't find process to terminate",
+            );
+            0
+        }
         _ => 0,
     }
 }
@@ -1231,13 +1481,20 @@ pub unsafe extern "C" fn wdlock(run_mode: u8, timeout: u32) -> u8 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn makedaemon() {
     let mut channel = [-1; 2];
+    // SAFETY: libc owns live stdout/stderr streams during single-threaded bootstrap.
+    unsafe {
+        libc::fflush(stdout);
+        libc::fflush(stderr);
+    }
     // SAFETY: Category 8 (FFI). Two-element array is valid pipe storage.
     if unsafe { libc::pipe(channel.as_mut_ptr()) } < 0 {
+        log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_ERR, c"pipe error");
         std::process::exit(1);
     }
     // SAFETY: Category 8 (FFI). fork is confined to bootstrap before Rust worker threads start.
     let first = unsafe { libc::fork() };
     if first < 0 {
+        log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_ERR, c"first fork error");
         std::process::exit(1);
     }
     if first > 0 {
@@ -1250,10 +1507,24 @@ pub unsafe extern "C" fn makedaemon() {
         let mut buffer = [0u8; 1000];
         loop {
             let read = unsafe { libc::read(channel[0], buffer.as_mut_ptr().cast(), buffer.len()) };
-            if read <= 0 {
+            if read == 0 {
                 break;
             }
+            if read < 0 {
+                log_message(MFSLOG_SYSLOG_STDERR, MFSLOG_ERR, c"Error reading pipe");
+                std::process::exit(1);
+            }
             if buffer[read as usize - 1] == 0 {
+                if read > 1 {
+                    // SAFETY: Buffer contains `read - 1` initialized bytes from pipe.
+                    unsafe {
+                        libc::write(
+                            libc::STDERR_FILENO,
+                            buffer.as_ptr().cast(),
+                            read as usize - 1,
+                        )
+                    };
+                }
                 std::process::exit(1);
             }
             unsafe { libc::write(libc::STDERR_FILENO, buffer.as_ptr().cast(), read as usize) };
@@ -1265,8 +1536,15 @@ pub unsafe extern "C" fn makedaemon() {
         libc::setpgid(0, libc::getpid());
     }
     let second = unsafe { libc::fork() };
-    if second != 0 {
-        std::process::exit(if second < 0 { 1 } else { 0 });
+    if second < 0 {
+        log_message(MFSLOG_SYSLOG, MFSLOG_ERR, c"second fork error");
+        let message = b"fork error\n\0";
+        // SAFETY: Pipe write end is open; static byte string is readable for full length.
+        unsafe { libc::write(channel[1], message.as_ptr().cast(), message.len()) };
+        std::process::exit(1);
+    }
+    if second > 0 {
+        std::process::exit(0);
     }
     unsafe { set_signal_handlers(1) };
     let null = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
@@ -1368,7 +1646,13 @@ pub unsafe extern "C" fn createpath(path: *const c_char) {
     // SAFETY: Category 8 (FFI). Caller contract supplies NUL-terminated path.
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     if let Some(parent) = Path::new(OsStr::from_bytes(bytes)).parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if std::fs::create_dir_all(parent).is_err() {
+            log_message(
+                MFSLOG_ERRNO_SYSLOG_STDERR,
+                MFSLOG_ERR,
+                c"can't create path",
+            );
+        }
     }
 }
 
@@ -1427,10 +1711,12 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
     mycrc32_init();
     let daemon_config = daemon_config();
     let mut config = CString::new(daemon_config.default_config).unwrap_or_default();
+    let mut moved_default = false;
     if std::fs::metadata(daemon_config.default_config).is_err()
         && std::fs::metadata(daemon_config.fallback_config).is_ok()
     {
         config = CString::new(daemon_config.fallback_config).unwrap_or_default();
+        moved_default = true;
     }
     let mut run_mode = RM_START;
     let mut daemon = 1;
@@ -1463,15 +1749,11 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
             b'd' => dangerous = true,
             b't' => {
                 // SAFETY: Category 8 (FFI). getopt sets optarg for option requiring value.
-                let value = unsafe { CStr::from_ptr(optarg) }.to_bytes();
-                lock_timeout = std::str::from_utf8(value)
-                    .ok()
-                    .and_then(|text| text.parse().ok())
-                    .unwrap_or(0);
+                lock_timeout = parse_c_timeout_prefix(unsafe { CStr::from_ptr(optarg) });
             }
             b'c' => {
                 // SAFETY: Category 8 (FFI). getopt sets optarg for option requiring value.
-                config = unsafe { CStr::from_ptr(optarg) }.to_owned();
+                config = anchor_config_path(unsafe { CStr::from_ptr(optarg) });
                 user_config = true;
             }
             b'u' => log_undefined = 1,
@@ -1494,14 +1776,47 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
     } else if remaining != 0 {
         unsafe { usage(application) };
     }
+    if moved_default {
+        log_message(
+            MFSLOG_SYSLOG_STDERR,
+            MFSLOG_WARNING,
+            c"default sysconf path has changed - please move the config file",
+        );
+    }
     // SAFETY: Category 8 (FFI). Config path is owned NUL-terminated string.
-    if unsafe { cfg_load(config.as_ptr(), log_undefined) } == 0 && user_config {
-        return 1;
+    if unsafe { cfg_load(config.as_ptr(), log_undefined) } == 0 {
+        // SAFETY: Static format matches live config C string.
+        unsafe {
+            mfs_log(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_WARNING,
+                c"can't load config file: %s - using defaults".as_ptr(),
+                config.as_ptr(),
+            )
+        };
+        if user_config {
+            return 1;
+        }
     }
     if unsafe { cfg_dangerous_options() } != 0
         && !dangerous
         && matches!(run_mode, RM_RELOAD | RM_START | RM_RESTART | RM_TRY_RESTART)
     {
+        // SAFETY: Static format matches config and action C string arguments.
+        unsafe {
+            mfs_log(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_WARNING,
+                c"Dangerous option(s) detected in config file: %s - use '-d' option to force %s"
+                    .as_ptr(),
+                config.as_ptr(),
+                if run_mode == RM_RELOAD {
+                    c"reload".as_ptr()
+                } else {
+                    c"start".as_ptr()
+                },
+            )
+        };
         return 1;
     }
     if matches!(run_mode, RM_START | RM_RESTART | RM_TRY_RESTART) {
@@ -1514,17 +1829,21 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
     unsafe { processname_init(argc, argv) };
     let app_default = CString::new(daemon_config.app_name).unwrap_or_default();
     let log_identity = config_string(c"SYSLOG_IDENT", &app_default);
-    unsafe { mfs_log_init(log_identity, daemon) };
+    let effective_log_identity = if log_identity.is_null()
+        // SAFETY: Non-null cfg result is NUL-terminated for its malloc-owned lifetime.
+        || unsafe { CStr::from_ptr(log_identity) }.to_bytes().is_empty()
+    {
+        app_default.as_ptr()
+    } else {
+        log_identity
+    };
+    unsafe { mfs_log_init(effective_log_identity, daemon) };
     unsafe { main_reload() };
 
     #[cfg(target_os = "linux")]
     let mut lock_memory = false;
     if matches!(run_mode, RM_START | RM_RESTART | RM_TRY_RESTART) {
-        set_resource_limit(
-            ResourceLimit::OpenFiles,
-            MFSMAXFILES as libc::rlim_t,
-            MFSMAXFILES as libc::rlim_t,
-        );
+        set_open_files_limit();
         #[cfg(target_os = "linux")]
         {
             // SAFETY: Category 8 (FFI). Static C string satisfies config getter ABI.
@@ -1541,11 +1860,44 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
         let nice_level = unsafe { cfg_getint32(c"NICE_LEVEL".as_ptr(), -19) };
         // SAFETY: Category 8 (FFI). Current process id and configured priority are valid inputs.
         unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::getpid() as _, nice_level) };
+        #[cfg(target_os = "linux")]
+        // SAFETY: Static C string satisfies initialized config getter ABI.
+        if unsafe {
+            cfg_getuint8(
+                c"DISABLE_OOM_KILLER".as_ptr(),
+                DEFAULT_DISABLE_OOM_KILLER,
+            )
+        } == 1
+        {
+            disable_oom_killer();
+        }
     }
     unsafe { changeugid() };
     let data_path = CString::new(daemon_config.data_path).unwrap_or_default();
     let workdir = config_string(c"DATA_PATH", &data_path);
+    if !workdir.is_null() && matches!(run_mode, RM_START | RM_RESTART | RM_TRY_RESTART) {
+        // SAFETY: Static format matches live workdir C string.
+        unsafe {
+            mfs_log(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_INFO,
+                c"working directory: %s".as_ptr(),
+                workdir,
+            )
+        };
+    }
     if workdir.is_null() || unsafe { libc::chdir(workdir) } < 0 {
+        if !workdir.is_null() {
+            // SAFETY: Static format matches live workdir C string.
+            unsafe {
+                mfs_log(
+                    MFSLOG_ERRNO_SYSLOG_STDERR,
+                    MFSLOG_ERR,
+                    c"can't set working directory to %s".as_ptr(),
+                    workdir,
+                )
+            };
+        }
         notify_daemon_failure(daemon);
         unsafe { libc::free(workdir.cast()) };
         unsafe { cleanup(log_identity) };
@@ -1579,6 +1931,11 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
             libc::RLIM_INFINITY,
             libc::RLIM_INFINITY,
         );
+        #[cfg(target_os = "linux")]
+        // SAFETY: PR_SET_DUMPABLE accepts integer flag 1 for current process.
+        unsafe {
+            libc::prctl(libc::PR_SET_DUMPABLE, 1);
+        }
     }
     unsafe {
         mfs_log(
@@ -1599,7 +1956,13 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
             close_msg_channel();
         }
         if unsafe { initialize_late() } != 0 {
-            unsafe { mainloop() }
+            let result = unsafe { mainloop() };
+            log_message(
+                MFSLOG_SYSLOG_STDERR,
+                MFSLOG_INFO,
+                c"exited from main loop",
+            );
+            result
         } else {
             1
         }
@@ -1617,7 +1980,10 @@ pub unsafe fn run(argc: c_int, argv: *mut *mut c_char) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::imp::{self, ExitState, Lifecycle, Registry, Timer};
-    use super::{DaemonSignal, VoidCallback, reverse_callbacks};
+    use super::{
+        DaemonSignal, VoidCallback, anchor_config_path, next_open_files_limit,
+        parse_c_timeout_prefix, parse_c_uint_prefix, reverse_callbacks,
+    };
 
     #[test]
     fn callback_stack_is_lifo_and_shutdown_is_two_phase() {
@@ -1673,5 +2039,61 @@ mod tests {
         assert_eq!(DaemonSignal::Info.as_raw(), libc::SIGUSR1);
         assert_eq!(DaemonSignal::Terminate.as_raw(), libc::SIGTERM);
         assert_eq!(DaemonSignal::Kill.as_raw(), libc::SIGKILL);
+    }
+
+    #[test]
+    fn c_numeric_prefixes_and_open_file_fallback_match_legacy_main() {
+        assert_eq!(parse_c_uint_prefix(c"1800x"), Some(1_800));
+        assert_eq!(parse_c_uint_prefix(c"80x"), Some(80));
+        assert_eq!(parse_c_uint_prefix(c"x"), None);
+        assert_eq!(parse_c_uint_prefix(c"4294967296"), None);
+        assert_eq!(parse_c_timeout_prefix(c"4294967297"), 1);
+        assert_eq!(parse_c_timeout_prefix(c"x"), 0);
+        assert_eq!(next_open_files_limit(4_096), 3_072);
+        assert_eq!(next_open_files_limit(1_025), 768);
+        assert!(
+            std::path::Path::new(anchor_config_path(c"Cargo.toml").to_str().unwrap()).is_absolute()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn oom_protection_defaults_and_fallbacks_match_legacy_main() {
+        assert_eq!(super::DEFAULT_DISABLE_OOM_KILLER, 1);
+        assert_eq!(
+            super::OOM_ADJUSTMENTS,
+            [
+                (c"/proc/self/oom_score_adj", -1_000),
+                (c"/proc/self/oom_adj", -17),
+            ]
+        );
+        let mut attempts = 0;
+        assert!(super::try_oom_adjustments(|_, _| {
+            attempts += 1;
+            Some(true)
+        }));
+        assert_eq!(attempts, 1);
+
+        let mut attempts = 0;
+        assert!(super::try_oom_adjustments(|path, value| {
+            assert_eq!((path, value), super::OOM_ADJUSTMENTS[attempts]);
+            attempts += 1;
+            (attempts == 2).then_some(true)
+        }));
+        assert_eq!(attempts, 2);
+
+        let mut attempts = 0;
+        assert!(!super::try_oom_adjustments(|_, _| {
+            attempts += 1;
+            None
+        }));
+        assert_eq!(attempts, 2);
+
+        let mut attempts = 0;
+        assert!(!super::try_oom_adjustments(|_, _| {
+            attempts += 1;
+            Some(false)
+        }));
+        assert_eq!(attempts, 1);
     }
 }

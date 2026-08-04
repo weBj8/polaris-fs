@@ -21,14 +21,17 @@
 # Baseline change: safe daemon/config/protocol cores plus shared-source dedup
 # lowered metalogger unsafe 302 -> 47 and wrapping 151 -> 15; GUI unsafe
 # 307 -> 97 and wrapping 149 -> 13. Shared sources account under plfscommon.
+# Baseline change (VC-13 review remediation): restored daemon libc boundaries
+# moved plfscommon unsafe 433 -> 449 and wrapping 853 -> 854; restored metalogger
+# diagnostics left unsafe at 46 and wrapping at 17.
 unsafe_sites	plfsmaster	le	3007
 unsafe_sites	plfschunkserver	le	1002
-unsafe_sites	plfsmetalogger	le	47
+unsafe_sites	plfsmetalogger	le	46
 unsafe_sites	plfsmount	le	859
 unsafe_sites	plfsbdev	le	570
 unsafe_sites	plfsgui	le	97
 unsafe_sites	plfsnetdump	le	44
-unsafe_sites	plfscommon	le	433
+unsafe_sites	plfscommon	le	449
 unsafe_no_safety	plfsmaster	le	3007
 unsafe_no_safety	plfschunkserver	le	1002
 unsafe_no_safety	plfsmetalogger	le	11
@@ -43,7 +46,7 @@ unsafe_no_safety	plfsclient	le	562
 wrapping_ops	plfsclient	ge	577
 wrapping_ops	plfsmaster	ge	4068
 wrapping_ops	plfschunkserver	ge	1316
-wrapping_ops	plfsmetalogger	ge	15
+wrapping_ops	plfsmetalogger	ge	17
 wrapping_ops	plfsmount	ge	369
 wrapping_ops	plfsbdev	ge	186
 wrapping_ops	plfsgui	ge	13

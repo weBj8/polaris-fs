@@ -241,16 +241,52 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
   daemon failure and lock handoff, master packet fragmentation/control paths,
   HTTP GET/HEAD/error/redirect/CGI/conditional/fragmented-request behavior.
   Live GUI GET returned 200 and POST returned 405.
-- GATE: metalogger and GUI crates have 18 tests each; mount has 95 library tests; locked release
+- GATE: metalogger and GUI crates have 17 tests each; mount has 95 library tests; locked release
   workspace build, cluster/FUSE smoke (`SMOKE OK`), and migration gates pass.
-  Unsafe floors are metalogger 47, GUI 97, and shared `plfscommon` 432;
-  wrapping floors are 15, 13, and 854 respectively.
-- SRC: `target/moosefs-ref` tag `v4.59.2` (`ac106b2`);
-  `plfscommon/src/{cfg,daemon_main,strerr}.rs`;
-  `plfsmetalogger/src/plfscommon/main.rs`;
-  `plfsmetalogger/src/plfsmetalogger/{masterconn,masterconn_core}.rs`;
-  `plfsgui/src/plfscommon/main.rs`;
-  `plfsgui/src/plfsgui/{mfsgui,mfsgui_core}.rs`.
+  Unsafe ceilings are metalogger 46, GUI 97, and shared `plfscommon` 449;
+  wrapping floors are 17, 13, and 854 respectively.
+- FACT: review remediation restored shared-daemon OOM protection,
+  `PR_SET_DUMPABLE`, descending `RLIMIT_NOFILE` retries, empty `SYSLOG_IDENT`
+  fallback, daemon bootstrap error forwarding, lock/config user messages, and
+  high-value metalogger protocol warnings. Numeric `#id` and `-t` values accept
+  C-style numeric prefixes; malformed/overflowing IDs fail closed. Relative
+  explicit config paths are anchored before the daemon changes directory.
+- FACT: the shared P2 daemon exception is recorded in `rewrite-plan.md`; OOM
+  regression vectors lock default enablement plus `/proc/self/oom_score_adj`
+  (`-1000`) and `/proc/self/oom_adj` (`-17`) fallback behavior.
+- ACCEPTED DIVERGENCE: high-byte garbage config lines warn; malformed ETags do
+  not use mtime fallback; changelog tail scan is fixed at 229376 bytes; `poll`
+  retries `EINTR`; malformed metachanges preserve embedded NUL bytes; default
+  file MD5 uses Rust byte-I/O semantics; `strerr` buffers are thread-local;
+  `main_time_refresh` additionally stamps `USEC_NOW`. Full legacy warning/error/
+  operational log inventory and callback-name long-call diagnostics are not
+  reproduced. Omitted logs include some GUI request/CGI failures and metalogger
+  DNS/socket/connect/timeout, metadata-validation, download offset/write/CRC/
+  fsync/rename failures. Restored events are daemon control/startup/resource
+  errors plus metalogger packet rejection, disconnect, version-gap, old-master,
+  download-close failure, and successful-download summary.
+- SRC: `target/moosefs-ref` tag `v4.59.2` (`ac106b2`),
+  `mfscommon/main.c:1041`, `mfscommon/main.c:1285`,
+  `mfscommon/main.c:1566`, `mfscommon/main.c:1587`,
+  `mfscommon/main.c:1623`, `mfscommon/main.c:1765`,
+  `mfsmetalogger/masterconn.c:318`, `mfsmetalogger/masterconn.c:352`,
+  `mfsmetalogger/masterconn.c:438`, `mfsmetalogger/masterconn.c:600`,
+  `mfsmetalogger/masterconn.c:750`;
+  `plfscommon/src/daemon_main.rs:164`, `plfscommon/src/daemon_main.rs:176`,
+  `plfscommon/src/daemon_main.rs:221`, `plfscommon/src/daemon_main.rs:291`,
+  `plfscommon/src/daemon_main.rs:1520`, `plfscommon/src/daemon_main.rs:1869`,
+  `plfscommon/src/daemon_main.rs:1884`, `plfscommon/src/daemon_main.rs:1903`,
+  `plfscommon/src/daemon_main.rs:1966`, `plfscommon/src/daemon_main.rs:2099`;
+  `plfscommon/src/cfg.rs:80`, `plfscommon/src/daemon_main.rs:742`,
+  `plfscommon/src/strerr.rs:175`;
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:277`,
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:294`,
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:360`,
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:412`,
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:433`,
+  `plfsmetalogger/src/plfsmetalogger/masterconn.rs:829`;
+  `plfsgui/src/plfsgui/mfsgui_core.rs:178`,
+  `plfsgui/src/plfsgui/mfsgui_core.rs:450`.
 
 ---
 

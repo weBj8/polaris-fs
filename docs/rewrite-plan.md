@@ -121,6 +121,14 @@ owning crate. Migrating six identical copies of `mfslog.rs` to safe Rust six
 times is waste; migrating divergent `cfg.rs` into one shared file is a
 behavior change. The split respects both.
 
+**P2 exception:** `plfsmetalogger` and `plfsgui` share the migrated `cfg`,
+`strerr`, and daemon lifecycle implementations. This is confined to these two
+P2 daemons: their compile-time differences are represented by daemon-local
+configuration/callback tables, while exported symbols remain daemon-local.
+Behavior was verified separately for both binaries. This recorded exception
+supersedes the general P6-only cross-crate-dedup rule for these modules only;
+other divergent convenience-library modules remain per-crate.
+
 ## Approach per module
 
 1. **Facts.** Write/refresh the `verified-claims.md` entries covering the
@@ -180,11 +188,30 @@ and libc numeric edges; LIFO lifecycle callbacks, timer catch-up, daemon failure
 status, lock-owner handoff, and `LOCK_MEMORY`; fragmented/bad master packets and
 registration frames; GET/HEAD, malformed methods/paths, redirects, CGI,
 conditional 304, fragmented requests, and live reload. Each daemon crate has
-18 release tests. Workspace release build, cluster/FUSE smoke, and migration
-gates pass. After shared-source dedup, unsafe floors are 47 for metalogger, 97
-for GUI, and 432 for `plfscommon`; wrapping floors are 15, 13, and 854.
+17 release tests. Workspace release build, cluster/FUSE smoke, and migration
+gates pass. After review remediation, unsafe ceilings are 46 for metalogger, 97
+for GUI, and 449 for `plfscommon`; wrapping floors are 17, 13, and 854.
 C-semantic operations remain explicit. Active ownership rows for these daemons
 contain no `UNKNOWN`.
+
+Review remediation restored daemon OOM protection, core-dump eligibility,
+open-file-limit fallback, bootstrap error forwarding, lock/config diagnostics,
+and high-value master-connection warnings. Accepted edge divergences remain:
+high-byte garbage config lines warn instead of being ignored; malformed ETags
+do not fall through to mtime matching; changelog tail scanning uses a fixed
+229376-byte window; `poll` retries `EINTR`; malformed metachange payloads retain
+embedded NUL bytes; default-file MD5 handling follows Rust byte-I/O semantics;
+`strerr` storage is thread-local; `main_time_refresh` also stamps `USEC_NOW`;
+malformed/overflowing numeric IDs fail closed after C-style numeric prefixes;
+relative explicit config paths are anchored before the daemon changes directory.
+The full legacy warning/error/operational log inventory and callback-name
+long-call diagnostics are not reproduced. Omitted logs include some GUI request/
+CGI failures and metalogger DNS/socket/connect/timeout, metadata-validation,
+download offset/write/CRC/fsync/rename failures. Restored events are daemon
+control/startup/resource errors plus metalogger packet rejection, disconnect,
+version-gap, old-master, download-close failure, and successful-download summary.
+OOM regression vectors lock the enabled-by-default setting and both Linux
+procfs fallback targets/values.
 
 `plfscommon::charts` remains verbatim because changing its binary format needs
 writer-side proof. Its IOU is transferred to P5
