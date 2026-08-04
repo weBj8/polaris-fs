@@ -22,7 +22,9 @@ pub use plfscommon::{clocks, crc, md5, mfslog, processname, sockets, timeparser}
 pub mod src {
     #[path = "plfscommon"]
     pub mod mfscommon {
+        #[path = "../../../plfscommon/src/cfg.rs"]
         pub mod cfg;
+        #[path = "../../../plfscommon/src/strerr.rs"]
         pub mod strerr;
     } // mod mfscommon
     #[path = "plfsgui"]

@@ -57,7 +57,7 @@ backup, upgrade, and rollback: [deployment guide](docs/deployment.md).
 | --- | --- | --- |
 | P0 | Facts, gates, shared-crate deduplication | **Done** |
 | P1 | Shared `plfscommon` | **Done** — 12/14 modules migrated |
-| P2 | `plfsmetalogger`, `plfsgui` | Pending |
+| P2 | `plfsmetalogger`, `plfsgui` | **Done** — Rust-owned config, lifecycle, protocol, HTTP/CGI cores; 18 tests per crate |
 | P3 | `plfschunkserver` | Pending |
 | P4 | `plfsmount`, shared `plfsclient`, `plfsbdev` | **Partial** — dirbuf/finfo ownership and thread waves migrated; mount has 96 lib tests + 2 bin tests; queue ownership, shared IO backends, and bdev data path remain |
 | P5 | `plfsmaster` | Pending |

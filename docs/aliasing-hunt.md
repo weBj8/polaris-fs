@@ -113,6 +113,15 @@ Populated during P0–P4; seeded below with the class-B module list.*
 *(Classes A and C are generated, not hand-listed: A = the OWNERSHIP.tsv rows;
 C = P0 grep for `*mut c_void` context registrations.)*
 
+### Metalogger and GUI re-audit — closed 2026-08-04
+
+`plfsmetalogger` and `plfsgui` no longer retain mutable raw-pointer ownership
+in config lists, callback registries, protocol queues, request routes, or CGI
+child tracking. Opaque callback handles remain integer/raw values only at the
+daemon ABI seam; Rust-owned state never dereferences them. The six active
+libc process globals (`stdout`, `stderr`, `optarg` in each daemon) are classified
+`FFI`, and active ownership rows for these daemons contain no `UNKNOWN`.
+
 ---
 
 ## Record-keeping

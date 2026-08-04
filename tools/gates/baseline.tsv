@@ -10,7 +10,7 @@
 # Baseline change (unused-unsafe sweep, 48 wrappers removed tree-wide):
 # Baseline change (P1): plfscommon migration (12/14 modules safe-ified) dropped
 # its unsafe 336 -> 244 and wrapping 940 -> 832; migration_iou floor raised to
-# 1 for the charts IOU (verified-claims ledger, consumed by P2/P5).
+# 1 for the charts IOU (verified-claims ledger, consumed by P5).
 # Baseline change (P0 dedup): plfscommon extraction moved shared modules out of
 # the 6 daemon crates into the plfscommon crate; plfsclient extraction moved the
 # 12 shared client modules out of plfsmount/plfsbdev into the plfsclient crate.
@@ -18,31 +18,37 @@
 # VC-05/VC-06).
 # Baseline change (P4 native ownership/thread wave): generated internal wrapper
 # removal lowered wrapping floors: plfsclient 796 -> 723, plfsmount 410 -> 400.
+# Baseline change: safe daemon/config/protocol cores plus shared-source dedup
+# lowered metalogger unsafe 302 -> 47 and wrapping 151 -> 15; GUI unsafe
+# 307 -> 97 and wrapping 149 -> 13. Shared sources account under plfscommon.
+# Baseline change (VC-13 review remediation): restored daemon libc boundaries
+# moved plfscommon unsafe 433 -> 449 and wrapping 853 -> 854; restored metalogger
+# diagnostics left unsafe at 46 and wrapping at 17.
 unsafe_sites	plfsmaster	le	3007
 unsafe_sites	plfschunkserver	le	1002
-unsafe_sites	plfsmetalogger	le	302
+unsafe_sites	plfsmetalogger	le	46
 unsafe_sites	plfsmount	le	859
 unsafe_sites	plfsbdev	le	570
-unsafe_sites	plfsgui	le	307
+unsafe_sites	plfsgui	le	97
 unsafe_sites	plfsnetdump	le	44
-unsafe_sites	plfscommon	le	240
+unsafe_sites	plfscommon	le	449
 unsafe_no_safety	plfsmaster	le	3007
 unsafe_no_safety	plfschunkserver	le	1002
-unsafe_no_safety	plfsmetalogger	le	302
+unsafe_no_safety	plfsmetalogger	le	11
 unsafe_no_safety	plfsmount	le	939
 unsafe_no_safety	plfsbdev	le	570
-unsafe_no_safety	plfsgui	le	307
+unsafe_no_safety	plfsgui	le	5
 unsafe_no_safety	plfsnetdump	le	44
-unsafe_no_safety	plfscommon	le	171
+unsafe_no_safety	plfscommon	le	231
 migration_iou	workspace	le	1
 unsafe_sites	plfsclient	le	562
 unsafe_no_safety	plfsclient	le	562
 wrapping_ops	plfsclient	ge	577
 wrapping_ops	plfsmaster	ge	4068
 wrapping_ops	plfschunkserver	ge	1316
-wrapping_ops	plfsmetalogger	ge	151
+wrapping_ops	plfsmetalogger	ge	17
 wrapping_ops	plfsmount	ge	369
 wrapping_ops	plfsbdev	ge	186
-wrapping_ops	plfsgui	ge	149
+wrapping_ops	plfsgui	ge	13
 wrapping_ops	plfsnetdump	ge	68
-wrapping_ops	plfscommon	ge	832
+wrapping_ops	plfscommon	ge	854

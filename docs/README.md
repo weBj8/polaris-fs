@@ -33,6 +33,12 @@ names the Bun artifact it adapts.
 
 ## Current status
 
+`plfsmetalogger` and `plfsgui` now use Rust-owned config, daemon lifecycle,
+master protocol, and HTTP/CGI state. Their remaining unsafe
+code is confined to documented libc, socket, process, and variadic ABI seams.
+The `plfscommon::charts` format migration is explicitly transferred to P5,
+where `plfsmaster::chartsdata` owns the writer-side compatibility proof.
+
 P4 remains partial. Current mount/client ownership and thread waves are recorded
 in [rust-native-plfsmount-audit.md](rust-native-plfsmount-audit.md). Commit
 The latest completed source waves migrate `mfs_fuse` dirbuf and finfo ownership
