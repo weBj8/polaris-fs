@@ -2,7 +2,7 @@
 //!
 //! MIGRATION-IOU: blocked_on: P5::plfsmaster::chartsdata
 //! Not migrated in P1: 5.2k lines of binary-format I/O and rendering where a
-//! subtle mistake corrupts statistics history. P2 verified GUI integration
+//! subtle mistake corrupts statistics history. This wave verified GUI integration
 //! without changing this format owner; migration transfers to P5, where
 //! plfsmaster writes it through chartsdata. Until then this stays verbatim.
 //!

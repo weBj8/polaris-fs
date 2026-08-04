@@ -166,7 +166,7 @@ phase in the ledger.
 
 ## Phase status log
 
-### P2 complete — metalogger and GUI (2026-08-04)
+### Metalogger and GUI complete (2026-08-04)
 
 `plfsmetalogger` and `plfsgui` migrated their divergent `cfg`, `strerr`, and
 `main` modules plus `masterconn` and `mfsgui`. Rust now owns configuration
@@ -179,15 +179,16 @@ Behavior was checked against MooseFS 4.59.2 source and vectors: config parsing
 and libc numeric edges; LIFO lifecycle callbacks, timer catch-up, daemon failure
 status, lock-owner handoff, and `LOCK_MEMORY`; fragmented/bad master packets and
 registration frames; GET/HEAD, malformed methods/paths, redirects, CGI,
-conditional 304, fragmented requests, and live reload. Each P2 crate has 18
-release tests. Workspace release build, cluster/FUSE smoke, and migration gates
-pass. After shared-source dedup, unsafe floors are 47 for metalogger, 97 for
-GUI, and 432 for `plfscommon`; wrapping floors are 15, 13, and 854. C-semantic
-operations remain explicit. Active P2 ownership rows contain no `UNKNOWN`.
+conditional 304, fragmented requests, and live reload. Each daemon crate has
+18 release tests. Workspace release build, cluster/FUSE smoke, and migration
+gates pass. After shared-source dedup, unsafe floors are 47 for metalogger, 97
+for GUI, and 432 for `plfscommon`; wrapping floors are 15, 13, and 854.
+C-semantic operations remain explicit. Active ownership rows for these daemons
+contain no `UNKNOWN`.
 
 `plfscommon::charts` remains verbatim because changing its binary format needs
 writer-side proof. Its IOU is transferred to P5
-(`plfsmaster::chartsdata`); P2 verified the unchanged GUI reader integration.
+(`plfsmaster::chartsdata`); this wave verified the unchanged GUI reader integration.
 
 ### P4 historical checkpoint — initial `plfsmount` sub-scope (2026-07-30)
 

@@ -33,8 +33,8 @@ names the Bun artifact it adapts.
 
 ## Current status
 
-P2 is complete. `plfsmetalogger` and `plfsgui` now use Rust-owned config,
-daemon lifecycle, master protocol, and HTTP/CGI state. Their remaining unsafe
+`plfsmetalogger` and `plfsgui` now use Rust-owned config, daemon lifecycle,
+master protocol, and HTTP/CGI state. Their remaining unsafe
 code is confined to documented libc, socket, process, and variadic ABI seams.
 The `plfscommon::charts` format migration is explicitly transferred to P5,
 where `plfsmaster::chartsdata` owns the writer-side compatibility proof.

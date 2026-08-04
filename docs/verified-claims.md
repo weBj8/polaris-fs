@@ -227,7 +227,7 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 - GATE: workspace tests (plfsclient 17, plfsmount 95+2, plfsbdev 16),
   release build, smoke, gates all green at `e06d8e9`.
 
-### VC-13 — P2 metalogger + GUI migration completion
+### VC-13 — metalogger + GUI migration completion
 
 - FACT: `plfsmetalogger` and `plfsgui` compile one shared source each for `cfg`,
   `strerr`, and daemon lifecycle, while keeping daemon-local C symbols. These
@@ -237,16 +237,16 @@ correction in Bun's `LESSONS_LEARNED.md` for the format).
 - FACT: exported master/GUI symbols and C allocation contracts are preserved;
   config strings and `cfg_buff` remain `free()`-compatible. Wire framing stays
   big-endian and metadata/chart formats are unchanged.
-- FACT: P2 release tests cover config syntax/numeric edges, lifecycle ordering,
+- FACT: release tests cover config syntax/numeric edges, lifecycle ordering,
   daemon failure and lock handoff, master packet fragmentation/control paths,
   HTTP GET/HEAD/error/redirect/CGI/conditional/fragmented-request behavior.
   Live GUI GET returned 200 and POST returned 405.
-- GATE: P2 crates have 18 tests each; mount has 95 library tests; locked release
+- GATE: metalogger and GUI crates have 18 tests each; mount has 95 library tests; locked release
   workspace build, cluster/FUSE smoke (`SMOKE OK`), and migration gates pass.
   Unsafe floors are metalogger 47, GUI 97, and shared `plfscommon` 432;
   wrapping floors are 15, 13, and 854 respectively.
 - SRC: `target/moosefs-ref` tag `v4.59.2` (`ac106b2`);
-  `plfscommon/src/p2_{cfg,daemon_main,strerr}.rs`;
+  `plfscommon/src/{cfg,daemon_main,strerr}.rs`;
   `plfsmetalogger/src/plfscommon/main.rs`;
   `plfsmetalogger/src/plfsmetalogger/{masterconn,masterconn_core}.rs`;
   `plfsgui/src/plfscommon/main.rs`;
@@ -262,4 +262,4 @@ Columns: item · blocking crate/module · reason · created (phase) · consumed
 
 | item | blocked_on | reason | created | consumed | status |
 | --- | --- | --- | --- | --- | --- |
-| plfscommon::charts | P5 (`plfsmaster::chartsdata`) | 5.2k lines of binary chart-format I/O + rendering; P2 verified unchanged GUI integration, but migration needs writer-side format proof | P1 (2026-07-30) | P5 | transferred to P5 (2026-08-04) |
+| plfscommon::charts | P5 (`plfsmaster::chartsdata`) | 5.2k lines of binary chart-format I/O + rendering; this wave verified unchanged GUI integration, but migration needs writer-side format proof | P1 (2026-07-30) | P5 | transferred to P5 (2026-08-04) |

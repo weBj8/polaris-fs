@@ -15,7 +15,7 @@ extern crate libc;
 // Test-only provider: production daemons compile this shared source locally
 // to avoid exporting duplicate C symbols to unrelated workspace binaries.
 #[cfg(test)]
-#[path = "p2_strerr.rs"]
+#[path = "strerr.rs"]
 mod strerr;
 
 pub mod charts;

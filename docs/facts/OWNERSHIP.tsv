@@ -351,11 +351,11 @@ plfscommon	plfscommon/src/charts.rs	3729	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> 
 plfscommon	plfscommon/src/charts.rs	390	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 plfscommon	plfscommon/src/charts.rs	410	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 plfscommon	plfscommon/src/mfslog.rs	41	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/p2_daemon_main.rs	39	stdout	*mut FILE	FFI	libc-owned process global; boundary only	verified:P2-source-review
-plfscommon	plfscommon/src/p2_daemon_main.rs	40	stderr	*mut FILE	FFI	libc-owned process global; boundary only	verified:P2-source-review
-plfscommon	plfscommon/src/p2_daemon_main.rs	41	optarg	*mut c_char	FFI	libc-owned getopt global; boundary only	verified:P2-source-review
-plfscommon	plfscommon/src/p2_daemon_main.rs	42	optind	c_int	STATIC	AtomicI32	auto:type-shape
-plfscommon	plfscommon/src/p2_strerr.rs	189	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+plfscommon	plfscommon/src/daemon_main.rs	39	stdout	*mut FILE	FFI	libc-owned process global; boundary only	verified:source-review
+plfscommon	plfscommon/src/daemon_main.rs	40	stderr	*mut FILE	FFI	libc-owned process global; boundary only	verified:source-review
+plfscommon	plfscommon/src/daemon_main.rs	41	optarg	*mut c_char	FFI	libc-owned getopt global; boundary only	verified:source-review
+plfscommon	plfscommon/src/daemon_main.rs	42	optind	c_int	STATIC	AtomicI32	auto:type-shape
+plfscommon	plfscommon/src/strerr.rs	189	errtab	[errent; 132]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 plfscommon	plfscommon/src/processname.rs	2	environ	*mut *mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 plfscommon	plfscommon/src/processname.rs	26	argv_start	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 plfscommon	plfscommon/src/processname.rs	27	argv_leng	uint32_t	STATIC	AtomicU32	auto:type-shape

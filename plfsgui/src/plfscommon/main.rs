@@ -64,7 +64,7 @@ const FALLBACK_CONFIG: &str = "/usr/local/etc/mfsgui.cfg";
 const INFO_FILE: &str = ".mfsgui_info.txt";
 const SILENT_SIGCHLD: bool = true;
 
-#[path = "../../../plfscommon/src/p2_daemon_main.rs"]
+#[path = "../../../plfscommon/src/daemon_main.rs"]
 mod daemon_main;
 
 fn main() {

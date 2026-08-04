@@ -65,7 +65,7 @@ const FALLBACK_CONFIG: &str = "/usr/local/etc/mfsmetalogger.cfg";
 const INFO_FILE: &str = ".mfsmetalogger_info.txt";
 const SILENT_SIGCHLD: bool = false;
 
-#[path = "../../../plfscommon/src/p2_daemon_main.rs"]
+#[path = "../../../plfscommon/src/daemon_main.rs"]
 mod daemon_main;
 
 fn main() {
