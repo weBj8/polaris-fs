@@ -9,6 +9,7 @@
 #   EXPORTS         mfsexports.cfg content (master only; default: allow all rw)
 #   HDD_PATHS       space-separated chunk dirs (chunkserver only; default /mnt/hdd)
 #   EXTRA_CFG       extra lines appended to the daemon cfg
+#   EXTRA_ARGS     extra daemon CLI args (master default: -a)
 set -euo pipefail
 
 ROLE="${ROLE:-plfsmaster}"
@@ -27,6 +28,7 @@ EOF
 
 case "$ROLE" in
 plfsmaster)
+    EXTRA_ARGS="${EXTRA_ARGS:--a}"  # -a: auto-restore metadata from backup
     common
     echo "EXPORTS_FILENAME = $DATA_PATH/mfsexports.cfg" >>"$CFG"
     cat >"$DATA_PATH/mfsexports.cfg" <<EOF
@@ -71,4 +73,4 @@ plfsmount)
     ;;
 esac
 
-exec "$ROLE" -f -c "$CFG"
+exec "$ROLE" -f ${EXTRA_ARGS:-} -c "$CFG"
