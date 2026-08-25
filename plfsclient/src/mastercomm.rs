@@ -1409,16 +1409,24 @@ pub unsafe extern "C" fn fs_init_counters() {
 pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
     unsafe {
         let mut drec: *mut threc = vrec as *mut threc;
+        // Take the locks as LOCAL guards (not stashed in the thread_local
+        // guard-slots) because this runs from the REC_LOCK/THREC guard-slot
+        // thread_local destructors: at that point std TLS is being torn down
+        // and `with()` on a destroyed slot panics with AccessError, which
+        // would abort the process. C holds the global pthread_mutex + per-rec
+        // mutex for the whole function, which is exactly what a stack-held
+        // MutexGuard does here; it never touches TLS. Locks nest
+        // REC_LOCK < rec.lock, same order as the normal helpers.
+        let _reclock = REC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut rec: *mut threc = ::core::ptr::null_mut::<threc>();
         let mut rechash: uint32_t = 0;
-        rec_lock();
         rechash = (*drec).packetid.wrapping_rem(THRECHASHSIZE as uint32_t);
         let bucket = &mut (*&raw mut threchash)[rechash as usize];
         if let Some(pos) = bucket.iter().position(|p| *p == drec) {
             rec = bucket.remove(pos);
             // C: rec->next = threcfree; threcfree = rec (LIFO head push).
             (*&raw mut threcfree).push(rec);
-            threc_lock(rec);
+            let _reclock_inner = (*rec).lock.lock().unwrap_or_else(|e| e.into_inner());
             if !(*rec).obuff.is_null() {
                 // C: free(rec->obuff) — Box<[u8]> from
                 // fs_output_buffer_init, length from obuffsize.
@@ -1438,11 +1446,11 @@ pub unsafe extern "C" fn fs_free_threc(mut vrec: *mut ::core::ffi::c_void) {
                 (*rec).ibuff = ::core::ptr::null_mut::<uint8_t>();
                 (*rec).ibuffsize = 0 as uint32_t;
             }
-            threc_unlock(rec);
-            rec_unlock();
+            drop(_reclock_inner);
+            drop(_reclock);
             return;
         }
-        rec_unlock();
+        drop(_reclock);
         mfs_log(
             MFSLOG_SYSLOG,
             MFSLOG_WARNING,
