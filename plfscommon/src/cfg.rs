@@ -632,8 +632,10 @@ fn c_strdup(v: &[u8], passert_line: Option<u32>) -> *mut c_char {
     }
 }
 
-/// Apply a conversion's `errno = ERANGE` side effect (strto* semantics).
-fn set_erange(e: imp::ConvErr) {
+/// Apply a conversion's `errno = ERANGE` side effect (strto* semantics), as
+/// the C getters do; Rust callers of the safe getters use this to keep the
+/// errno contract.
+pub fn set_erange(e: imp::ConvErr) {
     if e.erange {
         // SAFETY: thread-local errno location is always valid.
         unsafe { *libc::__errno_location() = libc::ERANGE };

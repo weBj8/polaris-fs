@@ -71,9 +71,8 @@ mod imp {
     }
 }
 
-/// # Safety
-// SAFETY: caller guarantees `h` came from `chash_new` and is not freed;
 // MooseFS uses each table from the main thread only (as the C did).
+// SAFETY: caller guarantees `h` came from `chash_new` and is not freed.
 unsafe fn tab<'a>(h: *mut c_void) -> &'a mut Chash {
     // SAFETY: per fn contract `h` is a live leaked Box<Chash>.
     unsafe { &mut *(h as *mut Chash) }

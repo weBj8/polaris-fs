@@ -302,8 +302,8 @@ pub unsafe extern "C" fn queue_delete(que: *mut c_void) {
     match unsafe { q(que) }.drain_for_delete() {
         Ok(data) => {
             for d in data {
-                // SAFETY: payloads were handed to the queue as malloc'd
-                // buffers (C contract: queue_delete frees them).
+                // C contract: queue_delete frees the malloc'd payloads.
+                // SAFETY: each payload was handed to the queue malloc'd.
                 unsafe { libc::free(d.0 as *mut c_void) };
             }
         }
