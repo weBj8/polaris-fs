@@ -19,6 +19,7 @@ pub mod cpuusage;
 pub mod cfg;
 pub mod cnum;
 pub mod crc;
+pub mod cuckoohash;
 pub mod delayrun;
 pub mod dictionary;
 pub mod ionice;
