@@ -18,6 +18,7 @@ extern crate libc;
 // their #[no_mangle] extern "C" symbols reachable so LTO retains them; the
 // daemon's extern blocks resolve to these definitions at link time.
 pub use plfscommon::{
+    random,
     pcqueue,
     cfg,
     charts, clocks, cpuusage, crc, labelparser, md5, memusage, mfslog, processname, sockets,
@@ -30,7 +31,6 @@ pub mod src {
         pub mod cuckoohash;
         pub mod dictionary;
         pub mod globengine;
-        pub mod random;
     } // mod mfscommon
     #[path = "plfsmaster"]
     pub mod mfsmaster {

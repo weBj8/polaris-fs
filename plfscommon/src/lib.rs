@@ -26,6 +26,7 @@ pub mod md5;
 pub mod memusage;
 pub mod mfslog;
 pub mod pcqueue;
+pub mod random;
 pub mod processname;
 pub mod sockets;
 pub mod strerr;
