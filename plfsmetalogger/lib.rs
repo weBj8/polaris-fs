@@ -21,9 +21,6 @@ pub use plfscommon::{
     cfg,clocks, crc, md5, mfslog, processname, sockets, timeparser};
 
 pub mod src {
-    #[path = "plfscommon"]
-    pub mod mfscommon {
-    } // mod mfscommon
     #[path = "plfsmetalogger"]
     pub mod mfsmetalogger {
         pub mod masterconn;

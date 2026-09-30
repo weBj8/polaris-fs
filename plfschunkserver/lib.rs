@@ -19,6 +19,7 @@ extern crate libc;
 // their #[no_mangle] extern "C" symbols reachable so LTO retains them; the
 // daemon's extern blocks resolve to these definitions at link time.
 pub use plfscommon::{
+    ionice,
     random,
     pcqueue,
     cfg,
@@ -38,8 +39,4 @@ pub mod src {
         pub mod masterconn;
         pub mod replicator;
     } // mod mfschunkserver
-    #[path = "plfscommon"]
-    pub mod mfscommon {
-        pub mod ionice;
-    } // mod mfscommon
 } // mod src

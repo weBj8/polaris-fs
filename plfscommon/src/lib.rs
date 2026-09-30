@@ -20,6 +20,7 @@ pub mod cfg;
 pub mod cnum;
 pub mod crc;
 pub mod delayrun;
+pub mod ionice;
 pub mod labelparser;
 pub mod lwthread;
 pub mod md5;
