@@ -25,6 +25,7 @@ pub mod lwthread;
 pub mod md5;
 pub mod memusage;
 pub mod mfslog;
+pub mod pcqueue;
 pub mod processname;
 pub mod sockets;
 pub mod strerr;
