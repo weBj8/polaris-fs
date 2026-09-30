@@ -37,7 +37,6 @@ pub mod src {
     #[path = "plfscommon"]
     pub mod mfscommon {
         pub mod squeue;
-        pub mod strerr;
         pub mod workers;
     } // mod mfscommon
 } // mod src

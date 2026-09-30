@@ -242,3 +242,14 @@ partial.
 - Stable toolchain builds all daemons; `c_variadic`/`core_intrinsics` gone.
 - unsafe-site counter at its floor and frozen by CI.
 - All audit docs in `docs/` intact, closed items struck through, none deleted.
+
+### P6 wave — `strerr` shared safe core (2026-08-03)
+
+The six per-daemon `strerr.rs` copies (errtab verified identical, 131 entries,
+by resolved-constant comparison) are replaced by `plfscommon/src/strerr.rs`:
+`#[deny(unsafe_code)] mod imp` with first-match table lookup (equivalent to
+the C hash, which keeps the first duplicate) and a thread-local unknown-errno
+buffer (C `USE_PTHREADS` contract). `strerr`/`strerr_init`/`strerr_term`
+exports unchanged. `wrapping_ops` baselines lowered by the removed hash-init
+arithmetic only. Verified: plfscommon 15 tests, mount lib 92, release
+workspace build, SMOKE OK, gates exit 0. Overall migration remains partial.

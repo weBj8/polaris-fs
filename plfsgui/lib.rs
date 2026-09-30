@@ -23,7 +23,6 @@ pub mod src {
     #[path = "plfscommon"]
     pub mod mfscommon {
         pub mod cfg;
-        pub mod strerr;
     } // mod mfscommon
     #[path = "plfsgui"]
     pub mod mfsgui {
