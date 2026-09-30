@@ -253,3 +253,23 @@ buffer (C `USE_PTHREADS` contract). `strerr`/`strerr_init`/`strerr_term`
 exports unchanged. `wrapping_ops` baselines lowered by the removed hash-init
 arithmetic only. Verified: plfscommon 15 tests, mount lib 92, release
 workspace build, SMOKE OK, gates exit 0. Overall migration remains partial.
+
+### P6 wave — `cfg` shared safe port + `cnum` (2026-08-03)
+
+`mfscommon/cfg.c` ported (from C, not the transpile) to
+`plfscommon/src/cfg.rs`: parser/registry/getters in `#[deny(unsafe_code)]
+mod imp` behind a Mutex; the 23 `cfg_*` exports keep their cfg.h
+signatures, return `malloc`ed memory the C callers `free()`, and reproduce
+the `errno = ERANGE` side effect. The four per-daemon copies (master,
+chunkserver, metalogger, gui — identical except `__FILE__`) are deleted.
+New `plfscommon/src/cnum.rs` replaces libc `strtol/strtoul/strtod` and
+`%.6f` with safe Rust, verified by differential tests against glibc
+(fixed edge cases + 200k fuzzed strings + 20k `%.6f` values). Supporting
+changes: `mfslog::log_bytes*`/`oom_abort` (safe logging entry, same
+sink/syslog/stderr path as `mfs_log`), `timeparser::parse_period`
+re-exported and `*ret` char sign-extension made C-exact, md5 `*_imp`
+helpers public. Gate baselines re-frozen (wrapping_ops drop = removed
+transpiled cfg copies; plfscommon unsafe_sites +23 = the new annotated
+C-ABI boundary fns). OWNERSHIP.tsv regenerated (it was already stale at
+HEAD). Verified: plfscommon 21 tests, mount lib 92, release build,
+SMOKE OK, gates exit 0.

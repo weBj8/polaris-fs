@@ -17,12 +17,12 @@ extern crate libc;
 // Shared transpiled mfscommon modules (dedup, VC-05). The pub use makes
 // their #[no_mangle] extern "C" symbols reachable so LTO retains them; the
 // daemon's extern blocks resolve to these definitions at link time.
-pub use plfscommon::{clocks, crc, md5, mfslog, processname, sockets, timeparser};
+pub use plfscommon::{
+    cfg,clocks, crc, md5, mfslog, processname, sockets, timeparser};
 
 pub mod src {
     #[path = "plfscommon"]
     pub mod mfscommon {
-        pub mod cfg;
     } // mod mfscommon
     #[path = "plfsmetalogger"]
     pub mod mfsmetalogger {

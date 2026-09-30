@@ -21,6 +21,10 @@ pub const LOG_USER: ::core::ffi::c_int = 1 << 3;
 pub const LOG_DAEMON: ::core::ffi::c_int = 3 << 3;
 pub const LOG_PID: ::core::ffi::c_int = 0x1;
 pub const LOG_NDELAY: ::core::ffi::c_int = 0x8;
+pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0;
+pub const MFSLOG_ERRNO_SYSLOG: ::core::ffi::c_int = 1;
+pub const MFSLOG_SYSLOG_STDERR: ::core::ffi::c_int = 2;
+pub const MFSLOG_ERRNO_SYSLOG_STDERR: ::core::ffi::c_int = 3;
 pub const MFSLOG_DEBUG: ::core::ffi::c_int = 0;
 pub const MFSLOG_INFO: ::core::ffi::c_int = 1;
 pub const MFSLOG_NOTICE: ::core::ffi::c_int = 2;
@@ -36,7 +40,6 @@ pub const BT_BUF_SIZE: ::core::ffi::c_int = 100;
 // FILE* ABIs — the mismatch is the c2rust standalone-module artifact, benign.
 #[allow(clashing_extern_declarations)]
 unsafe extern "C" {
-    fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
     // libc crate doesn't expose these (variadic / statics)
     static mut stderr: *mut FILE;
     fn vfprintf(
@@ -51,12 +54,6 @@ unsafe extern "C" {
         arg: ::core::ffi::VaList,
     ) -> ::core::ffi::c_int;
     fn fprintf(s: *mut FILE, format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn snprintf(
-        s: *mut ::core::ffi::c_char,
-        n: size_t,
-        format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
 }
 
 static MFS_LOG_SINK: AtomicPtr<::core::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -195,8 +192,8 @@ pub unsafe extern "C" fn mfs_file_log(
         }
         LFD.store(lfd, Ordering::Relaxed);
     }
-    // SAFETY: extern; file/func are valid C strings per contract; fmt and
-    // the variadic pack are forwarded to vfprintf unmodified.
+    // file/func are valid C strings per contract; fmt and the variadic
+    // SAFETY: pack are forwarded to vfprintf unmodified (C caller contract).
     unsafe {
         libc::fprintf(lfd, b"%s:%d (%s):\0".as_ptr() as *const _, file, line, func);
         let ap = c2rust_args.clone();
@@ -254,12 +251,11 @@ pub unsafe extern "C" fn mfs_log(
     if priority < MFS_LOG_MIN_LEVEL.load(Ordering::Relaxed) {
         return;
     }
-    let with_errno = mode & 1 != 0;
-    let errstr = if with_errno {
-        // SAFETY: extern; errno location valid for this thread.
-        unsafe { strerr(*libc::__errno_location()) }
+    // C reads errno (via strerr) before vsnprintf can clobber it.
+    let err = if mode & 1 != 0 {
+        std::io::Error::last_os_error().raw_os_error()
     } else {
-        std::ptr::null()
+        None
     };
     let mut p = [0 as ::core::ffi::c_char; LOGBUFFSIZE];
     // SAFETY: p valid for LOGBUFFSIZE; fmt+args forwarded per contract.
@@ -271,35 +267,65 @@ pub unsafe extern "C" fn mfs_log(
         return;
     }
     p[LOGBUFFSIZE - 1] = 0;
-    let mut msg = [0 as ::core::ffi::c_char; MSGBUFFSIZE];
-    // SAFETY: msg/p valid; errstr is a valid C string when used.
-    unsafe {
-        if with_errno {
-            snprintf(
-                msg.as_mut_ptr(),
-                MSGBUFFSIZE,
-                b"%s: %s\0".as_ptr() as *const _,
-                p.as_ptr(),
-                errstr,
-            );
-        } else {
-            snprintf(
-                msg.as_mut_ptr(),
-                MSGBUFFSIZE,
-                b"%s\0".as_ptr() as *const _,
-                p.as_ptr(),
-            );
-        }
+    // SAFETY: p is NUL-terminated (last byte forced to 0 above).
+    let text = unsafe { std::ffi::CStr::from_ptr(p.as_ptr()) }.to_bytes();
+    emit(mode, priority, text, err.unwrap_or(0));
+}
+
+/// Safe logging entry for Rust callers: `text` is the already-formatted
+/// message (what C's `vsnprintf` would produce). With `mode & 1` the
+/// current thread's errno is appended, exactly as in `mfs_log`.
+pub fn log_bytes(mode: ::core::ffi::c_int, priority: ::core::ffi::c_int, text: &[u8]) {
+    let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+    log_bytes_errno(mode, priority, text, err);
+}
+
+/// As [`log_bytes`], with an explicit errno value for `mode & 1`.
+pub fn log_bytes_errno(
+    mode: ::core::ffi::c_int,
+    priority: ::core::ffi::c_int,
+    text: &[u8],
+    errno: ::core::ffi::c_int,
+) {
+    if priority < MFS_LOG_MIN_LEVEL.load(Ordering::Relaxed) {
+        return;
     }
-    msg[MSGBUFFSIZE - 1] = 0;
+    // C: vsnprintf into p[LOGBUFFSIZE]; %s stops at the first NUL.
+    let text = &text[..text.iter().position(|&b| b == 0).unwrap_or(text.len())];
+    emit(mode, priority, &text[..text.len().min(LOGBUFFSIZE - 1)], errno);
+}
+
+/// C: `massert.h` `passert` failure path — report and abort.
+pub fn oom_abort(file: &str, line: u32, what: &str) -> ! {
+    let text = format!("{file}:{line} - out of memory: {what} is NULL");
+    eprintln!("{text}");
+    log_bytes_errno(MFSLOG_SYSLOG, MFSLOG_ERR, text.as_bytes(), 0);
+    std::process::abort()
+}
+
+/// Shared tail of `mfs_log`: `p` is the formatted body (no NUL, at most
+/// LOGBUFFSIZE-1 bytes).
+fn emit(mode: ::core::ffi::c_int, priority: ::core::ffi::c_int, p: &[u8], errno: ::core::ffi::c_int) {
+    let mut msg: Vec<u8> = Vec::with_capacity(MSGBUFFSIZE);
+    msg.extend_from_slice(p);
+    if mode & 1 != 0 {
+        msg.extend_from_slice(b": ");
+        let e = crate::strerr::known(errno)
+            .map(|c| c.to_bytes().to_vec())
+            .unwrap_or_else(|| crate::strerr::unknown_message(errno).into_bytes());
+        msg.extend_from_slice(&e);
+    }
+    msg.truncate(MSGBUFFSIZE - 1);
+    msg.push(0);
+    let msg_ptr = msg.as_ptr() as *const ::core::ffi::c_char;
     let sink = MFS_LOG_SINK.load(Ordering::Relaxed);
     if !sink.is_null() {
-        let sink: unsafe extern "C" fn(*const ::core::ffi::c_char) =
-            // SAFETY: sink was stored by mfs_log_set_sink_function from this
-            // exact fn-pointer type.
-            unsafe { std::mem::transmute(sink) };
+        // stored by mfs_log_set_sink_function from this exact fn-pointer type
+        type Sink = unsafe extern "C" fn(*const ::core::ffi::c_char);
+        // SAFETY: the pointer is a `Sink` (see above), transmuted back.
+        let sink: Sink = unsafe { std::mem::transmute::<*mut ::core::ffi::c_void, Sink>(sink) };
         // SAFETY: sink contract; msg is NUL-terminated.
-        unsafe { sink(msg.as_ptr()) };
+        unsafe { sink(msg_ptr) };
     }
     if SYSLOG_OPEN.load(Ordering::Relaxed) != 0 {
         // SAFETY: extern; both strings valid C strings.
@@ -308,7 +334,7 @@ pub unsafe extern "C" fn mfs_log(
                 priority_convert(priority),
                 b"[%s] %s\0".as_ptr() as *const _,
                 pri_to_str(priority),
-                msg.as_ptr(),
+                msg_ptr,
             )
         };
     }
@@ -326,11 +352,11 @@ pub unsafe extern "C" fn mfs_log(
                     stderr,
                     b"%s%s%s\n\0".as_ptr() as *const _,
                     pri_to_colorstr(priority),
-                    msg.as_ptr(),
+                    msg_ptr,
                     COLOR_CLEAR.as_ptr() as *const ::core::ffi::c_char,
                 );
             } else {
-                fprintf(stderr, b"%s\n\0".as_ptr() as *const _, msg.as_ptr());
+                fprintf(stderr, b"%s\n\0".as_ptr() as *const _, msg_ptr);
             }
         }
     }
