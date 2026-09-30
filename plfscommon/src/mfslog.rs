@@ -303,6 +303,22 @@ pub fn oom_abort(file: &str, line: u32, what: &str) -> ! {
     std::process::abort()
 }
 
+/// C: `massert.h` `sassert` failure path — report and abort.
+pub fn assert_abort(file: &str, line: u32, expr: &str) -> ! {
+    let text = format!("{file}:{line} - failed assertion '{expr}'");
+    eprintln!("{text}");
+    log_bytes_errno(MFSLOG_SYSLOG, MFSLOG_ERR, text.as_bytes(), 0);
+    std::process::abort()
+}
+
+/// C: `massert.h` `massert(e,msg)` failure path — report and abort.
+pub fn massert_abort(file: &str, line: u32, expr: &str, msg: &str) -> ! {
+    let text = format!("{file}:{line} - failed assertion '{expr}' : {msg}");
+    eprintln!("{text}");
+    log_bytes_errno(MFSLOG_SYSLOG, MFSLOG_ERR, text.as_bytes(), 0);
+    std::process::abort()
+}
+
 /// Shared tail of `mfs_log`: `p` is the formatted body (no NUL, at most
 /// LOGBUFFSIZE-1 bytes).
 fn emit(mode: ::core::ffi::c_int, priority: ::core::ffi::c_int, p: &[u8], errno: ::core::ffi::c_int) {

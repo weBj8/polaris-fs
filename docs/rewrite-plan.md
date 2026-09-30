@@ -273,3 +273,24 @@ transpiled cfg copies; plfscommon unsafe_sites +23 = the new annotated
 C-ABI boundary fns). OWNERSHIP.tsv regenerated (it was already stale at
 HEAD). Verified: plfscommon 21 tests, mount lib 92, release build,
 SMOKE OK, gates exit 0.
+
+### P6 wave — remaining mfscommon modules (2026-08-03)
+
+Ported from the C sources, each with unit tests:
+- `processname` (boundary: argv/environ rewrite; region math safe + tested;
+  C's strdup-failure path leaves `myenvcpy` dangling — cleared here),
+- `pcqueue` (Mutex+Condvar; waiter counters, EDEADLK/EIO/EBUSY errno kept;
+  master+chunkserver copies removed),
+- `random` (RC4 keystream verified against a literal C transcription;
+  glibc `srandom/random` kept since sockets/matoclserv share that PRNG),
+- `ionice` (ioprio syscall boundary), `dictionary` (HashMap-interned
+  refcounted strings; `dict_printall` dropped — unreferenced),
+- `cuckoohash` (HashMap; unreferenced `chash_get_size` dropped; treap RNG
+  draws on the overflow path no longer consume the RC4 stream),
+- `globengine` (stays in plfsmaster: registers with main's destructor
+  list). Differential test vs the compiled C `globengine.c`: 300k fuzzed
+  pattern/name pairs, 0 mismatches. Deviations only where C is UB: a
+  range ending at 0xFF (infinite loop in C) and middle-subpattern
+  overshoot (out-of-bounds read in C) now terminate / don't match.
+Gate baselines re-frozen (new annotated C-ABI fns; removed transpiled
+copies' wrapping ops).
