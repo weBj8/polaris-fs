@@ -1,1345 +1,521 @@
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-use ::c2rust_bitfields;
-unsafe extern "C" {
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memcmp(
-        __s1: *const ::core::ffi::c_void,
-        __s2: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    unsafe fn free(__ptr: *mut ::core::ffi::c_void);
-    unsafe fn abort() -> !;
-    unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-    static mut stderr: *mut FILE;
-    unsafe fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn main_destruct_register_fname(
-        fun: Option<unsafe extern "C" fn() -> ()>,
-        fname: *const ::core::ffi::c_char,
-    );
-    unsafe fn mfs_log(
-        mode: ::core::ffi::c_int,
-        priority: ::core::ffi::c_int,
-        fmt: *const ::core::ffi::c_char,
-        ...
-    );
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn strerr(error: ::core::ffi::c_int) -> *const ::core::ffi::c_char;
-}
-pub type size_t = usize;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-pub type uint8_t = u8;
-pub type uint32_t = u32;
-pub type globpattern = _globpattern;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _globpattern {
-    pub sptab: *mut subpattern,
-    pub spelements: uint8_t,
-    pub minleng: uint32_t,
-    pub flags: patflags,
-}
-pub type patflags = _patflags;
-pub type _patflags = ::core::ffi::c_uint;
-pub const PATFLAG_LASTASTERISK: _patflags = 2;
-pub const PATFLAG_FIRSTASTERISK: _patflags = 1;
-pub type subpattern = _subpattern;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _subpattern {
-    pub attab: *mut atom,
-    pub atelements: uint8_t,
-    pub leng: uint8_t,
-}
-pub type atom = _atom;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _atom {
-    pub r#type: atomtype,
-    pub leng: uint32_t,
-    pub str: *mut uint8_t,
-    pub rangebits: [uint32_t; 8],
-    pub next: *mut _atom,
-}
-pub type atomtype = _atomtype;
-pub type _atomtype = ::core::ffi::c_uint;
-pub const ATOM_RANGE: _atomtype = 3;
-pub const ATOM_QMARK: _atomtype = 2;
-pub const ATOM_ASTERISK: _atomtype = 1;
-pub const ATOM_STRING: _atomtype = 0;
-pub type FILE = _IO_FILE;
-#[derive(Copy, Clone, ::c2rust_bitfields::BitfieldStruct)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    #[bitfield(name = "_flags2", ty = "::core::ffi::c_int", bits = "0..=23")]
-    pub _flags2: [u8; 3],
-    pub _short_backupbuf: [::core::ffi::c_char; 1],
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused3: ::core::ffi::c_int,
-    pub _total_written: __uint64_t,
-    pub _unused2: [::core::ffi::c_char; 8],
-}
-pub type _IO_lock_t = ();
-pub type globcache = _globcache;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _globcache {
-    pub glob: *mut ::core::ffi::c_void,
-    pub valid: uint8_t,
-    pub gnleng: uint8_t,
-    pub gname: *mut uint8_t,
-    pub mt: ::core::ffi::c_double,
-}
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const GLOB_CACHE_SIZE: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
-pub const MFSLOG_SYSLOG: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const MFSLOG_ERR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-static mut globtab: [globcache; 16] = [globcache {
-    glob: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-    valid: 0,
-    gnleng: 0,
-    gname: ::core::ptr::null_mut::<uint8_t>(),
-    mt: 0.,
-}; 16];
-#[inline]
-unsafe extern "C" fn parse_range(
-    mut rangebits: *mut uint32_t,
-    mut start: *const uint8_t,
-    mut end: *const uint8_t,
-) {
-    unsafe {
-        let mut s: *const uint8_t = start;
-        let mut e: *const uint8_t = end;
-        let mut mask: uint32_t = 0;
-        let mut pos: uint8_t = 0;
-        let mut neg: uint8_t = 0 as uint8_t;
-        let mut i: uint8_t = 0;
-        if s < e && *s as ::core::ffi::c_int == '!' as ::core::ffi::c_int {
-            s = s.offset(1);
-            neg = 1 as uint8_t;
-        }
-        if neg != 0 {
-            memset(
-                rangebits as *mut ::core::ffi::c_void,
-                0xffffffff as ::core::ffi::c_uint as ::core::ffi::c_int,
-                ::core::mem::size_of::<uint32_t>().wrapping_mul(8 as size_t),
-            );
+//! Glob pattern engine with a 16-entry cache — port of mfscommon/globengine.c.
+//!
+//! Used by plfsmaster (patterns.c storage-class patterns; filesystem.c
+//! name-glob listings). Parsing and matching are safe Rust in `imp`,
+//! mirroring the C algorithm step by step — including its quirks:
+//! - `\x` escapes apply outside brackets only; an unclosed `[` is literal;
+//! - consecutive `*` collapse; `[!..]` negates; `a-b` ranges;
+//! - the middle-subpattern advance uses subpattern 0's length
+//!   (`name += pos+p->sptab[0].leng`), a C quirk kept as is.
+//!
+//! Two deliberate deviations where C has undefined behavior, both
+//! documented in the rewrite plan:
+//! - a range ending in byte 0xFF (`[a-\xff]`) loops forever in C (uint8_t
+//!   counter); here it terminates with the range filled up to 0xFF;
+//! - when that middle advance overshoots the remaining name, C reads past
+//!   the name buffer; here the name simply does not match.
+//!
+//! The cache lives in the plfsmaster lib because `glob_cache_init`
+//! registers its destructor with the daemon's `main_destruct_register`.
+
+use core::ffi::{c_char, c_int, c_void};
+use std::sync::{Mutex, MutexGuard};
+
+use plfscommon::clocks::monotonic_seconds;
+
+pub use imp::Pattern;
+
+const GLOB_CACHE_SIZE: usize = 16;
+
+#[deny(unsafe_code)]
+mod imp {
+    enum Atom {
+        Str(Vec<u8>),
+        QMark,
+        Range([u32; 8]),
+    }
+
+    enum Token {
+        Star,
+        Atom(Atom),
+    }
+
+    struct Sub {
+        atoms: Vec<Atom>,
+        /// C `uint8_t leng`.
+        leng: u8,
+    }
+
+    pub struct Pattern {
+        subs: Vec<Sub>,
+        minleng: u32,
+        first_asterisk: bool,
+        last_asterisk: bool,
+    }
+
+    fn at(s: &[u8], i: usize) -> u8 {
+        s.get(i).copied().unwrap_or(0)
+    }
+
+    fn set_bit(bits: &mut [u32; 8], c: u8, neg: bool) {
+        let mask = 1u32 << (c & 0x1F);
+        if neg {
+            bits[(c >> 5) as usize] &= !mask;
         } else {
-            memset(
-                rangebits as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ::core::mem::size_of::<uint32_t>().wrapping_mul(8 as size_t),
-            );
-        }
-        while s < e {
-            if s.offset(2 as ::core::ffi::c_int as isize) < e
-                && *s.offset(1 as isize) as ::core::ffi::c_int == '-' as ::core::ffi::c_int
-            {
-                i = *s.offset(0 as isize);
-                while i as ::core::ffi::c_int <= *s.offset(2 as isize) as ::core::ffi::c_int {
-                    pos = (i as ::core::ffi::c_int >> 5 as ::core::ffi::c_int) as uint8_t;
-                    mask = ((1 as ::core::ffi::c_uint)
-                        << (i as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int))
-                        as uint32_t;
-                    if neg != 0 {
-                        *rangebits.offset(pos as isize) &= !mask;
-                    } else {
-                        *rangebits.offset(pos as isize) |= mask;
-                    }
-                    i = i.wrapping_add(1);
-                }
-                s = s.offset(3 as ::core::ffi::c_int as isize);
-            } else {
-                let c2rust_fresh1 = s;
-                s = s.offset(1);
-                i = *c2rust_fresh1;
-                pos = (i as ::core::ffi::c_int >> 5 as ::core::ffi::c_int) as uint8_t;
-                mask = ((1 as ::core::ffi::c_uint)
-                    << (i as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int))
-                    as uint32_t;
-                if neg != 0 {
-                    *rangebits.offset(pos as isize) &= !mask;
-                } else {
-                    *rangebits.offset(pos as isize) |= mask;
-                }
-            }
+            bits[(c >> 5) as usize] |= mask;
         }
     }
-}
-#[inline]
-unsafe extern "C" fn unescape_string(
-    mut src: *const uint8_t,
-    mut srcend: *mut *const uint8_t,
-    mut dst: *mut uint8_t,
-) -> uint32_t {
-    unsafe {
-        let mut l: uint32_t = 0;
-        let mut r: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        l = 0 as uint32_t;
-        r = src;
-        while *r as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            if *r as ::core::ffi::c_int == '\\' as ::core::ffi::c_int {
-                if *r.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                    != 0 as ::core::ffi::c_int
-                {
-                    if !dst.is_null() {
-                        *dst.offset(l as isize) = *r.offset(1 as ::core::ffi::c_int as isize);
-                    }
-                    r = r.offset(2 as ::core::ffi::c_int as isize);
-                    l = l.wrapping_add(1);
-                } else {
-                    if !dst.is_null() {
-                        *dst.offset(l as isize) = *r;
-                    }
-                    r = r.offset(1);
-                    l = l.wrapping_add(1);
+
+    /// C `parse_range` over the bytes between `[` and `]`.
+    fn parse_range(s: &[u8]) -> [u32; 8] {
+        let mut k = 0;
+        let neg = s.first() == Some(&b'!');
+        if neg {
+            k = 1;
+        }
+        let mut bits = [if neg { u32::MAX } else { 0 }; 8];
+        while k < s.len() {
+            if k + 2 < s.len() && s[k + 1] == b'-' {
+                for c in s[k]..=s[k + 2] {
+                    set_bit(&mut bits, c, neg);
                 }
+                k += 3;
             } else {
-                if *r as ::core::ffi::c_int == '[' as ::core::ffi::c_int
-                    || *r as ::core::ffi::c_int == '*' as ::core::ffi::c_int
-                    || *r as ::core::ffi::c_int == '?' as ::core::ffi::c_int
-                {
-                    break;
-                }
-                if !dst.is_null() {
-                    *dst.offset(l as isize) = *r;
-                }
-                r = r.offset(1);
-                l = l.wrapping_add(1);
+                set_bit(&mut bits, s[k], neg);
+                k += 1;
             }
         }
-        if !srcend.is_null() {
-            *srcend = r;
-        }
-        return l;
+        bits
     }
-}
-#[inline]
-unsafe extern "C" fn pattern_to_atoms_list(mut globstr: *const uint8_t) -> *mut atom {
-    unsafe {
-        let mut p: *const uint8_t = globstr;
-        let mut r: *const uint8_t = ::core::ptr::null::<uint8_t>();
-        let mut c: uint8_t = 0;
-        let mut head: *mut atom = ::core::ptr::null_mut::<atom>();
-        let mut tail: *mut *mut atom = ::core::ptr::null_mut::<*mut atom>();
-        let mut a: *mut atom = ::core::ptr::null_mut::<atom>();
-        let mut last_asterisk: uint8_t = 0 as uint8_t;
-        let mut l: uint32_t = 0;
-        head = ::core::ptr::null_mut::<atom>();
-        tail = &raw mut head;
-        a = ::core::ptr::null_mut::<atom>();
+
+    /// C `unescape_string`: literal run starting at `start`, returns the
+    /// unescaped bytes and the end index.
+    fn unescape(g: &[u8], start: usize) -> (Vec<u8>, usize) {
+        let mut out = Vec::new();
+        let mut r = start;
+        while at(g, r) != 0 {
+            let c = at(g, r);
+            if c == b'\\' {
+                if at(g, r + 1) != 0 {
+                    out.push(at(g, r + 1));
+                    r += 2;
+                } else {
+                    out.push(c);
+                    r += 1;
+                }
+            } else if c == b'[' || c == b'*' || c == b'?' {
+                break;
+            } else {
+                out.push(c);
+                r += 1;
+            }
+        }
+        (out, r)
+    }
+
+    /// C `pattern_to_atoms_list` (input ends at the first NUL).
+    fn tokenize(g: &[u8]) -> Vec<Token> {
+        let mut toks = Vec::new();
+        let mut last_asterisk = false;
+        let mut p = 0usize;
         loop {
-            let c2rust_fresh0 = p;
-            p = p.offset(1);
-            c = *c2rust_fresh0;
-            if c as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+            let c = at(g, p);
+            p += 1;
+            if c == 0 {
                 break;
             }
-            if c as ::core::ffi::c_int == '*' as ::core::ffi::c_int {
-                if last_asterisk as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                    a = malloc(::core::mem::size_of::<atom>()) as *mut atom;
-                    if a.is_null() {
-                        fprintf(
-                            stderr,
-                            b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            170 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            170 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                        abort();
-                    } else if a
-                        == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                            -1 as ::core::ffi::c_int as usize,
-                        ) as *mut atom
-                    {
-                        let mut _mfs_errorstring: *const ::core::ffi::c_char =
-                            strerr(*__errno_location());
-                        mfs_log(
-                            MFSLOG_SYSLOG,
-                            MFSLOG_ERR,
-                            b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            170 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        fprintf(
-                            stderr,
-                            b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                            170 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                            b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                            _mfs_errorstring,
-                        );
-                        abort();
+            match c {
+                b'*' => {
+                    if !last_asterisk {
+                        toks.push(Token::Star);
+                        last_asterisk = true;
                     }
-                    memset(
-                        a as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ::core::mem::size_of::<atom>(),
-                    );
-                    (*a).r#type = ATOM_ASTERISK;
-                    (*a).next = ::core::ptr::null_mut::<_atom>();
-                    *tail = a;
-                    tail = &raw mut (*a).next as *mut *mut atom;
-                    last_asterisk = 1 as uint8_t;
+                    continue;
                 }
-            } else if c as ::core::ffi::c_int == '?' as ::core::ffi::c_int {
-                a = malloc(::core::mem::size_of::<atom>()) as *mut atom;
-                if a.is_null() {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                } else if a
-                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                        -1 as ::core::ffi::c_int as usize,
-                    ) as *mut atom
-                {
-                    let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_0,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        181 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_0,
-                    );
-                    abort();
+                b'?' => {
+                    toks.push(Token::Atom(Atom::QMark));
+                    last_asterisk = false;
+                    continue;
                 }
-                memset(
-                    a as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ::core::mem::size_of::<atom>(),
-                );
-                (*a).r#type = ATOM_QMARK;
-                (*a).next = ::core::ptr::null_mut::<_atom>();
-                *tail = a;
-                tail = &raw mut (*a).next as *mut *mut atom;
-                last_asterisk = 0 as uint8_t;
-            } else {
-                if c as ::core::ffi::c_int == '[' as ::core::ffi::c_int {
-                    r = p;
-                    while *r as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-                        && *r as ::core::ffi::c_int != ']' as ::core::ffi::c_int
-                    {
-                        r = r.offset(1);
+                b'[' => {
+                    let mut r = p;
+                    while at(g, r) != 0 && at(g, r) != b']' {
+                        r += 1;
                     }
-                    if *r as ::core::ffi::c_int == ']' as ::core::ffi::c_int {
-                        a = malloc(::core::mem::size_of::<atom>()) as *mut atom;
-                        if a.is_null() {
-                            fprintf(
-                                stderr,
-                                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                            );
-                            abort();
-                        } else if a
-                            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                                -1 as ::core::ffi::c_int as usize,
-                            ) as *mut atom
-                        {
-                            let mut _mfs_errorstring_1: *const ::core::ffi::c_char =
-                                strerr(*__errno_location());
-                            mfs_log(
-                                MFSLOG_SYSLOG,
-                                MFSLOG_ERR,
-                                b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring_1,
-                            );
-                            fprintf(
-                                stderr,
-                                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                                    as *const ::core::ffi::c_char,
-                                196 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                                _mfs_errorstring_1,
-                            );
-                            abort();
-                        }
-                        memset(
-                            a as *mut ::core::ffi::c_void,
-                            0 as ::core::ffi::c_int,
-                            ::core::mem::size_of::<atom>(),
-                        );
-                        (*a).r#type = ATOM_RANGE;
-                        parse_range(&raw mut (*a).rangebits as *mut uint32_t, p, r);
-                        p = r.offset(1 as ::core::ffi::c_int as isize);
-                        (*a).next = ::core::ptr::null_mut::<_atom>();
-                        *tail = a;
-                        tail = &raw mut (*a).next as *mut *mut atom;
-                        last_asterisk = 0 as uint8_t;
+                    if at(g, r) == b']' {
+                        toks.push(Token::Atom(Atom::Range(parse_range(&g[p..r]))));
+                        p = r + 1;
+                        last_asterisk = false;
                         continue;
                     }
                 }
-                if c as ::core::ffi::c_int == '[' as ::core::ffi::c_int {
-                    l = unescape_string(
-                        p,
-                        ::core::ptr::null_mut::<*const uint8_t>(),
-                        ::core::ptr::null_mut::<uint8_t>(),
-                    )
-                    .wrapping_add(1 as uint32_t);
-                } else {
-                    l = unescape_string(
-                        p.offset(-(1 as ::core::ffi::c_int as isize)),
-                        ::core::ptr::null_mut::<*const uint8_t>(),
-                        ::core::ptr::null_mut::<uint8_t>(),
-                    );
-                }
-                a = malloc(::core::mem::size_of::<atom>()) as *mut atom;
-                if a.is_null() {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        214 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        214 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                } else if a
-                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                        -1 as ::core::ffi::c_int as usize,
-                    ) as *mut atom
-                {
-                    let mut _mfs_errorstring_2: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        214 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_2,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        214 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_2,
-                    );
-                    abort();
-                }
-                memset(
-                    a as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ::core::mem::size_of::<atom>(),
-                );
-                (*a).r#type = ATOM_STRING;
-                (*a).leng = l;
-                (*a).str = malloc((*a).leng as size_t) as *mut uint8_t;
-                if (*a).str.is_null() {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - out of memory: %s is NULL\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        219 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a->str\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - out of memory: %s is NULL\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        219 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a->str\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                } else if (*a).str
-                    == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                        -1 as ::core::ffi::c_int as usize,
-                    ) as *mut uint8_t
-                {
-                    let mut _mfs_errorstring_3: *const ::core::ffi::c_char =
-                        strerr(*__errno_location());
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - mmap error on %s, error: %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        219 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a->str\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_3,
-                    );
-                    fprintf(
-                        stderr,
-                        b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        219 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"a->str\0".as_ptr() as *const ::core::ffi::c_char,
-                        _mfs_errorstring_3,
-                    );
-                    abort();
-                }
-                if c as ::core::ffi::c_int == '[' as ::core::ffi::c_int {
-                    *(*a).str.offset(0 as isize) = '[' as uint8_t;
-                    unescape_string(
-                        p,
-                        &raw mut p,
-                        (*a).str.offset(1 as ::core::ffi::c_int as isize),
-                    );
-                } else {
-                    unescape_string(
-                        p.offset(-(1 as ::core::ffi::c_int as isize)),
-                        &raw mut p,
-                        (*a).str,
-                    );
-                }
-                (*a).next = ::core::ptr::null_mut::<_atom>();
-                *tail = a;
-                tail = &raw mut (*a).next as *mut *mut atom;
-                last_asterisk = 0 as uint8_t;
+                _ => {}
             }
-        }
-        return head;
-    }
-}
-#[inline]
-unsafe extern "C" fn atom_range_match(mut rangebits: *mut uint32_t, mut c: uint8_t) -> uint8_t {
-    unsafe {
-        let mut pos: uint8_t = (c as ::core::ffi::c_int >> 5 as ::core::ffi::c_int) as uint8_t;
-        let mut mask: uint32_t =
-            (1 as uint32_t) << (c as ::core::ffi::c_int & 0x1f as ::core::ffi::c_int);
-        return (if *rangebits.offset(pos as isize) & mask != 0 {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        }) as uint8_t;
-    }
-}
-#[inline]
-unsafe extern "C" fn subpattern_match_exact(
-    mut sp: *mut subpattern,
-    mut name: *const uint8_t,
-    mut nleng: uint8_t,
-) -> uint8_t {
-    unsafe {
-        let mut a: *mut atom = ::core::ptr::null_mut::<atom>();
-        let mut atpos: uint8_t = 0;
-        atpos = 0 as uint8_t;
-        while (atpos as ::core::ffi::c_int) < (*sp).atelements as ::core::ffi::c_int {
-            a = (*sp).attab.offset(atpos as ::core::ffi::c_int as isize);
-            match (*a).r#type as ::core::ffi::c_uint {
-                0 => {
-                    if (*a).leng > nleng as uint32_t
-                        || memcmp(
-                            name as *const ::core::ffi::c_void,
-                            (*a).str as *const ::core::ffi::c_void,
-                            (*a).leng as size_t,
-                        ) != 0 as ::core::ffi::c_int
-                    {
-                        return 0 as uint8_t;
-                    }
-                    name = name.offset((*a).leng as isize);
-                    nleng = (nleng as uint32_t).wrapping_sub((*a).leng) as uint8_t;
-                }
-                2 => {
-                    if nleng as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                        return 0 as uint8_t;
-                    }
-                    name = name.offset(1 as ::core::ffi::c_int as isize);
-                    nleng = (nleng as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as uint8_t;
-                }
-                3 => {
-                    if nleng as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                        || atom_range_match(
-                            &raw mut (*a).rangebits as *mut uint32_t,
-                            *name.offset(0 as isize),
-                        ) as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
-                    {
-                        return 0 as uint8_t;
-                    }
-                    name = name.offset(1 as ::core::ffi::c_int as isize);
-                    nleng = (nleng as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as uint8_t;
-                }
-                _ => return 0 as uint8_t,
-            }
-            atpos = atpos.wrapping_add(1);
-        }
-        return 1 as uint8_t;
-    }
-}
-#[inline]
-unsafe extern "C" fn subpattern_closest_match(
-    mut sp: *mut subpattern,
-    mut name: *const uint8_t,
-    mut nleng: uint8_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut pos: uint32_t = 0;
-        pos = 0 as uint32_t;
-        while (*sp).leng as uint32_t <= (nleng as uint32_t).wrapping_sub(pos) {
-            if subpattern_match_exact(
-                sp,
-                name.offset(pos as isize),
-                (nleng as uint32_t).wrapping_sub(pos) as uint8_t,
-            ) != 0
-            {
-                return pos as ::core::ffi::c_int;
-            }
-            pos = pos.wrapping_add(1);
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-#[inline]
-unsafe extern "C" fn pattern_match(
-    mut p: *mut globpattern,
-    mut name: *const uint8_t,
-    mut nleng: uint8_t,
-) -> uint8_t {
-    unsafe {
-        let mut pos: ::core::ffi::c_int = 0;
-        let mut i: uint8_t = 0;
-        if (nleng as uint32_t) < (*p).minleng {
-            return 0 as uint8_t;
-        }
-        if (*p).spelements as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            if (*p).flags as ::core::ffi::c_uint
-                & (PATFLAG_LASTASTERISK as ::core::ffi::c_int
-                    | PATFLAG_FIRSTASTERISK as ::core::ffi::c_int)
-                    as ::core::ffi::c_uint
-                != 0
-            {
-                return 1 as uint8_t;
-            }
-            return 0 as uint8_t;
-        }
-        if (*p).spelements as ::core::ffi::c_int == 1 as ::core::ffi::c_int {
-            if (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int
-                > nleng as ::core::ffi::c_int
-            {
-                return 0 as uint8_t;
-            }
-            if (*p).flags as ::core::ffi::c_uint
-                & (PATFLAG_LASTASTERISK as ::core::ffi::c_int
-                    | PATFLAG_FIRSTASTERISK as ::core::ffi::c_int)
-                    as ::core::ffi::c_uint
-                == (PATFLAG_LASTASTERISK as ::core::ffi::c_int
-                    | PATFLAG_FIRSTASTERISK as ::core::ffi::c_int)
-                    as ::core::ffi::c_uint
-            {
-                if subpattern_closest_match((*p).sptab, name, nleng) >= 0 as ::core::ffi::c_int {
-                    return 1 as uint8_t;
-                }
-                return 0 as uint8_t;
-            }
-            if (*p).flags as ::core::ffi::c_uint
-                & PATFLAG_LASTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-                != 0
-            {
-                return subpattern_match_exact((*p).sptab, name, nleng);
-            }
-            if (*p).flags as ::core::ffi::c_uint
-                & PATFLAG_FIRSTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-                != 0
-            {
-                return subpattern_match_exact(
-                    (*p).sptab,
-                    name.offset(
-                        (nleng as ::core::ffi::c_int
-                            - (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int)
-                            as isize,
-                    ),
-                    (*(*p).sptab.offset(0 as isize)).leng,
-                );
-            }
-            if (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int
-                != nleng as ::core::ffi::c_int
-            {
-                return 0 as uint8_t;
-            }
-            return subpattern_match_exact((*p).sptab, name, nleng);
-        }
-        if (*p).flags as ::core::ffi::c_uint
-            & PATFLAG_FIRSTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-            != 0
-        {
-            pos = subpattern_closest_match((*p).sptab, name, nleng);
-            if pos < 0 as ::core::ffi::c_int {
-                return 0 as uint8_t;
-            }
-            name = name.offset(
-                (pos + (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int) as isize,
-            );
-            nleng = (nleng as ::core::ffi::c_int
-                - (pos + (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int))
-                as uint8_t;
-        } else {
-            if subpattern_match_exact((*p).sptab, name, nleng) as ::core::ffi::c_int
-                == 0 as ::core::ffi::c_int
-            {
-                return 0 as uint8_t;
-            }
-            name =
-                name.offset((*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int as isize);
-            nleng = (nleng as ::core::ffi::c_int
-                - (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int)
-                as uint8_t;
-        }
-        i = 1 as uint8_t;
-        while (i as ::core::ffi::c_int)
-            < (*p).spelements as ::core::ffi::c_int - 1 as ::core::ffi::c_int
-        {
-            pos = subpattern_closest_match(
-                (*p).sptab.offset(i as ::core::ffi::c_int as isize),
-                name,
-                nleng,
-            );
-            if pos < 0 as ::core::ffi::c_int {
-                return 0 as uint8_t;
-            }
-            name = name.offset(
-                (pos + (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int) as isize,
-            );
-            nleng = (nleng as ::core::ffi::c_int
-                - (pos + (*(*p).sptab.offset(0 as isize)).leng as ::core::ffi::c_int))
-                as uint8_t;
-            i = i.wrapping_add(1);
-        }
-        if (*p).flags as ::core::ffi::c_uint
-            & PATFLAG_LASTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-            != 0
-        {
-            pos = subpattern_closest_match(
-                (*p).sptab.offset(i as ::core::ffi::c_int as isize),
-                name,
-                nleng,
-            );
-            return (if pos < 0 as ::core::ffi::c_int {
-                0 as ::core::ffi::c_int
+            let s = if c == b'[' {
+                let (rest, end) = unescape(g, p);
+                p = end;
+                let mut s = vec![b'['];
+                s.extend_from_slice(&rest);
+                s
             } else {
-                1 as ::core::ffi::c_int
-            }) as uint8_t;
-        } else {
-            if (nleng as ::core::ffi::c_int)
-                < (*(*p).sptab.offset(i as isize)).leng as ::core::ffi::c_int
-            {
-                return 0 as uint8_t;
-            }
-            return subpattern_match_exact(
-                (*p).sptab.offset(i as ::core::ffi::c_int as isize),
-                name.offset(
-                    (nleng as ::core::ffi::c_int
-                        - (*(*p).sptab.offset(i as isize)).leng as ::core::ffi::c_int)
-                        as isize,
-                ),
-                (*(*p).sptab.offset(i as isize)).leng,
-            );
-        };
+                let (s, end) = unescape(g, p - 1);
+                p = end;
+                s
+            };
+            toks.push(Token::Atom(Atom::Str(s)));
+            last_asterisk = false;
+        }
+        toks
     }
-}
-#[inline]
-unsafe extern "C" fn atoms_list_to_pattern_structure(
-    mut p: *mut globpattern,
-    mut atlist: *mut atom,
-) {
-    unsafe {
-        let mut a: *mut atom = ::core::ptr::null_mut::<atom>();
-        let mut an: *mut atom = ::core::ptr::null_mut::<atom>();
-        let mut l: uint8_t = 0;
-        let mut m: uint8_t = 0;
-        (*p).minleng = 0 as uint32_t;
-        (*p).flags = 0 as patflags;
-        (*p).spelements = 0 as uint8_t;
-        (*p).sptab = ::core::ptr::null_mut::<subpattern>();
-        if atlist.is_null() {
-            return;
-        }
-        if (*atlist).r#type as ::core::ffi::c_uint
-            == ATOM_ASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            (*p).flags = ((*p).flags as ::core::ffi::c_uint
-                | PATFLAG_FIRSTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint)
-                as patflags;
-            an = (*atlist).next as *mut atom;
-            free(atlist as *mut ::core::ffi::c_void);
-            atlist = an;
-            if atlist.is_null() {
-                (*p).flags = ((*p).flags as ::core::ffi::c_uint
-                    | PATFLAG_LASTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint)
-                    as patflags;
-                return;
+
+    impl Pattern {
+        /// C `glob_new` (pattern bytes up to the first NUL).
+        pub fn new(globstr: &[u8]) -> Self {
+            let mut toks = tokenize(globstr).into_iter().peekable();
+            let mut p = Pattern {
+                subs: Vec::new(),
+                minleng: 0,
+                first_asterisk: false,
+                last_asterisk: false,
+            };
+            if toks.peek().is_none() {
+                return p;
             }
-        }
-        (*p).spelements = 1 as uint8_t;
-        a = atlist;
-        while !a.is_null() {
-            if (*a).r#type as ::core::ffi::c_uint
-                == ATOM_ASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                if !(*a).next.is_null() {
-                    (*p).spelements = (*p).spelements.wrapping_add(1);
-                } else {
-                    (*p).flags = ((*p).flags as ::core::ffi::c_uint
-                        | PATFLAG_LASTASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint)
-                        as patflags;
+            if matches!(toks.peek(), Some(Token::Star)) {
+                toks.next();
+                p.first_asterisk = true;
+                if toks.peek().is_none() {
+                    p.last_asterisk = true;
+                    return p;
                 }
             }
-            a = (*a).next as *mut atom;
+            let mut cur = Sub { atoms: Vec::new(), leng: 0 };
+            while let Some(t) = toks.next() {
+                match t {
+                    Token::Star => {
+                        if toks.peek().is_some() {
+                            p.subs.push(std::mem::replace(
+                                &mut cur,
+                                Sub { atoms: Vec::new(), leng: 0 },
+                            ));
+                        } else {
+                            p.last_asterisk = true;
+                        }
+                    }
+                    Token::Atom(a) => {
+                        let l = match &a {
+                            Atom::Str(s) => s.len() as u8,
+                            _ => 1,
+                        };
+                        cur.leng = cur.leng.wrapping_add(l);
+                        cur.atoms.push(a);
+                    }
+                }
+            }
+            p.subs.push(cur);
+            p.minleng = p.subs.iter().map(|s| s.leng as u32).sum();
+            p
         }
-        (*p).sptab =
-            malloc(::core::mem::size_of::<subpattern>().wrapping_mul((*p).spelements as size_t))
-                as *mut subpattern;
-        if (*p).sptab.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                435 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p->sptab\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                435 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p->sptab\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if (*p).sptab
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut subpattern
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                435 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p->sptab\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                435 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p->sptab\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        l = 0 as uint8_t;
-        while (l as ::core::ffi::c_int) < (*p).spelements as ::core::ffi::c_int {
-            (*(*p).sptab.offset(l as isize)).atelements = 0 as uint8_t;
-            (*(*p).sptab.offset(l as isize)).leng = 0 as uint8_t;
-            l = l.wrapping_add(1);
-        }
-        l = 0 as uint8_t;
-        a = atlist;
-        while !a.is_null() {
-            if (*a).r#type as ::core::ffi::c_uint
-                == ATOM_ASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                l = l.wrapping_add(1);
+
+        /// C `glob_match` / `pattern_match`.
+        pub fn matches(&self, name: &[u8]) -> bool {
+            let nleng = name.len();
+            if (nleng as u32) < self.minleng {
+                return false;
+            }
+            let subs = &self.subs;
+            let (first, last) = (self.first_asterisk, self.last_asterisk);
+            if subs.is_empty() {
+                return first || last;
+            }
+            if subs.len() == 1 {
+                let s = &subs[0];
+                let sl = s.leng as usize;
+                if sl > nleng {
+                    return false;
+                }
+                if first && last {
+                    return closest(s, name).is_some();
+                }
+                if last {
+                    return exact(s, name);
+                }
+                if first {
+                    return exact(s, &name[nleng - sl..]);
+                }
+                if sl != nleng {
+                    return false;
+                }
+                return exact(s, name);
+            }
+            let mut cur = name;
+            let adv0 = subs[0].leng as usize;
+            if first {
+                let Some(pos) = closest(&subs[0], cur) else { return false };
+                cur = &cur[pos + adv0..];
             } else {
-                (*(*p).sptab.offset(l as isize)).atelements =
-                    (*(*p).sptab.offset(l as isize)).atelements.wrapping_add(1);
-                if (*a).r#type as ::core::ffi::c_uint
-                    == ATOM_STRING as ::core::ffi::c_int as ::core::ffi::c_uint
-                {
-                    (*(*p).sptab.offset(l as isize)).leng =
-                        ((*(*p).sptab.offset(l as isize)).leng as uint32_t).wrapping_add((*a).leng)
-                            as uint8_t;
-                } else {
-                    (*(*p).sptab.offset(l as isize)).leng =
-                        ((*(*p).sptab.offset(l as isize)).leng as ::core::ffi::c_int
-                            + 1 as ::core::ffi::c_int) as uint8_t;
+                if !exact(&subs[0], cur) {
+                    return false;
                 }
+                cur = &cur[adv0..];
             }
-            a = (*a).next as *mut atom;
-        }
-        l = 0 as uint8_t;
-        while (l as ::core::ffi::c_int) < (*p).spelements as ::core::ffi::c_int {
-            (*(*p).sptab.offset(l as isize)).attab = malloc(
-                ::core::mem::size_of::<atom>()
-                    .wrapping_mul((*(*p).sptab.offset(l as isize)).atelements as size_t),
-            ) as *mut atom;
-            if (*(*p).sptab.offset(l as isize)).attab.is_null() {
-                fprintf(
-                    stderr,
-                    b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    455 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"p->sptab[l].attab\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    455 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"p->sptab[l].attab\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                abort();
-            } else if (*(*p).sptab.offset(l as isize)).attab
-                == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                    -1 as ::core::ffi::c_int as usize,
-                ) as *mut atom
-            {
-                let mut _mfs_errorstring_0: *const ::core::ffi::c_char =
-                    strerr(*__errno_location());
-                mfs_log(
-                    MFSLOG_SYSLOG,
-                    MFSLOG_ERR,
-                    b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    455 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"p->sptab[l].attab\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                fprintf(
-                    stderr,
-                    b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                    455 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                    b"p->sptab[l].attab\0".as_ptr() as *const ::core::ffi::c_char,
-                    _mfs_errorstring_0,
-                );
-                abort();
+            let lasti = subs.len() - 1;
+            for s in &subs[1..lasti] {
+                let Some(pos) = closest(s, cur) else { return false };
+                // C advances by subpattern 0's length (quirk kept)
+                let adv = pos + adv0;
+                if adv > cur.len() {
+                    return false; // C: reads past the name (UB)
+                }
+                cur = &cur[adv..];
             }
-            (*p).minleng = (*p)
-                .minleng
-                .wrapping_add((*(*p).sptab.offset(l as isize)).leng as uint32_t);
-            l = l.wrapping_add(1);
-        }
-        l = 0 as uint8_t;
-        m = 0 as uint8_t;
-        a = atlist;
-        while !a.is_null() {
-            if (*a).r#type as ::core::ffi::c_uint
-                == ATOM_ASTERISK as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                l = l.wrapping_add(1);
-                m = 0 as uint8_t;
+            let s = &subs[lasti];
+            if last {
+                closest(s, cur).is_some()
             } else {
-                if (l as ::core::ffi::c_int) < (*p).spelements as ::core::ffi::c_int {
-                } else {
-                    fprintf(
-                        stderr,
-                        b"%s:%u - failed assertion '%s' : %s\n\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        465 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"l<p->spelements\0".as_ptr() as *const ::core::ffi::c_char,
-                        b"wrong pattern elements count\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    mfs_log(
-                        MFSLOG_SYSLOG,
-                        MFSLOG_ERR,
-                        b"%s:%u - failed assertion '%s' : %s\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                        465 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                        b"l<p->spelements\0".as_ptr() as *const ::core::ffi::c_char,
-                        b"wrong pattern elements count\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    abort();
-                };
-                memcpy(
-                    (*(*p).sptab.offset(l as isize))
-                        .attab
-                        .offset(m as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_void,
-                    a as *const ::core::ffi::c_void,
-                    ::core::mem::size_of::<atom>(),
-                );
-                m = m.wrapping_add(1);
-            }
-            an = (*a).next as *mut atom;
-            free(a as *mut ::core::ffi::c_void);
-            a = an;
-        }
-    }
-}
-#[inline]
-unsafe extern "C" fn free_pattern_structure(mut p: *mut globpattern) {
-    unsafe {
-        let mut i: uint8_t = 0;
-        let mut j: uint8_t = 0;
-        i = 0 as uint8_t;
-        while (i as ::core::ffi::c_int) < (*p).spelements as ::core::ffi::c_int {
-            j = 0 as uint8_t;
-            while (j as ::core::ffi::c_int)
-                < (*(*p).sptab.offset(i as isize)).atelements as ::core::ffi::c_int
-            {
-                if (*(*(*p).sptab.offset(i as isize)).attab.offset(j as isize)).r#type
-                    as ::core::ffi::c_uint
-                    == ATOM_STRING as ::core::ffi::c_int as ::core::ffi::c_uint
-                {
-                    free(
-                        (*(*(*p).sptab.offset(i as isize)).attab.offset(j as isize)).str
-                            as *mut ::core::ffi::c_void,
-                    );
+                let sl = s.leng as usize;
+                if cur.len() < sl {
+                    return false;
                 }
-                j = j.wrapping_add(1);
+                exact(s, &cur[cur.len() - sl..])
             }
-            if !(*(*p).sptab.offset(i as isize)).attab.is_null() {
-                free((*(*p).sptab.offset(i as isize)).attab as *mut ::core::ffi::c_void);
+        }
+    }
+
+    /// C `subpattern_match_exact`: atoms match a prefix of `name`.
+    fn exact(sp: &Sub, name: &[u8]) -> bool {
+        let mut n = name;
+        for a in &sp.atoms {
+            match a {
+                Atom::Str(s) => {
+                    if s.len() > n.len() || &n[..s.len()] != s.as_slice() {
+                        return false;
+                    }
+                    n = &n[s.len()..];
+                }
+                Atom::QMark => {
+                    if n.is_empty() {
+                        return false;
+                    }
+                    n = &n[1..];
+                }
+                Atom::Range(bits) => {
+                    let Some(&c) = n.first() else { return false };
+                    if bits[(c >> 5) as usize] & (1u32 << (c & 0x1F)) == 0 {
+                        return false;
+                    }
+                    n = &n[1..];
+                }
             }
-            i = i.wrapping_add(1);
         }
-        if !(*p).sptab.is_null() {
-            free((*p).sptab as *mut ::core::ffi::c_void);
-        }
-        (*p).spelements = 0 as uint8_t;
-        (*p).minleng = 0 as uint32_t;
-        (*p).sptab = ::core::ptr::null_mut::<subpattern>();
+        true
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_new(mut globstr: *const uint8_t) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut p: *mut globpattern = ::core::ptr::null_mut::<globpattern>();
-        p = malloc(::core::mem::size_of::<globpattern>()) as *mut globpattern;
-        if p.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                530 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                530 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if p
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut globpattern
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                530 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                530 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"p\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        atoms_list_to_pattern_structure(p, pattern_to_atoms_list(globstr));
-        return p as *mut ::core::ffi::c_void;
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_free(mut glob: *mut ::core::ffi::c_void) {
-    unsafe {
-        let mut p: *mut globpattern = glob as *mut globpattern;
-        free_pattern_structure(p);
-        free(p as *mut ::core::ffi::c_void);
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_match(
-    mut glob: *mut ::core::ffi::c_void,
-    mut name: *const uint8_t,
-    mut nleng: uint8_t,
-) -> uint8_t {
-    unsafe {
-        let mut p: *mut globpattern = glob as *mut globpattern;
-        return pattern_match(p, name, nleng);
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_cache_get(
-    mut gnleng: uint8_t,
-    mut gname: *const uint8_t,
-) -> *mut ::core::ffi::c_void {
-    unsafe {
-        let mut i: ::core::ffi::c_int = 0;
-        let mut j: ::core::ffi::c_int = 0;
-        j = 0 as ::core::ffi::c_int;
-        i = 0 as ::core::ffi::c_int;
-        while i < GLOB_CACHE_SIZE {
-            if globtab[i as usize].valid as ::core::ffi::c_int != 0
-                && globtab[i as usize].gnleng as ::core::ffi::c_int == gnleng as ::core::ffi::c_int
-                && (gnleng as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                    || memcmp(
-                        globtab[i as usize].gname as *const ::core::ffi::c_void,
-                        gname as *const ::core::ffi::c_void,
-                        gnleng as size_t,
-                    ) == 0 as ::core::ffi::c_int)
-            {
-                globtab[i as usize].mt = monotonic_seconds();
-                return globtab[i as usize].glob;
+
+    /// C `subpattern_closest_match`: first offset where `sp` matches.
+    fn closest(sp: &Sub, name: &[u8]) -> Option<usize> {
+        let sl = sp.leng as usize;
+        let mut pos = 0;
+        while pos <= name.len() && sl <= name.len() - pos {
+            if exact(sp, &name[pos..]) {
+                return Some(pos);
             }
-            if globtab[i as usize].valid as ::core::ffi::c_int == 0 as ::core::ffi::c_int
-                || globtab[i as usize].mt < globtab[j as usize].mt
-            {
-                j = i;
-            }
-            i += 1;
+            pos += 1;
         }
-        if globtab[j as usize].valid != 0 {
-            glob_free(globtab[j as usize].glob);
-            free(globtab[j as usize].gname as *mut ::core::ffi::c_void);
-        }
-        globtab[j as usize].gname =
-            malloc((gnleng as ::core::ffi::c_int + 1 as ::core::ffi::c_int) as size_t)
-                as *mut uint8_t;
-        if globtab[j as usize].gname.is_null() {
-            fprintf(
-                stderr,
-                b"%s:%u - out of memory: %s is NULL\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                563 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"globtab[j].gname\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - out of memory: %s is NULL\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                563 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"globtab[j].gname\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            abort();
-        } else if globtab[j as usize].gname
-            == ::core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(
-                -1 as ::core::ffi::c_int as usize,
-            ) as *mut uint8_t
-        {
-            let mut _mfs_errorstring: *const ::core::ffi::c_char = strerr(*__errno_location());
-            mfs_log(
-                MFSLOG_SYSLOG,
-                MFSLOG_ERR,
-                b"%s:%u - mmap error on %s, error: %s\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                563 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"globtab[j].gname\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            fprintf(
-                stderr,
-                b"%s:%u - mmap error on %s, error: %s\n\0".as_ptr() as *const ::core::ffi::c_char,
-                b"/tmp/moosefs-ref/mfsmaster/../mfscommon/globengine.c\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-                563 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                b"globtab[j].gname\0".as_ptr() as *const ::core::ffi::c_char,
-                _mfs_errorstring,
-            );
-            abort();
-        }
-        memcpy(
-            globtab[j as usize].gname as *mut ::core::ffi::c_void,
-            gname as *const ::core::ffi::c_void,
-            gnleng as size_t,
-        );
-        *globtab[j as usize].gname.offset(gnleng as isize) = 0 as uint8_t;
-        globtab[j as usize].glob = glob_new(globtab[j as usize].gname);
-        globtab[j as usize].mt = monotonic_seconds();
-        globtab[j as usize].valid = 1 as uint8_t;
-        return globtab[j as usize].glob;
+        None
     }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_cache_term() {
-    unsafe {
-        let mut i: ::core::ffi::c_int = 0;
-        i = 0 as ::core::ffi::c_int;
-        while i < GLOB_CACHE_SIZE {
-            if globtab[i as usize].valid != 0 {
-                glob_free(globtab[i as usize].glob);
-                free(globtab[i as usize].gname as *mut ::core::ffi::c_void);
-            }
-            globtab[i as usize].valid = 0 as uint8_t;
-            i += 1;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn m(g: &str, n: &str) -> bool {
+            Pattern::new(g.as_bytes()).matches(n.as_bytes())
+        }
+
+        #[test]
+        fn basic_globs() {
+            assert!(m("*", ""));
+            assert!(m("*", "abc"));
+            assert!(!m("", ""));
+            assert!(m("abc", "abc"));
+            assert!(!m("abc", "abcd"));
+            assert!(m("a*", "abcd"));
+            assert!(m("*d", "abcd"));
+            assert!(!m("*d", "abce"));
+            assert!(m("*bc*", "abcd"));
+            assert!(m("a?c", "abc"));
+            assert!(!m("a?c", "ac"));
+            assert!(m("[a-c]x", "bx"));
+            assert!(!m("[!a-c]x", "bx"));
+            assert!(m("[!a-c]x", "dx"));
+            assert!(m("a**b", "ab"));
+            assert!(m("a*b*c", "aXbYc"));
+            assert!(!m("a*b*c", "aXbY"));
+            assert!(m("*.txt", "notes.txt"));
+        }
+
+        #[test]
+        fn escapes_and_unclosed_brackets() {
+            assert!(m("a\\*b", "a*b"));
+            assert!(!m("a\\*b", "axb"));
+            assert!(m("[ab", "[ab"));
+            assert!(m("x\\", "x\\"));
+            assert!(m("[\\]]", "\\]")); // bracket body is not unescaped
+        }
+
+        #[test]
+        fn middle_advance_quirk_matches_c() {
+            // "a*bc*c": C advances by len("a")=1 after finding "bc", so the
+            // final "c" may reuse the 'c' of "bc".
+            assert!(!m("a*bc*c", "abc")); // minleng 4 > 3
+            assert!(m("a*bcd*d", "abcdd"));
+            // overshoot (C UB) → no match: sptab[0]="abc", middle "x"
+            assert!(!m("abc*x*y", "abcxy"));
+        }
+
+        #[test]
+        fn range_to_ff_terminates() {
+            let p = Pattern::new(b"[\xf0-\xff]");
+            assert!(p.matches(b"\xff"));
+            assert!(p.matches(b"\xf0"));
+            assert!(!p.matches(b"\xef"));
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// C ABI boundary (globengine.h). Handles are `Pattern` addresses.
+// ---------------------------------------------------------------------------
+
+unsafe extern "C" {
+    // plfsmaster bin (main.c): destructor registry.
+    fn main_destruct_register_fname(fun: Option<unsafe extern "C" fn()>, fname: *const c_char);
+}
+
+struct CacheEntry {
+    glob: Option<Box<Pattern>>,
+    gname: Vec<u8>,
+    mt: f64,
+}
+
+static CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
+
+fn cache() -> MutexGuard<'static, Vec<CacheEntry>> {
+    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if c.is_empty() {
+        c.extend((0..GLOB_CACHE_SIZE).map(|_| CacheEntry { glob: None, gname: Vec::new(), mt: 0.0 }));
+    }
+    c
+}
+
+/// Pattern bytes as C `glob_new` sees them (up to the first NUL).
+fn until_nul(b: &[u8]) -> &[u8] {
+    &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]
+}
+
+/// # Safety
+/// `globstr` must be a valid NUL-terminated string. Free with `glob_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn glob_cache_init() -> ::core::ffi::c_int {
-    unsafe {
-        let mut i: ::core::ffi::c_int = 0;
-        i = 0 as ::core::ffi::c_int;
-        while i < GLOB_CACHE_SIZE {
-            globtab[i as usize].glob = NULL;
-            globtab[i as usize].valid = 0 as uint8_t;
-            globtab[i as usize].gnleng = 0 as uint8_t;
-            globtab[i as usize].gname = ::core::ptr::null_mut::<uint8_t>();
-            globtab[i as usize].mt = 0.0f64;
-            i += 1;
+pub unsafe extern "C" fn glob_new(globstr: *const u8) -> *mut c_void {
+    // SAFETY: per fn contract.
+    let g = unsafe { core::ffi::CStr::from_ptr(globstr as *const c_char) }.to_bytes();
+    Box::into_raw(Box::new(Pattern::new(g))) as *mut c_void
+}
+
+/// # Safety
+/// `glob` from `glob_new` (not from the cache); invalid afterwards.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glob_free(glob: *mut c_void) {
+    // SAFETY: per fn contract this is the last use of the Box.
+    drop(unsafe { Box::from_raw(glob as *mut Pattern) });
+}
+
+/// # Safety
+/// `glob` a live pattern handle; `name` readable for `nleng` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glob_match(glob: *mut c_void, name: *const u8, nleng: u8) -> u8 {
+    // SAFETY: per fn contract.
+    let (p, n) = unsafe {
+        let n = if nleng == 0 { &[][..] } else { std::slice::from_raw_parts(name, nleng as usize) };
+        (&*(glob as *const Pattern), n)
+    };
+    p.matches(n) as u8
+}
+
+/// # Safety
+/// `gname` readable for `gnleng` bytes. The handle stays valid until the
+/// entry is evicted (16 newer distinct patterns) or the cache terminates.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glob_cache_get(gnleng: u8, gname: *const u8) -> *mut c_void {
+    // SAFETY: per fn contract.
+    let key = unsafe {
+        if gnleng == 0 { &[][..] } else { std::slice::from_raw_parts(gname, gnleng as usize) }
+    };
+    let mut c = cache();
+    let mut j = 0usize;
+    for i in 0..GLOB_CACHE_SIZE {
+        if let Some(g) = &c[i].glob {
+            if c[i].gname == key {
+                let ptr = &**g as *const Pattern as *mut c_void;
+                c[i].mt = monotonic_seconds();
+                return ptr;
+            }
         }
-        main_destruct_register_fname(
-            Some(glob_cache_term as unsafe extern "C" fn() -> ()),
-            b"glob_cache_term\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return 0 as ::core::ffi::c_int;
+        if c[i].glob.is_none() || c[i].mt < c[j].mt {
+            j = i;
+        }
+    }
+    let glob = Box::new(Pattern::new(until_nul(key)));
+    let ptr = &*glob as *const Pattern as *mut c_void;
+    c[j] = CacheEntry { glob: Some(glob), gname: key.to_vec(), mt: monotonic_seconds() };
+    ptr
+}
+
+/// C: `glob_cache_term` (registered as a main destructor).
+#[unsafe(no_mangle)]
+pub extern "C" fn glob_cache_term() {
+    for e in cache().iter_mut() {
+        *e = CacheEntry { glob: None, gname: Vec::new(), mt: 0.0 };
+    }
+}
+
+/// C: `glob_cache_init`.
+#[unsafe(no_mangle)]
+pub extern "C" fn glob_cache_init() -> c_int {
+    glob_cache_term();
+    // SAFETY: main_destruct_register_fname stores the fn pointer and the
+    // static name for the daemon's shutdown sequence.
+    unsafe {
+        main_destruct_register_fname(Some(glob_cache_term_c), c"glob_cache_term".as_ptr());
+    }
+    0
+}
+
+unsafe extern "C" fn glob_cache_term_c() {
+    glob_cache_term()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_hits_and_lru_eviction() {
+        // SAFETY: literal buffers; handles used while cached.
+        unsafe {
+            let a = glob_cache_get(3, b"*.c".as_ptr());
+            assert_eq!(glob_cache_get(3, b"*.c".as_ptr()), a);
+            assert_eq!(glob_match(a, b"x.c".as_ptr(), 3), 1);
+            assert_eq!(glob_match(a, b"x.h".as_ptr(), 3), 0);
+            let e = glob_cache_get(0, core::ptr::null());
+            assert_eq!(glob_match(e, b"".as_ptr(), 0), 0);
+            // embedded NUL: cache key is all bytes, pattern stops at NUL
+            let z = glob_cache_get(3, b"a\0b".as_ptr());
+            assert_eq!(glob_match(z, b"a".as_ptr(), 1), 1);
+            let d = glob_new(c"a?".as_ptr() as *const u8);
+            assert_eq!(glob_match(d, b"ab".as_ptr(), 2), 1);
+            glob_free(d);
+        }
+        glob_cache_term();
     }
 }
