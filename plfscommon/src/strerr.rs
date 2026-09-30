@@ -8,7 +8,7 @@
 //! observationally identical).
 use core::ffi::{c_char, c_int};
 
-pub use imp::{ERRTAB, STRERR_BUFF_SIZE, known, strerr_ptr, unknown_message};
+pub use imp::{ERRTAB, STRERR_BUFF_SIZE, known, message, strerr_ptr, unknown_message};
 
 #[deny(unsafe_code)]
 mod imp {
@@ -160,6 +160,14 @@ pub fn known(error: c_int) -> Option<&'static CStr> {
         return Some(c"Success (errno=0)");
     }
     ERRTAB.iter().find(|(n, _)| *n == error).map(|(_, s)| *s)
+}
+
+/// C `strerr(error)` text as bytes (known entry or "Unknown error: %d").
+pub fn message(error: c_int) -> Vec<u8> {
+    match known(error) {
+        Some(s) => s.to_bytes().to_vec(),
+        None => unknown_message(error).into_bytes(),
+    }
 }
 
 /// Format the unknown-error message exactly as snprintf would (truncated).

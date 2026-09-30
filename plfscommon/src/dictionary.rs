@@ -219,8 +219,8 @@ pub unsafe extern "C" fn dict_get_hash(dptr: *mut c_void) -> u32 {
 /// `dptr` is a live handle; it is invalid after the last reference drops.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dict_dec_ref(dptr: *mut c_void) {
-    // SAFETY: per fn contract; the bytes are copied out before the entry
-    // can be freed inside dec_ref.
+    // The bytes are copied out before dec_ref can free the entry.
+    // SAFETY: per fn contract `dptr` is a live handle.
     let key = unsafe {
         let e = entry(dptr);
         slice(e.data as *const u8, e.leng).to_vec()

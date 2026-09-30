@@ -294,3 +294,27 @@ Ported from the C sources, each with unit tests:
   overshoot (out-of-bounds read in C) now terminate / don't match.
 Gate baselines re-frozen (new annotated C-ABI fns; removed transpiled
 copies' wrapping ops).
+
+### P6 wave — shared daemon runtime (main.c) (2026-08-03)
+
+`mfscommon/main.c` ported from C to `plfscommon/src/daemon.rs`; the four
+transpiled per-daemon `main.rs` copies (~18k lines) are now `Spec` tables
+(init.h RunTab/LateRunTab/RestoreRunTab, module options, MFSMAXFILES,
+`_USE_PTHREADS`/`USE_IONICE`/`SILENT_SIGCHLD`). The `main_*` registry and
+time API keep their main.h signatures. Registries are one Mutex (loops
+iterate snapshots so callbacks can register; timers re-read live so
+`main_time_change` inside a callback takes effect as in C). No `static
+mut` remains. Supporting pieces: `plfscommon::getopt` (glibc PERMUTE
+getopt, differential-tested against glibc on fixed cases + 20k fuzzed
+argvs; the permutation is applied to the real argv captured from
+`.init_array`, which processname relies on), `cnum::strto{l,ul}10` and
+`fmt_fixed`, `mfslog::str_to_pri`/`zassert_abort`, `strerr::message`.
+
+Verified: old vs new binaries give byte-identical stdout/stderr and exit
+codes for 17 CLI cases × 4 daemons (-v/-h/invalid/missing arg/bad
+mode/test/stop/reload/info/kill/try-restart/missing cfg/--), and an
+identical daemonized master lifecycle (start → test → reload → info →
+test → stop → test: output, lockfile/pidfile, `.mfsmaster_info.txt`,
+work-dir files). SMOKE OK, gates exit 0 (baselines re-frozen: −544 unsafe
+sites in the four daemons, +60 annotated boundary sites in plfscommon;
+wrapping_ops drop = removed transpiled main copies).

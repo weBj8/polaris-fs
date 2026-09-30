@@ -114,46 +114,48 @@ fn priority_convert(priority: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
-/// # Safety
-/// `pristr` must be a valid NUL-terminated C string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mfs_log_str_to_pri(
-    mut pristr: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    // SAFETY: per fn contract.
-    let s = unsafe { std::ffi::CStr::from_ptr(pristr) }.to_bytes();
-    let mut fpri = -1;
-    let mut fpri_idx: Option<usize> = None;
+/// C `mfs_log_str_to_pri` core: case-insensitive prefix of a priority name
+/// ("debug", "info", ...); -1 when invalid or empty (first letters are
+/// unique, so the candidate is fixed by the first byte).
+pub fn str_to_pri(s: &[u8]) -> ::core::ffi::c_int {
+    const NAMES: [&[u8]; 5] = [b"debug", b"info", b"notice", b"warning", b"error"];
+    let mut fpri: ::core::ffi::c_int = -1;
+    let mut chosen: Option<usize> = None;
     for (i, &c0) in s.iter().enumerate() {
         let c = c0.to_ascii_lowercase();
         if !c.is_ascii_lowercase() {
             return -1;
         }
-        match fpri_idx {
+        match chosen {
             Some(j) => {
-                // compare against the already-chosen candidate at same pos
-                // SAFETY: PRIORITY_STRINGS entries are static NUL-terminated.
-                let cand = unsafe { *PRIORITY_STRINGS.0[j].add(i) } as u8;
-                if cand != c {
+                if NAMES[j].get(i).copied().unwrap_or(0) != c {
                     return -1;
                 }
             }
             None => {
-                for j in MFSLOG_PRI_MIN..=MFSLOG_PRI_MAX {
-                    // SAFETY: static NUL-terminated strings.
-                    let cand = unsafe { *PRIORITY_STRINGS.0[j as usize].add(i) } as u8;
-                    if cand == c {
-                        fpri_idx = Some(j as usize);
-                        fpri = j;
+                for (j, name) in NAMES.iter().enumerate() {
+                    if name.get(i).copied().unwrap_or(0) == c {
+                        chosen = Some(j);
+                        fpri = j as ::core::ffi::c_int;
                     }
                 }
-                if fpri_idx.is_none() {
-                    return -1; // none matched
+                if chosen.is_none() {
+                    return -1;
                 }
             }
         }
     }
     fpri
+}
+
+/// # Safety
+/// `pristr` must be a valid NUL-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mfs_log_str_to_pri(
+    pristr: *const ::core::ffi::c_char,
+) -> ::core::ffi::c_int {
+    // SAFETY: per fn contract.
+    str_to_pri(unsafe { std::ffi::CStr::from_ptr(pristr) }.to_bytes())
 }
 
 /// Debug backtrace logger (mfsdebug.txt). Variadic leaf.
@@ -316,6 +318,25 @@ pub fn massert_abort(file: &str, line: u32, expr: &str, msg: &str) -> ! {
     let text = format!("{file}:{line} - failed assertion '{expr}' : {msg}");
     eprintln!("{text}");
     log_bytes_errno(MFSLOG_SYSLOG, MFSLOG_ERR, text.as_bytes(), 0);
+    std::process::abort()
+}
+
+/// C: `massert.h` `zassert(e)` failure path (`ret != 0`) — report, abort.
+pub fn zassert_abort(file: &str, line: u32, expr: &str, ret: i32, errno: i32) -> ! {
+    let es = |e: i32| String::from_utf8_lossy(&crate::strerr::message(e)).into_owned();
+    let text = if ret < 0 && errno != 0 {
+        format!("{file}:{line} - unexpected status, '{expr}' returned: {ret} (errno={errno}: {})", es(errno))
+    } else if ret > 0 && errno == 0 {
+        format!("{file}:{line} - unexpected status, '{expr}' returned: {ret} : {}", es(ret))
+    } else {
+        format!(
+            "{file}:{line} - unexpected status, '{expr}' returned: {ret} : {} (errno={errno}: {})",
+            es(ret),
+            es(errno)
+        )
+    };
+    log_bytes_errno(MFSLOG_SYSLOG, MFSLOG_ERR, text.as_bytes(), 0);
+    eprintln!("{text}");
     std::process::abort()
 }
 

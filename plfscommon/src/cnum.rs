@@ -36,9 +36,9 @@ struct IntScan {
     overflow: bool,
 }
 
-/// Shared base-0 scanner of glibc `strtol`/`strtoul`. No conversion yields
-/// `end == 0` (C: `*endptr = nptr`).
-fn scan_int(s: &[u8]) -> IntScan {
+/// Shared scanner of glibc `strtol`/`strtoul` for base 0 (`base10 ==
+/// false`) or base 10. No conversion yields `end == 0` (C: `*endptr = nptr`).
+fn scan_int(s: &[u8], base10: bool) -> IntScan {
     let mut i = 0;
     while is_space(at(s, i)) {
         i += 1;
@@ -50,7 +50,9 @@ fn scan_int(s: &[u8]) -> IntScan {
     } else if at(s, i) == b'+' {
         i += 1;
     }
-    let base: u64 = if at(s, i) == b'0' {
+    let base: u64 = if base10 {
+        10
+    } else if at(s, i) == b'0' {
         if at(s, i + 1) | 0x20 == b'x' && at(s, i + 2).is_ascii_hexdigit() {
             i += 2;
             16
@@ -79,7 +81,15 @@ fn scan_int(s: &[u8]) -> IntScan {
 /// glibc `strtol(s, &end, 0)` on LP64 (also `strtoll`).
 /// Returns (value, end offset, ERANGE).
 pub fn strtol(s: &[u8]) -> (i64, usize, bool) {
-    let r = scan_int(s);
+    signed(scan_int(s, false))
+}
+
+/// glibc `strtol(s, &end, 10)`.
+pub fn strtol10(s: &[u8]) -> (i64, usize, bool) {
+    signed(scan_int(s, true))
+}
+
+fn signed(r: IntScan) -> (i64, usize, bool) {
     if r.neg {
         if r.overflow || r.mag > 1u64 << 63 {
             (i64::MIN, r.end, true)
@@ -96,7 +106,15 @@ pub fn strtol(s: &[u8]) -> (i64, usize, bool) {
 /// glibc `strtoul(s, &end, 0)` on LP64 (also `strtoull`): negative inputs
 /// wrap, overflow saturates to `ULONG_MAX` with ERANGE.
 pub fn strtoul(s: &[u8]) -> (u64, usize, bool) {
-    let r = scan_int(s);
+    unsigned(scan_int(s, false))
+}
+
+/// glibc `strtoul(s, &end, 10)`.
+pub fn strtoul10(s: &[u8]) -> (u64, usize, bool) {
+    unsigned(scan_int(s, true))
+}
+
+fn unsigned(r: IntScan) -> (u64, usize, bool) {
     if r.overflow {
         (u64::MAX, r.end, true)
     } else if r.neg {
@@ -383,12 +401,17 @@ fn round_binary(m: u64, sticky: bool, e2: i64) -> (f64, bool) {
 
 /// `printf("%.6f", v)` (glibc: exact value, round-half-even; "nan"/"-nan").
 pub fn fmt_f6(v: f64) -> String {
+    fmt_fixed(v, 6)
+}
+
+/// `printf("%.<prec>f", v)` with glibc semantics.
+pub fn fmt_fixed(v: f64, prec: usize) -> String {
     if v.is_nan() {
         if v.is_sign_negative() { "-nan".into() } else { "nan".into() }
     } else if v.is_infinite() {
         if v < 0.0 { "-inf".into() } else { "inf".into() }
     } else {
-        format!("{v:.6}")
+        format!("{v:.prec$}")
     }
 }
 
@@ -432,15 +455,35 @@ mod tests {
         (v, e as usize - cs.as_ptr() as usize, errno_erange())
     }
     fn c_fmt6(v: f64) -> String {
+        c_fmt(v, c"%.6f")
+    }
+    fn c_fmt(v: f64, f: &std::ffi::CStr) -> String {
         let mut buf = [0u8; 512];
         // SAFETY: buffer valid for its length; format matches the argument.
-        let n = unsafe {
-            libc::snprintf(buf.as_mut_ptr() as *mut _, buf.len(), c"%.6f".as_ptr(), v)
-        };
+        let n = unsafe { libc::snprintf(buf.as_mut_ptr() as *mut _, buf.len(), f.as_ptr(), v) };
         String::from_utf8(buf[..n as usize].to_vec()).unwrap()
     }
 
+    fn c_strtol10(s: &[u8]) -> (i64, usize, bool) {
+        let cs = CString::new(s).unwrap();
+        let mut e = std::ptr::null_mut();
+        errno_reset();
+        // SAFETY: valid C string and out-pointer.
+        let v = unsafe { libc::strtol(cs.as_ptr(), &mut e, 10) };
+        (v, e as usize - cs.as_ptr() as usize, errno_erange())
+    }
+    fn c_strtoul10(s: &[u8]) -> (u64, usize, bool) {
+        let cs = CString::new(s).unwrap();
+        let mut e = std::ptr::null_mut();
+        errno_reset();
+        // SAFETY: valid C string and out-pointer.
+        let v = unsafe { libc::strtoul(cs.as_ptr(), &mut e, 10) };
+        (v, e as usize - cs.as_ptr() as usize, errno_erange())
+    }
+
     fn check(s: &[u8]) {
+        assert_eq!(strtol10(s), c_strtol10(s), "strtol10 {:?}", String::from_utf8_lossy(s));
+        assert_eq!(strtoul10(s), c_strtoul10(s), "strtoul10 {:?}", String::from_utf8_lossy(s));
         assert_eq!(strtol(s), c_strtol(s), "strtol {:?}", String::from_utf8_lossy(s));
         assert_eq!(strtoul(s), c_strtoul(s), "strtoul {:?}", String::from_utf8_lossy(s));
         let (a, ae, ar) = strtod(s);
@@ -512,6 +555,8 @@ mod tests {
         }
         for v in vals {
             assert_eq!(fmt_f6(v), c_fmt6(v), "value {v:e}");
+            assert_eq!(fmt_fixed(v, 2), c_fmt(v, c"%.2f"), "value {v:e}");
+            assert_eq!(fmt_fixed(v, 3), c_fmt(v, c"%.3f"), "value {v:e}");
         }
         assert_eq!(fmt_f6(f64::INFINITY), c_fmt6(f64::INFINITY));
         assert_eq!(fmt_f6(f64::NEG_INFINITY), c_fmt6(f64::NEG_INFINITY));
