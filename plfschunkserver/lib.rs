@@ -41,6 +41,5 @@ pub mod src {
         pub mod ionice;
         pub mod pcqueue;
         pub mod random;
-        pub mod strerr;
     } // mod mfscommon
 } // mod src

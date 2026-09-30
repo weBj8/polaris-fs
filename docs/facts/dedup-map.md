@@ -22,7 +22,7 @@ per-daemon copies and their variants.
 | pcqueue.rs | = | A | - | B | = | - |
 | random.rs | = | A | - | - | - | - |
 | squeue.rs | - | - | - | - | = | - |
-| strerr.rs | = | = | A | B | = | = |
+| ~~strerr.rs~~ | shared | shared | shared | shared | shared | shared |  (P6: deduplicated into `plfscommon::strerr`, safe core; errtab identical across all six copies) |
 | workers.rs | - | - | - | - | = | - |
 
 ## plfsclient/ (shared crate and frontend-specific modules)

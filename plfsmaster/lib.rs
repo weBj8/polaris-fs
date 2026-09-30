@@ -31,7 +31,6 @@ pub mod src {
         pub mod globengine;
         pub mod pcqueue;
         pub mod random;
-        pub mod strerr;
     } // mod mfscommon
     #[path = "plfsmaster"]
     pub mod mfsmaster {
