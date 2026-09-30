@@ -318,3 +318,17 @@ test → stop → test: output, lockfile/pidfile, `.mfsmaster_info.txt`,
 work-dir files). SMOKE OK, gates exit 0 (baselines re-frozen: −544 unsafe
 sites in the four daemons, +60 annotated boundary sites in plfscommon;
 wrapping_ops drop = removed transpiled main copies).
+
+### P6 wave — sockets.c (2026-08-03)
+
+`mfscommon/sockets.c` ported from C (`plfscommon/src/sockets.rs`, 2.2k
+transpiled lines → syscall boundary `sys` + safe `imp`). All 56 exports
+keep sockets.h signatures; the timed stream loops (toread/towrite/
+toforward/towait/toaccept, non-blocking connect wait) follow the C step by
+step, including `(double)*1000.0` → `uint32_t` truncation, `uint32_t`
+timeouts passed as `int`, errno as the error channel and `random()%n`
+resolver selection. Only deviation: `udpread` initializes the `socklen_t`
+C passed uninitialized (UB). Tests: loopback TCP listen/connect/accept/
+read/write, forward via socketpairs, timeouts (ETIMEDOUT), peer close
+(ECONNRESET short read), unix path overflow, resolver `*` handling,
+snprintf-exact strip buffers. SMOKE OK, gates exit 0.

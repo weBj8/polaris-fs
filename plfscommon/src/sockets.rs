@@ -1,2212 +1,1248 @@
-//! Socket helpers (tcp/udp/unix + address formatting), P1 pass.
+//! Acid's simple socket library (ver 6.0) — port of mfscommon/sockets.c.
 //!
-//! STATUS: annotated boundary, not yet safe-ified. These ~50 functions are
-//! thin wrappers over socket syscalls whose ABI is (fd, raw buffer) pairs —
-//! making them safe requires changing their *call sites*, which belong to
-//! the daemon phases (P3 chunkserver, P4 clients, P5 master). This pass:
-//! converted the address formatters to safe cores and SAFETY-documented
-//! every exported wrapper. Deeper migration is tracked per phase, not as
-//! an IOU here (the module is correct as-is; the work is call-site reshaping,
-//! not a defect).
+//! Layout:
+//! - `sys`: the syscall boundary — one small safe wrapper per libc call
+//!   (read/write/poll/accept/connect/bind/...), each an annotated unsafe
+//!   block over plain fd + buffer arguments;
+//! - `imp` (`#[deny(unsafe_code)]`): all logic — the timed stream loops
+//!   (`streamtoread/towrite/toforward/towait/toaccept`), the non-blocking
+//!   connect wait, resolver entry selection and address formatting —
+//!   written against `sys`, step for step with the C;
+//! - the exported C ABI (sockets.h signatures), which only turns raw
+//!   pointers into slices and out-params.
 //!
-pub enum sockaddr_x25 {}
-pub enum sockaddr_ns {}
-pub enum sockaddr_iso {}
-pub enum sockaddr_ipx {}
-pub enum sockaddr_inarp {}
-pub enum sockaddr_eon {}
-pub enum sockaddr_dl {}
-pub enum sockaddr_ax25 {}
-pub enum sockaddr_at {}
-unsafe extern "C" {
-    unsafe fn socket(
-        __domain: ::core::ffi::c_int,
-        __type: ::core::ffi::c_int,
-        __protocol: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    unsafe fn bind(
-        __fd: ::core::ffi::c_int,
-        __addr: __CONST_SOCKADDR_ARG,
-        __len: socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn getsockname(
-        __fd: ::core::ffi::c_int,
-        __addr: __SOCKADDR_ARG,
-        __len: *mut socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn connect(
-        __fd: ::core::ffi::c_int,
-        __addr: __CONST_SOCKADDR_ARG,
-        __len: socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn getpeername(
-        __fd: ::core::ffi::c_int,
-        __addr: __SOCKADDR_ARG,
-        __len: *mut socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn sendto(
-        __fd: ::core::ffi::c_int,
-        __buf: *const ::core::ffi::c_void,
-        __n: size_t,
-        __flags: ::core::ffi::c_int,
-        __addr: __CONST_SOCKADDR_ARG,
-        __addr_len: socklen_t,
-    ) -> ssize_t;
-    unsafe fn recvfrom(
-        __fd: ::core::ffi::c_int,
-        __buf: *mut ::core::ffi::c_void,
-        __n: size_t,
-        __flags: ::core::ffi::c_int,
-        __addr: __SOCKADDR_ARG,
-        __addr_len: *mut socklen_t,
-    ) -> ssize_t;
-    unsafe fn getsockopt(
-        __fd: ::core::ffi::c_int,
-        __level: ::core::ffi::c_int,
-        __optname: ::core::ffi::c_int,
-        __optval: *mut ::core::ffi::c_void,
-        __optlen: *mut socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn setsockopt(
-        __fd: ::core::ffi::c_int,
-        __level: ::core::ffi::c_int,
-        __optname: ::core::ffi::c_int,
-        __optval: *const ::core::ffi::c_void,
-        __optlen: socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn listen(__fd: ::core::ffi::c_int, __n: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    unsafe fn accept(
-        __fd: ::core::ffi::c_int,
-        __addr: __SOCKADDR_ARG,
-        __addr_len: *mut socklen_t,
-    ) -> ::core::ffi::c_int;
-    unsafe fn shutdown(__fd: ::core::ffi::c_int, __how: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    unsafe fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    unsafe fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    unsafe fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    unsafe fn poll(
-        __fds: *mut pollfd,
-        __nfds: nfds_t,
-        __timeout: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    unsafe fn getaddrinfo(
-        __name: *const ::core::ffi::c_char,
-        __service: *const ::core::ffi::c_char,
-        __req: *const addrinfo,
-        __pai: *mut *mut addrinfo,
-    ) -> ::core::ffi::c_int;
-    unsafe fn freeaddrinfo(__ai: *mut addrinfo);
-    unsafe fn close(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    unsafe fn read(
-        __fd: ::core::ffi::c_int,
-        __buf: *mut ::core::ffi::c_void,
-        __nbytes: size_t,
-    ) -> ssize_t;
-    unsafe fn write(
-        __fd: ::core::ffi::c_int,
-        __buf: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> ssize_t;
-    unsafe fn snprintf(
-        __s: *mut ::core::ffi::c_char,
-        __maxlen: size_t,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    unsafe fn random() -> ::core::ffi::c_long;
-    unsafe fn fcntl(__fd: ::core::ffi::c_int, __cmd: ::core::ffi::c_int, ...)
-    -> ::core::ffi::c_int;
-    unsafe fn __errno_location() -> *mut ::core::ffi::c_int;
-    unsafe fn monotonic_seconds() -> ::core::ffi::c_double;
-}
-pub type size_t = usize;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __socklen_t = ::core::ffi::c_uint;
-pub type ssize_t = isize;
-pub type int32_t = i32;
-pub type socklen_t = __socklen_t;
-pub type __socket_type = ::core::ffi::c_uint;
-pub const SOCK_NONBLOCK: __socket_type = 2048;
-pub const SOCK_CLOEXEC: __socket_type = 524288;
-pub const SOCK_PACKET: __socket_type = 10;
-pub const SOCK_DCCP: __socket_type = 6;
-pub const SOCK_SEQPACKET: __socket_type = 5;
-pub const SOCK_RDM: __socket_type = 4;
-pub const SOCK_RAW: __socket_type = 3;
-pub const SOCK_DGRAM: __socket_type = 2;
-pub const SOCK_STREAM: __socket_type = 1;
-pub type sa_family_t = ::core::ffi::c_ushort;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct sockaddr {
-    pub sa_family: sa_family_t,
-    pub sa_data: [::core::ffi::c_char; 14],
-}
-pub type C2Rust_Unnamed = ::core::ffi::c_uint;
-pub const SHUT_RDWR: C2Rust_Unnamed = 2;
-pub const SHUT_WR: C2Rust_Unnamed = 1;
-pub const SHUT_RD: C2Rust_Unnamed = 0;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union __SOCKADDR_ARG {
-    pub __sockaddr__: *mut sockaddr,
-    pub __sockaddr_at__: *mut sockaddr_at,
-    pub __sockaddr_ax25__: *mut sockaddr_ax25,
-    pub __sockaddr_dl__: *mut sockaddr_dl,
-    pub __sockaddr_eon__: *mut sockaddr_eon,
-    pub __sockaddr_in__: *mut sockaddr_in,
-    pub __sockaddr_in6__: *mut sockaddr_in6,
-    pub __sockaddr_inarp__: *mut sockaddr_inarp,
-    pub __sockaddr_ipx__: *mut sockaddr_ipx,
-    pub __sockaddr_iso__: *mut sockaddr_iso,
-    pub __sockaddr_ns__: *mut sockaddr_ns,
-    pub __sockaddr_un__: *mut sockaddr_un,
-    pub __sockaddr_x25__: *mut sockaddr_x25,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct sockaddr_un {
-    pub sun_family: sa_family_t,
-    pub sun_path: [::core::ffi::c_char; 108],
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct sockaddr_in6 {
-    pub sin6_family: sa_family_t,
-    pub sin6_port: in_port_t,
-    pub sin6_flowinfo: uint32_t,
-    pub sin6_addr: in6_addr,
-    pub sin6_scope_id: uint32_t,
-}
-pub type uint32_t = u32;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct in6_addr {
-    pub __in6_u: C2Rust_Unnamed_0,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union C2Rust_Unnamed_0 {
-    pub __u6_addr8: [uint8_t; 16],
-    pub __u6_addr16: [uint16_t; 8],
-    pub __u6_addr32: [uint32_t; 4],
-}
-pub type uint16_t = u16;
-pub type uint8_t = u8;
-pub type in_port_t = uint16_t;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct sockaddr_in {
-    pub sin_family: sa_family_t,
-    pub sin_port: in_port_t,
-    pub sin_addr: in_addr,
-    pub sin_zero: [::core::ffi::c_uchar; 8],
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct in_addr {
-    pub s_addr: in_addr_t,
-}
-pub type in_addr_t = uint32_t;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union __CONST_SOCKADDR_ARG {
-    pub __sockaddr__: *const sockaddr,
-    pub __sockaddr_at__: *const sockaddr_at,
-    pub __sockaddr_ax25__: *const sockaddr_ax25,
-    pub __sockaddr_dl__: *const sockaddr_dl,
-    pub __sockaddr_eon__: *const sockaddr_eon,
-    pub __sockaddr_in__: *const sockaddr_in,
-    pub __sockaddr_in6__: *const sockaddr_in6,
-    pub __sockaddr_inarp__: *const sockaddr_inarp,
-    pub __sockaddr_ipx__: *const sockaddr_ipx,
-    pub __sockaddr_iso__: *const sockaddr_iso,
-    pub __sockaddr_ns__: *const sockaddr_ns,
-    pub __sockaddr_un__: *const sockaddr_un,
-    pub __sockaddr_x25__: *const sockaddr_x25,
-}
-pub type nfds_t = ::core::ffi::c_ulong;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct pollfd {
-    pub fd: ::core::ffi::c_int,
-    pub events: ::core::ffi::c_short,
-    pub revents: ::core::ffi::c_short,
-}
-pub type C2Rust_Unnamed_1 = ::core::ffi::c_uint;
-pub const IPPROTO_MAX: C2Rust_Unnamed_1 = 263;
-pub const IPPROTO_MPTCP: C2Rust_Unnamed_1 = 262;
-pub const IPPROTO_SMC: C2Rust_Unnamed_1 = 256;
-pub const IPPROTO_RAW: C2Rust_Unnamed_1 = 255;
-pub const IPPROTO_AGGFRAG: C2Rust_Unnamed_1 = 144;
-pub const IPPROTO_ETHERNET: C2Rust_Unnamed_1 = 143;
-pub const IPPROTO_MPLS: C2Rust_Unnamed_1 = 137;
-pub const IPPROTO_UDPLITE: C2Rust_Unnamed_1 = 136;
-pub const IPPROTO_SCTP: C2Rust_Unnamed_1 = 132;
-pub const IPPROTO_L2TP: C2Rust_Unnamed_1 = 115;
-pub const IPPROTO_COMP: C2Rust_Unnamed_1 = 108;
-pub const IPPROTO_PIM: C2Rust_Unnamed_1 = 103;
-pub const IPPROTO_ENCAP: C2Rust_Unnamed_1 = 98;
-pub const IPPROTO_BEETPH: C2Rust_Unnamed_1 = 94;
-pub const IPPROTO_MTP: C2Rust_Unnamed_1 = 92;
-pub const IPPROTO_AH: C2Rust_Unnamed_1 = 51;
-pub const IPPROTO_ESP: C2Rust_Unnamed_1 = 50;
-pub const IPPROTO_GRE: C2Rust_Unnamed_1 = 47;
-pub const IPPROTO_RSVP: C2Rust_Unnamed_1 = 46;
-pub const IPPROTO_IPV6: C2Rust_Unnamed_1 = 41;
-pub const IPPROTO_DCCP: C2Rust_Unnamed_1 = 33;
-pub const IPPROTO_TP: C2Rust_Unnamed_1 = 29;
-pub const IPPROTO_IDP: C2Rust_Unnamed_1 = 22;
-pub const IPPROTO_UDP: C2Rust_Unnamed_1 = 17;
-pub const IPPROTO_PUP: C2Rust_Unnamed_1 = 12;
-pub const IPPROTO_EGP: C2Rust_Unnamed_1 = 8;
-pub const IPPROTO_TCP: C2Rust_Unnamed_1 = 6;
-pub const IPPROTO_IPIP: C2Rust_Unnamed_1 = 4;
-pub const IPPROTO_IGMP: C2Rust_Unnamed_1 = 2;
-pub const IPPROTO_ICMP: C2Rust_Unnamed_1 = 1;
-pub const IPPROTO_IP: C2Rust_Unnamed_1 = 0;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct addrinfo {
-    pub ai_flags: ::core::ffi::c_int,
-    pub ai_family: ::core::ffi::c_int,
-    pub ai_socktype: ::core::ffi::c_int,
-    pub ai_protocol: ::core::ffi::c_int,
-    pub ai_addrlen: socklen_t,
-    pub ai_addr: *mut sockaddr,
-    pub ai_canonname: *mut ::core::ffi::c_char,
-    pub ai_next: *mut addrinfo,
-}
-#[inline]
-unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    return (__bsx as ::core::ffi::c_int >> 8 as ::core::ffi::c_int & 0xff as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) << 8 as ::core::ffi::c_int)
-        as __uint16_t;
-}
-#[inline]
-unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    return (__bsx & 0xff000000 as __uint32_t) >> 24 as ::core::ffi::c_int
-        | (__bsx & 0xff0000 as __uint32_t) >> 8 as ::core::ffi::c_int
-        | (__bsx & 0xff00 as __uint32_t) << 8 as ::core::ffi::c_int
-        | (__bsx & 0xff as __uint32_t) << 24 as ::core::ffi::c_int;
-}
-pub const PF_LOCAL: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const PF_UNIX: ::core::ffi::c_int = PF_LOCAL;
-pub const PF_INET: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const AF_LOCAL: ::core::ffi::c_int = PF_LOCAL;
-pub const AF_UNIX: ::core::ffi::c_int = PF_UNIX;
-pub const AF_INET: ::core::ffi::c_int = PF_INET;
-pub const SOL_SOCKET: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const SO_REUSEADDR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const SO_ERROR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const POLLIN: ::core::ffi::c_int = 0x1 as ::core::ffi::c_int;
-pub const POLLOUT: ::core::ffi::c_int = 0x4 as ::core::ffi::c_int;
-pub const POLLERR: ::core::ffi::c_int = 0x8 as ::core::ffi::c_int;
-pub const POLLHUP: ::core::ffi::c_int = 0x10 as ::core::ffi::c_int;
-pub const TCP_NODELAY: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const TCP_DEFER_ACCEPT: ::core::ffi::c_int = 9 as ::core::ffi::c_int;
-pub const AI_PASSIVE: ::core::ffi::c_int = 0x1 as ::core::ffi::c_int;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const O_NONBLOCK: ::core::ffi::c_int = 0o4000 as ::core::ffi::c_int;
-pub const F_GETFL: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const F_SETFL: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const EINTR: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const EAGAIN: ::core::ffi::c_int = 11 as ::core::ffi::c_int;
-pub const EINVAL: ::core::ffi::c_int = 22 as ::core::ffi::c_int;
-pub const EWOULDBLOCK: ::core::ffi::c_int = EAGAIN;
-pub const ECONNRESET: ::core::ffi::c_int = 104 as ::core::ffi::c_int;
-pub const ETIMEDOUT: ::core::ffi::c_int = 110 as ::core::ffi::c_int;
-pub const EINPROGRESS: ::core::ffi::c_int = 115 as ::core::ffi::c_int;
-pub const STRIPSIZE: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
-pub const STRIPPORTSIZE: ::core::ffi::c_int = 32 as ::core::ffi::c_int;
-#[inline]
-unsafe extern "C" fn sockaddrnumfill(
-    mut sa: *mut sockaddr_in,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        memset(
-            sa as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<sockaddr_in>(),
-        );
-        (*sa).sin_family = AF_INET as sa_family_t;
-        (*sa).sin_port = __bswap_16(port as __uint16_t) as in_port_t;
-        (*sa).sin_addr.s_addr = __bswap_32(ip as __uint32_t) as in_addr_t;
-        return 0 as ::core::ffi::c_int;
+//! C quirks kept: elapsed times are `(double seconds)*1000.0` truncated to
+//! `uint32_t`; poll timeouts are `uint32_t` passed as `int` (values above
+//! INT_MAX wait forever); `errno` is the error channel (ETIMEDOUT,
+//! ECONNRESET, ...); resolver picks `random()%n` among matching entries
+//! (consuming the libc PRNG exactly when C does).
+//!
+//! One deviation where C is undefined: `udpread` passed an uninitialized
+//! `socklen_t` to `recvfrom`; here it is initialized to the buffer size.
+
+use core::ffi::{CStr, c_char, c_int, c_void};
+
+use crate::clocks::monotonic_seconds;
+
+pub const STRIPSIZE: usize = 16;
+pub const STRIPPORTSIZE: usize = 32;
+
+/// Syscall boundary: thin safe wrappers, errno is left as the kernel set it.
+mod sys {
+    use core::ffi::{CStr, c_int, c_void};
+
+    pub fn errno() -> c_int {
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
     }
-}
-#[inline]
-unsafe extern "C" fn sockaddrfill(
-    mut sa: *mut sockaddr_in,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut family: ::core::ffi::c_int,
-    mut socktype: ::core::ffi::c_int,
-    mut passive: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut hints: addrinfo = addrinfo {
-            ai_flags: 0,
-            ai_family: 0,
-            ai_socktype: 0,
-            ai_protocol: 0,
-            ai_addrlen: 0,
-            ai_addr: ::core::ptr::null_mut::<sockaddr>(),
-            ai_canonname: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-            ai_next: ::core::ptr::null_mut::<addrinfo>(),
+
+    pub fn set_errno(e: c_int) {
+        // SAFETY: thread-local errno location is always valid.
+        unsafe { *libc::__errno_location() = e };
+    }
+
+    pub fn read(fd: c_int, buf: &mut [u8]) -> isize {
+        // SAFETY: buf is valid for writes of buf.len() bytes.
+        unsafe { libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len()) }
+    }
+
+    pub fn write(fd: c_int, buf: &[u8]) -> isize {
+        // SAFETY: buf is valid for reads of buf.len() bytes.
+        unsafe { libc::write(fd, buf.as_ptr() as *const c_void, buf.len()) }
+    }
+
+    pub fn poll(fds: &mut [libc::pollfd], timeout: c_int) -> c_int {
+        // SAFETY: fds is a valid array of fds.len() pollfd entries.
+        unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) }
+    }
+
+    pub fn accept(lsock: c_int) -> c_int {
+        // SAFETY: NULL address/len is allowed by accept(2).
+        unsafe { libc::accept(lsock, core::ptr::null_mut(), core::ptr::null_mut()) }
+    }
+
+    pub fn socket(domain: c_int, ty: c_int) -> c_int {
+        // SAFETY: no memory arguments.
+        unsafe { libc::socket(domain, ty, 0) }
+    }
+
+    pub fn close(fd: c_int) -> c_int {
+        // SAFETY: no memory arguments.
+        unsafe { libc::close(fd) }
+    }
+
+    pub fn shutdown(fd: c_int, how: c_int) -> c_int {
+        // SAFETY: no memory arguments.
+        unsafe { libc::shutdown(fd, how) }
+    }
+
+    pub fn listen(fd: c_int, queue: c_int) -> c_int {
+        // SAFETY: no memory arguments.
+        unsafe { libc::listen(fd, queue) }
+    }
+
+    pub fn nonblock(fd: c_int) -> c_int {
+        // SAFETY: fcntl F_GETFL/F_SETFL take integer arguments.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            if flags == -1 {
+                return -1;
+            }
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK)
+        }
+    }
+
+    pub fn setsockopt_int(fd: c_int, level: c_int, name: c_int, v: c_int) -> c_int {
+        // SAFETY: option value is a local int of the stated size.
+        unsafe {
+            libc::setsockopt(
+                fd,
+                level,
+                name,
+                &v as *const c_int as *const c_void,
+                core::mem::size_of::<c_int>() as libc::socklen_t,
+            )
+        }
+    }
+
+    /// C `sockgetstatus`: SO_ERROR, stored into errno and returned.
+    pub fn getstatus(fd: c_int) -> c_int {
+        let mut rc: c_int = 0;
+        let mut len = core::mem::size_of::<c_int>() as libc::socklen_t;
+        // SAFETY: rc/len are locals of the sizes passed.
+        let r = unsafe {
+            libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, &mut rc as *mut c_int as *mut c_void, &mut len)
         };
-        let mut res: *mut addrinfo = ::core::ptr::null_mut::<addrinfo>();
-        let mut reshead: *mut addrinfo = ::core::ptr::null_mut::<addrinfo>();
-        let mut n: uint32_t = 0;
-        let mut r: uint32_t = 0;
-        memset(
-            &raw mut hints as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<addrinfo>(),
-        );
-        hints.ai_family = family;
-        hints.ai_socktype = socktype;
-        if passive != 0 {
-            hints.ai_flags = AI_PASSIVE;
+        if r < 0 {
+            rc = errno();
         }
-        if !hostname.is_null()
-            && *hostname.offset(0 as isize) as ::core::ffi::c_int == '*' as ::core::ffi::c_int
-        {
-            hostname = ::core::ptr::null::<::core::ffi::c_char>();
-        }
-        if !service.is_null()
-            && *service.offset(0 as isize) as ::core::ffi::c_int == '*' as ::core::ffi::c_int
-        {
-            service = ::core::ptr::null::<::core::ffi::c_char>();
-        }
-        if getaddrinfo(hostname, service, &raw mut hints, &raw mut reshead) != 0 {
-            return -1 as ::core::ffi::c_int;
-        }
-        n = 0 as uint32_t;
-        res = reshead;
-        while !res.is_null() {
-            if (*res).ai_family == family
-                && (*res).ai_socktype == socktype
-                && (*res).ai_addrlen as usize == ::core::mem::size_of::<sockaddr_in>()
-            {
-                n = n.wrapping_add(1);
-            }
-            res = (*res).ai_next;
-        }
-        if n > 0 as uint32_t {
-            r = (random() % n as ::core::ffi::c_long) as uint32_t;
-        } else {
-            r = 0 as uint32_t;
-        }
-        res = reshead;
-        while !res.is_null() {
-            if (*res).ai_family == family
-                && (*res).ai_socktype == socktype
-                && (*res).ai_addrlen as usize == ::core::mem::size_of::<sockaddr_in>()
-            {
-                if r == 0 as uint32_t {
-                    *sa = *((*res).ai_addr as *mut sockaddr_in);
-                    freeaddrinfo(reshead);
-                    return 0 as ::core::ffi::c_int;
-                } else {
-                    r = r.wrapping_sub(1);
-                }
-            }
-            res = (*res).ai_next;
-        }
-        freeaddrinfo(reshead);
-        return -1 as ::core::ffi::c_int;
+        set_errno(rc);
+        rc
     }
-}
-#[inline]
-unsafe extern "C" fn sockresolve(
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-    mut family: ::core::ffi::c_int,
-    mut socktype: ::core::ffi::c_int,
-    mut passive: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
+
+    /// C `sockaddrnumfill`.
+    pub fn sin(ip: u32, port: u16) -> libc::sockaddr_in {
+        libc::sockaddr_in {
+            sin_family: libc::AF_INET as libc::sa_family_t,
+            sin_port: port.to_be(),
+            sin_addr: libc::in_addr { s_addr: ip.to_be() },
             sin_zero: [0; 8],
-        };
-        if sockaddrfill(&raw mut sa, hostname, service, family, socktype, passive)
-            < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
         }
-        if !ip.is_null() {
-            *ip = __bswap_32(sa.sin_addr.s_addr as __uint32_t) as uint32_t;
-        }
-        if !port.is_null() {
-            *port = __bswap_16(sa.sin_port as __uint16_t) as uint16_t;
-        }
-        return 0 as ::core::ffi::c_int;
     }
-}
-fn fmt_ip(ip: uint32_t) -> [u8; 16] {
-    let s = format!(
-        "{}.{}.{}.{}",
-        ip >> 24,
-        (ip >> 16) & 0xff,
-        (ip >> 8) & 0xff,
-        ip & 0xff
-    );
-    let mut b = [0u8; 16];
-    b[..s.len()].copy_from_slice(s.as_bytes());
-    b
+
+    pub fn connect_in(fd: c_int, sa: &libc::sockaddr_in) -> c_int {
+        // SAFETY: sa is a valid sockaddr_in of the stated length.
+        unsafe {
+            libc::connect(
+                fd,
+                sa as *const libc::sockaddr_in as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            )
+        }
+    }
+
+    pub fn bind_in(fd: c_int, sa: &libc::sockaddr_in) -> c_int {
+        // SAFETY: sa is a valid sockaddr_in of the stated length.
+        unsafe {
+            libc::bind(
+                fd,
+                sa as *const libc::sockaddr_in as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            )
+        }
+    }
+
+    /// C `sockaddrpathfill`: None when the path does not fit `sun_path`.
+    pub fn sun(path: &[u8]) -> Option<libc::sockaddr_un> {
+        // SAFETY: sockaddr_un is plain data; all-zero is valid.
+        let mut sa: libc::sockaddr_un = unsafe { core::mem::zeroed() };
+        if path.len() >= sa.sun_path.len() {
+            return None;
+        }
+        sa.sun_family = libc::AF_LOCAL as libc::sa_family_t;
+        for (d, &s) in sa.sun_path.iter_mut().zip(path) {
+            *d = s as libc::c_char;
+        }
+        Some(sa)
+    }
+
+    pub fn connect_un(fd: c_int, sa: &libc::sockaddr_un) -> c_int {
+        // SAFETY: sa is a valid sockaddr_un of the stated length.
+        unsafe {
+            libc::connect(
+                fd,
+                sa as *const libc::sockaddr_un as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+            )
+        }
+    }
+
+    pub fn bind_un(fd: c_int, sa: &libc::sockaddr_un) -> c_int {
+        // SAFETY: sa is a valid sockaddr_un of the stated length.
+        unsafe {
+            libc::bind(
+                fd,
+                sa as *const libc::sockaddr_un as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+            )
+        }
+    }
+
+    /// getpeername/getsockname as (ip, port) in host order.
+    pub fn name(fd: c_int, peer: bool) -> Option<(u32, u16)> {
+        let mut sa = sin(0, 0);
+        let mut len = core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        let p = &mut sa as *mut libc::sockaddr_in as *mut libc::sockaddr;
+        // SAFETY: sa/len are locals of the sizes passed.
+        let r = unsafe { if peer { libc::getpeername(fd, p, &mut len) } else { libc::getsockname(fd, p, &mut len) } };
+        (r >= 0).then(|| (u32::from_be(sa.sin_addr.s_addr), u16::from_be(sa.sin_port)))
+    }
+
+    /// getaddrinfo: IPv4 entries matching (family, socktype) with a
+    /// sockaddr_in-sized address, in resolver order. None = lookup failed.
+    pub fn addrinfo(
+        host: Option<&CStr>,
+        service: Option<&CStr>,
+        family: c_int,
+        socktype: c_int,
+        passive: bool,
+    ) -> Option<Vec<libc::sockaddr_in>> {
+        // SAFETY: hints is zeroed plain data; getaddrinfo's result list is
+        // walked read-only and freed exactly once.
+        unsafe {
+            let mut hints: libc::addrinfo = core::mem::zeroed();
+            hints.ai_family = family;
+            hints.ai_socktype = socktype;
+            if passive {
+                hints.ai_flags = libc::AI_PASSIVE;
+            }
+            let mut head: *mut libc::addrinfo = core::ptr::null_mut();
+            let h = host.map_or(core::ptr::null(), |c| c.as_ptr());
+            let s = service.map_or(core::ptr::null(), |c| c.as_ptr());
+            if libc::getaddrinfo(h, s, &hints, &mut head) != 0 {
+                return None;
+            }
+            let mut out = Vec::new();
+            let mut r = head;
+            while !r.is_null() {
+                let ai = &*r;
+                if ai.ai_family == family
+                    && ai.ai_socktype == socktype
+                    && ai.ai_addrlen as usize == core::mem::size_of::<libc::sockaddr_in>()
+                {
+                    out.push(*(ai.ai_addr as *const libc::sockaddr_in));
+                }
+                r = ai.ai_next;
+            }
+            libc::freeaddrinfo(head);
+            Some(out)
+        }
+    }
+
+    /// libc `random()` (the PRNG shared with rnd_init's srandom seed).
+    pub fn random() -> libc::c_long {
+        unsafe extern "C" {
+            fn random() -> libc::c_long;
+        }
+        // SAFETY: no arguments; glibc random() is thread-safe.
+        unsafe { random() }
+    }
+
+    pub fn sendto_in(fd: c_int, buf: &[u8], sa: &libc::sockaddr_in) -> c_int {
+        // SAFETY: buf and sa are valid for the lengths passed.
+        unsafe {
+            libc::sendto(
+                fd,
+                buf.as_ptr() as *const c_void,
+                buf.len(),
+                0,
+                sa as *const libc::sockaddr_in as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            ) as c_int
+        }
+    }
+
+    /// recvfrom into `buf`; returns (ret, source if it is a sockaddr_in).
+    pub fn recvfrom_in(fd: c_int, buf: &mut [u8]) -> (c_int, Option<(u32, u16)>) {
+        // SAFETY: sockaddr is plain data; all-zero is valid.
+        let mut sa: libc::sockaddr = unsafe { core::mem::zeroed() };
+        let mut len = core::mem::size_of::<libc::sockaddr>() as libc::socklen_t;
+        // SAFETY: buf/sa/len are valid for the lengths passed.
+        let ret = unsafe {
+            libc::recvfrom(fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0, &mut sa, &mut len) as c_int
+        };
+        let src = (len as usize == core::mem::size_of::<libc::sockaddr_in>()).then(|| {
+            // SAFETY: the kernel filled a sockaddr_in (length checked);
+            // sockaddr is at least as large and suitably aligned.
+            let sin = unsafe { &*(&sa as *const libc::sockaddr as *const libc::sockaddr_in) };
+            (u32::from_be(sin.sin_addr.s_addr), u16::from_be(sin.sin_port))
+        });
+        (ret, src)
+    }
 }
 
-/// # Safety
-/// `strip` must be writable for STRIPSIZE bytes (C caller contract).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univmakestrip(mut strip: *mut ::core::ffi::c_char, mut ip: uint32_t) {
-    let b = fmt_ip(ip);
-    // SAFETY: per fn contract; writes STRIPSIZE bytes incl. NUL.
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            b.as_ptr() as *const ::core::ffi::c_char,
-            strip,
-            STRIPSIZE as usize,
-        );
-        *strip.add((STRIPSIZE - 1) as usize) = 0;
-    }
-}
-fn fmt_ip_port(ip: uint32_t, port: uint16_t) -> [u8; 32] {
-    let s = format!(
-        "{}.{}.{}.{}:{}",
-        ip >> 24,
-        (ip >> 16) & 0xff,
-        (ip >> 8) & 0xff,
-        ip & 0xff,
-        port
-    );
-    let mut b = [0u8; 32];
-    b[..s.len()].copy_from_slice(s.as_bytes());
-    b
-}
+pub use imp::{fmt_ip, fmt_ip_port};
 
-/// # Safety
-/// `stripport` must be writable for STRIPPORTSIZE bytes (C caller contract).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univmakestripport(
-    mut stripport: *mut ::core::ffi::c_char,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) {
-    let b = fmt_ip_port(ip, port);
-    // SAFETY: per fn contract; writes STRIPPORTSIZE bytes incl. NUL.
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            b.as_ptr() as *const ::core::ffi::c_char,
-            stripport,
-            STRIPPORTSIZE as usize,
-        );
-        *stripport.add((STRIPPORTSIZE - 1) as usize) = 0;
+#[deny(unsafe_code)]
+mod imp {
+    use super::sys;
+    use super::{CStr, c_int, monotonic_seconds};
+    use libc::{
+        EAGAIN, ECONNRESET, EINPROGRESS, EINTR, ETIMEDOUT, POLLERR, POLLHUP, POLLIN, POLLOUT, pollfd,
+    };
+
+    /// `(uint32_t)((c-s)*1000.0)`.
+    fn ms(d: f64) -> u32 {
+        (d * 1000.0) as u32
     }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univallocstrip(mut ip: uint32_t) -> *mut ::core::ffi::c_char {
-    unsafe {
-        let mut sbuff: [::core::ffi::c_char; 16] = [0; 16];
-        univmakestrip(&raw mut sbuff as *mut ::core::ffi::c_char, ip);
-        return strdup(&raw mut sbuff as *mut ::core::ffi::c_char);
+
+    /// C `ERRNO_ERROR` (Linux: EWOULDBLOCK == EAGAIN).
+    fn errno_error() -> bool {
+        sys::errno() != EAGAIN
     }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univallocstripport(
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) -> *mut ::core::ffi::c_char {
-    unsafe {
-        let mut sbuff: [::core::ffi::c_char; 32] = [0; 32];
-        univmakestripport(&raw mut sbuff as *mut ::core::ffi::c_char, ip, port);
-        return strdup(&raw mut sbuff as *mut ::core::ffi::c_char);
+
+    fn pfd(fd: c_int, events: i16) -> pollfd {
+        pollfd { fd, events, revents: 0 }
     }
-}
-#[inline]
-unsafe extern "C" fn sockaddrpathfill(
-    mut sa: *mut sockaddr_un,
-    mut path: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut pl: size_t = 0;
-        pl = strlen(path);
-        if pl >= ::core::mem::size_of::<[::core::ffi::c_char; 108]>() {
-            return -1 as ::core::ffi::c_int;
+
+    /// Shared per-part / total deadline bookkeeping of the stream loops.
+    struct Clock {
+        s: f64,
+        c: f64,
+    }
+
+    impl Clock {
+        fn new() -> Self {
+            Clock { s: 0.0, c: 0.0 }
         }
-        memset(
-            sa as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<sockaddr_un>(),
-        );
-        (*sa).sun_family = AF_LOCAL as sa_family_t;
-        memcpy(
-            &raw mut (*sa).sun_path as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
-            path as *const ::core::ffi::c_void,
-            pl,
-        );
-        (*sa).sun_path[pl] = '\0' as ::core::ffi::c_char;
-        return 0 as ::core::ffi::c_int;
-    }
-}
-#[inline]
-unsafe extern "C" fn descnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut flags: ::core::ffi::c_int = fcntl(sock, F_GETFL, 0 as ::core::ffi::c_int);
-        if flags == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
+        /// Returns msecpassed, or Err after setting ETIMEDOUT.
+        fn step(&mut self, msectopart: u32, msectoall: u32) -> Result<u32, ()> {
+            if self.s == 0.0 {
+                self.s = monotonic_seconds();
+                self.c = self.s;
+                return Ok(0);
+            }
+            let l = self.c;
+            self.c = monotonic_seconds();
+            if ms(self.c - l) >= msectopart {
+                sys::set_errno(ETIMEDOUT);
+                return Err(());
+            }
+            let passed = ms(self.c - self.s);
+            if passed >= msectoall {
+                sys::set_errno(ETIMEDOUT);
+                return Err(());
+            }
+            Ok(passed)
         }
-        return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     }
-}
-#[inline]
-unsafe extern "C" fn sockgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut arglen: socklen_t = ::core::mem::size_of::<::core::ffi::c_int>() as socklen_t;
-        let mut rc: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-        if getsockopt(
-            sock,
-            SOL_SOCKET,
-            SO_ERROR,
-            &raw mut rc as *mut ::core::ffi::c_void,
-            &raw mut arglen,
-        ) < 0 as ::core::ffi::c_int
-        {
-            rc = *__errno_location();
+
+    fn poll_timeout(msectopart: u32, msectoall: u32, passed: u32) -> c_int {
+        let mut msecpoll = msectoall.wrapping_sub(passed);
+        if msectopart < msecpoll {
+            msecpoll = msectopart;
         }
-        *__errno_location() = rc;
-        return rc;
+        msecpoll as c_int
     }
-}
-#[inline]
-unsafe extern "C" fn streamtowait(
-    mut sock: ::core::ffi::c_int,
-    mut msectoall: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut pfd: pollfd = pollfd {
-            fd: 0,
-            events: 0,
-            revents: 0,
-        };
-        let mut s: ::core::ffi::c_double = 0.;
-        let mut c: ::core::ffi::c_double = 0.;
-        let mut msecpassed: uint32_t = 0;
-        let mut msecpoll: uint32_t = 0;
-        s = 0.0f64;
-        c = 0.0f64;
-        pfd.fd = sock;
-        pfd.events = POLLIN as ::core::ffi::c_short;
-        pfd.revents = 0 as ::core::ffi::c_short;
+
+    /// C `streamtowait`.
+    pub fn towait(sock: c_int, msectoall: u32) -> c_int {
+        let (mut s, mut msecpassed) = (0.0f64, 0u32);
+        let mut p = [pfd(sock, POLLIN)];
         loop {
-            if s == 0.0f64 {
+            if s == 0.0 {
                 s = monotonic_seconds();
-                c = s;
-                msecpassed = 0 as uint32_t;
+                msecpassed = 0;
             } else {
-                c = monotonic_seconds();
-                msecpassed = ((c - s) * 1000.0f64) as uint32_t;
+                msecpassed = ms(monotonic_seconds() - s);
                 if msecpassed >= msectoall {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as ::core::ffi::c_int;
+                    sys::set_errno(ETIMEDOUT);
+                    return -1;
                 }
             }
-            pfd.revents = 0 as ::core::ffi::c_short;
-            msecpoll = msectoall.wrapping_sub(msecpassed);
-            if poll(&raw mut pfd, 1 as nfds_t, msecpoll as ::core::ffi::c_int)
-                < 0 as ::core::ffi::c_int
-            {
-                if *__errno_location() == EINTR {
-                    continue;
+            p[0].revents = 0;
+            if sys::poll(&mut p, msectoall.wrapping_sub(msecpassed) as c_int) < 0 {
+                if sys::errno() != EINTR {
+                    return -1;
                 }
-                return -1 as ::core::ffi::c_int;
-            } else {
-                if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLIN) != 0 {
-                    return 0 as ::core::ffi::c_int;
-                }
-                if pfd.revents as ::core::ffi::c_int & POLLERR != 0 {
-                    return -1 as ::core::ffi::c_int;
-                }
-                if pfd.revents as ::core::ffi::c_int & POLLIN == 0 as ::core::ffi::c_int {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as ::core::ffi::c_int;
-                }
+                continue;
             }
+            if p[0].revents & (POLLHUP | POLLIN) != 0 {
+                return 0;
+            }
+            if p[0].revents & POLLERR != 0 {
+                return -1;
+            }
+            sys::set_errno(ETIMEDOUT);
+            return -1;
         }
     }
-}
-#[inline]
-unsafe extern "C" fn streamtoread(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        let mut rcvd: uint32_t = 0 as uint32_t;
-        let mut i: ::core::ffi::c_int = 0;
-        let mut pfd: pollfd = pollfd {
-            fd: 0,
-            events: 0,
-            revents: 0,
-        };
-        let mut s: ::core::ffi::c_double = 0.;
-        let mut c: ::core::ffi::c_double = 0.;
-        let mut l: ::core::ffi::c_double = 0.;
-        let mut msecpassed: uint32_t = 0;
-        let mut msecpoll: uint32_t = 0;
-        s = 0.0f64;
-        c = 0.0f64;
-        pfd.fd = sock;
-        pfd.events = POLLIN as ::core::ffi::c_short;
-        pfd.revents = 0 as ::core::ffi::c_short;
+
+    /// C `streamtoread`.
+    pub fn toread(sock: c_int, buff: &mut [u8], msectopart: u32, msectoall: u32) -> i32 {
+        let leng = buff.len() as u32;
+        let mut rcvd: u32 = 0;
+        let mut clock = Clock::new();
+        let mut p = [pfd(sock, POLLIN)];
         loop {
-            i = read(
-                sock,
-                (buff as *mut uint8_t).offset(rcvd as isize) as *mut ::core::ffi::c_void,
-                leng.wrapping_sub(rcvd) as size_t,
-            ) as ::core::ffi::c_int;
-            if i == 0 as ::core::ffi::c_int {
-                *__errno_location() = ECONNRESET;
-                return rcvd as int32_t;
+            let i = sys::read(sock, &mut buff[rcvd as usize..]) as c_int;
+            if i == 0 {
+                sys::set_errno(ECONNRESET);
+                return rcvd as i32;
             }
-            if i > 0 as ::core::ffi::c_int {
-                rcvd = rcvd.wrapping_add(i as uint32_t);
-            } else if *__errno_location() != EAGAIN && *__errno_location() != EWOULDBLOCK {
-                return -1 as int32_t;
+            if i > 0 {
+                rcvd = rcvd.wrapping_add(i as u32);
+            } else if errno_error() {
+                return -1;
             }
-            if pfd.revents as ::core::ffi::c_int & POLLHUP != 0 {
-                *__errno_location() = ECONNRESET;
-                return rcvd as int32_t;
+            if p[0].revents & POLLHUP != 0 {
+                sys::set_errno(ECONNRESET);
+                return rcvd as i32;
             }
             if rcvd >= leng {
                 break;
             }
-            if s == 0.0f64 {
-                s = monotonic_seconds();
-                c = s;
-                msecpassed = 0 as uint32_t;
-            } else {
-                l = c;
-                c = monotonic_seconds();
-                msecpassed = ((c - l) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectopart {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
+            let Ok(passed) = clock.step(msectopart, msectoall) else { return -1 };
+            p[0].revents = 0;
+            if sys::poll(&mut p, poll_timeout(msectopart, msectoall, passed)) < 0 {
+                if sys::errno() != EINTR {
+                    return -1;
                 }
-                msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectoall {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
+                continue;
             }
-            pfd.revents = 0 as ::core::ffi::c_short;
-            msecpoll = msectoall.wrapping_sub(msecpassed);
-            if msectopart < msecpoll {
-                msecpoll = msectopart;
+            if p[0].revents & POLLERR != 0 {
+                return -1;
             }
-            if poll(&raw mut pfd, 1 as nfds_t, msecpoll as ::core::ffi::c_int)
-                < 0 as ::core::ffi::c_int
-            {
-                if *__errno_location() == EINTR {
-                    continue;
-                }
-                return -1 as int32_t;
-            } else {
-                if pfd.revents as ::core::ffi::c_int & POLLERR != 0 {
-                    return -1 as int32_t;
-                }
-                if pfd.revents as ::core::ffi::c_int & POLLIN == 0 as ::core::ffi::c_int {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
+            if p[0].revents & POLLIN == 0 {
+                sys::set_errno(ETIMEDOUT);
+                return -1;
             }
         }
-        return rcvd as int32_t;
+        rcvd as i32
     }
-}
-#[inline]
-unsafe extern "C" fn streamtowrite(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *const ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        let mut sent: uint32_t = 0 as uint32_t;
-        let mut i: int32_t = 0;
-        let mut pfd: pollfd = pollfd {
-            fd: 0,
-            events: 0,
-            revents: 0,
-        };
-        let mut s: ::core::ffi::c_double = 0.;
-        let mut c: ::core::ffi::c_double = 0.;
-        let mut l: ::core::ffi::c_double = 0.;
-        let mut msecpassed: uint32_t = 0;
-        let mut msecpoll: uint32_t = 0;
-        s = 0.0f64;
-        c = 0.0f64;
-        pfd.fd = sock;
-        pfd.events = POLLOUT as ::core::ffi::c_short;
-        pfd.revents = 0 as ::core::ffi::c_short;
+
+    /// C `streamtowrite`.
+    pub fn towrite(sock: c_int, buff: &[u8], msectopart: u32, msectoall: u32) -> i32 {
+        let leng = buff.len() as u32;
+        let mut sent: u32 = 0;
+        let mut clock = Clock::new();
+        let mut p = [pfd(sock, POLLOUT)];
         loop {
-            i = write(
-                sock,
-                (buff as *mut uint8_t).offset(sent as isize) as *const ::core::ffi::c_void,
-                leng.wrapping_sub(sent) as size_t,
-            ) as int32_t;
-            if i >= 0 as int32_t {
-                sent = sent.wrapping_add(i as uint32_t);
-            } else if *__errno_location() != EAGAIN && *__errno_location() != EWOULDBLOCK {
-                return -1 as int32_t;
+            let i = sys::write(sock, &buff[sent as usize..]) as i32;
+            if i >= 0 {
+                sent = sent.wrapping_add(i as u32);
+            } else if errno_error() {
+                return -1;
             }
             if sent >= leng {
                 break;
             }
-            if s == 0.0f64 {
-                s = monotonic_seconds();
-                c = s;
-                msecpassed = 0 as uint32_t;
-            } else {
-                l = c;
-                c = monotonic_seconds();
-                msecpassed = ((c - l) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectopart {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
+            let Ok(passed) = clock.step(msectopart, msectoall) else { return -1 };
+            p[0].revents = 0;
+            if sys::poll(&mut p, poll_timeout(msectopart, msectoall, passed)) < 0 {
+                if sys::errno() != EINTR {
+                    return -1;
                 }
-                msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectoall {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
+                continue;
             }
-            pfd.revents = 0 as ::core::ffi::c_short;
-            msecpoll = msectoall.wrapping_sub(msecpassed);
-            if msectopart < msecpoll {
-                msecpoll = msectopart;
+            if p[0].revents & (POLLHUP | POLLERR) != 0 {
+                return -1;
             }
-            if poll(&raw mut pfd, 1 as nfds_t, msecpoll as ::core::ffi::c_int)
-                < 0 as ::core::ffi::c_int
-            {
-                if *__errno_location() == EINTR {
-                    continue;
-                }
-                return -1 as int32_t;
-            } else {
-                if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLERR) != 0 {
-                    return -1 as int32_t;
-                }
-                if pfd.revents as ::core::ffi::c_int & POLLOUT == 0 as ::core::ffi::c_int {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
+            if p[0].revents & POLLOUT == 0 {
+                sys::set_errno(ETIMEDOUT);
+                return -1;
             }
         }
-        return sent as int32_t;
+        sent as i32
     }
-}
-#[inline]
-unsafe extern "C" fn streamtoforward(
-    mut srcsock: ::core::ffi::c_int,
-    mut dstsock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut rcvd: uint32_t,
-    mut sent: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        let mut i: int32_t = 0;
-        let mut pfd: [pollfd; 2] = [pollfd {
-            fd: 0,
-            events: 0,
-            revents: 0,
-        }; 2];
-        let mut s: ::core::ffi::c_double = 0.;
-        let mut c: ::core::ffi::c_double = 0.;
-        let mut l: ::core::ffi::c_double = 0.;
-        let mut msecpassed: uint32_t = 0;
-        let mut msecpoll: uint32_t = 0;
-        s = 0.0f64;
-        c = 0.0f64;
-        pfd[0 as usize].fd = srcsock;
-        pfd[0 as usize].events = POLLIN as ::core::ffi::c_short;
-        pfd[0 as usize].revents = 0 as ::core::ffi::c_short;
-        pfd[1 as usize].fd = dstsock;
-        pfd[1 as usize].events = POLLOUT as ::core::ffi::c_short;
-        pfd[1 as usize].revents = 0 as ::core::ffi::c_short;
+
+    /// C `streamtoforward`: copy `buff.len()` bytes src→dst through buff,
+    /// resuming from (rcvd, sent). Returns the forwarded length.
+    #[allow(clippy::too_many_arguments)]
+    pub fn toforward(
+        src: c_int,
+        dst: c_int,
+        buff: &mut [u8],
+        mut rcvd: u32,
+        mut sent: u32,
+        msectopart: u32,
+        msectoall: u32,
+    ) -> i32 {
+        let mut leng = buff.len() as u32;
+        let mut clock = Clock::new();
+        let mut p = [pfd(src, POLLIN), pfd(dst, POLLOUT)];
         loop {
             if rcvd < leng {
-                i = read(
-                    srcsock,
-                    (buff as *mut uint8_t).offset(rcvd as isize) as *mut ::core::ffi::c_void,
-                    leng.wrapping_sub(rcvd) as size_t,
-                ) as int32_t;
-                if i == 0 as int32_t {
+                let i = sys::read(src, &mut buff[rcvd as usize..leng as usize]) as i32;
+                if i == 0 {
                     leng = rcvd;
                 }
-                if i > 0 as int32_t {
-                    rcvd = rcvd.wrapping_add(i as uint32_t);
-                } else if *__errno_location() != EAGAIN && *__errno_location() != EWOULDBLOCK {
-                    return -1 as int32_t;
+                if i > 0 {
+                    rcvd = rcvd.wrapping_add(i as u32);
+                } else if errno_error() {
+                    return -1;
                 }
             }
-            if pfd[0 as usize].revents as ::core::ffi::c_int & POLLHUP != 0 {
+            if p[0].revents & POLLHUP != 0 {
                 leng = rcvd;
             }
             if rcvd > sent {
-                i = write(
-                    dstsock,
-                    (buff as *mut uint8_t).offset(sent as isize) as *const ::core::ffi::c_void,
-                    rcvd.wrapping_sub(sent) as size_t,
-                ) as int32_t;
-                if i >= 0 as int32_t {
-                    sent = sent.wrapping_add(i as uint32_t);
-                } else if *__errno_location() != EAGAIN && *__errno_location() != EWOULDBLOCK {
-                    return -1 as int32_t;
+                let i = sys::write(dst, &buff[sent as usize..rcvd as usize]) as i32;
+                if i >= 0 {
+                    sent = sent.wrapping_add(i as u32);
+                } else if errno_error() {
+                    return -1;
                 }
             }
             if rcvd >= leng && sent >= leng {
                 break;
             }
-            if s == 0.0f64 {
-                s = monotonic_seconds();
-                c = s;
-                msecpassed = 0 as uint32_t;
-            } else {
-                l = c;
-                c = monotonic_seconds();
-                msecpassed = ((c - l) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectopart {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
-                msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                if msecpassed >= msectoall {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as int32_t;
-                }
-            }
-            pfd[0 as usize].revents = 0 as ::core::ffi::c_short;
-            pfd[1 as usize].revents = 0 as ::core::ffi::c_short;
-            msecpoll = msectoall.wrapping_sub(msecpassed);
-            if msectopart < msecpoll {
-                msecpoll = msectopart;
-            }
+            let Ok(passed) = clock.step(msectopart, msectoall) else { return -1 };
+            p[0].revents = 0;
+            p[1].revents = 0;
+            let t = poll_timeout(msectopart, msectoall, passed);
             if rcvd == leng {
-                if poll(
-                    (&raw mut pfd as *mut pollfd).offset(1 as ::core::ffi::c_int as isize),
-                    1 as nfds_t,
-                    msecpoll as ::core::ffi::c_int,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    if *__errno_location() == EINTR {
-                        continue;
+                // only wait for write
+                if sys::poll(&mut p[1..], t) < 0 {
+                    if sys::errno() != EINTR {
+                        return -1;
                     }
-                    return -1 as int32_t;
-                } else {
-                    if pfd[1 as usize].revents as ::core::ffi::c_int & (POLLERR | POLLHUP) != 0 {
-                        return -1 as int32_t;
-                    }
-                    pfd[0 as usize].revents = 0 as ::core::ffi::c_short;
-                }
-            } else if rcvd == sent {
-                if poll(
-                    &raw mut pfd as *mut pollfd,
-                    1 as nfds_t,
-                    msecpoll as ::core::ffi::c_int,
-                ) < 0 as ::core::ffi::c_int
-                {
-                    if *__errno_location() == EINTR {
-                        continue;
-                    }
-                    return -1 as int32_t;
-                } else {
-                    if pfd[0 as usize].revents as ::core::ffi::c_int & POLLERR != 0 {
-                        return -1 as int32_t;
-                    }
-                    pfd[1 as usize].revents = 0 as ::core::ffi::c_short;
-                }
-            } else if poll(
-                &raw mut pfd as *mut pollfd,
-                2 as nfds_t,
-                msecpoll as ::core::ffi::c_int,
-            ) < 0 as ::core::ffi::c_int
-            {
-                if *__errno_location() == EINTR {
                     continue;
                 }
-                return -1 as int32_t;
-            } else if pfd[0 as usize].revents as ::core::ffi::c_int & POLLERR != 0
-                || pfd[1 as usize].revents as ::core::ffi::c_int & (POLLERR | POLLHUP) != 0
-            {
-                return -1 as int32_t;
-            }
-            if pfd[0 as usize].revents as ::core::ffi::c_int & (POLLIN | POLLHUP)
-                == 0 as ::core::ffi::c_int
-                && pfd[1 as usize].revents as ::core::ffi::c_int & POLLOUT
-                    == 0 as ::core::ffi::c_int
-            {
-                *__errno_location() = ETIMEDOUT;
-                return -1 as int32_t;
-            }
-        }
-        return leng as int32_t;
-    }
-}
-#[inline]
-unsafe extern "C" fn streamtoaccept(
-    mut lsock: ::core::ffi::c_int,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut i: ::core::ffi::c_int = 0;
-        let mut s: ::core::ffi::c_double = 0.;
-        let mut c: ::core::ffi::c_double = 0.;
-        let mut msecpassed: uint32_t = 0;
-        let mut pfd: pollfd = pollfd {
-            fd: 0,
-            events: 0,
-            revents: 0,
-        };
-        i = accept(
-            lsock,
-            __SOCKADDR_ARG {
-                __sockaddr__: NULL as *mut sockaddr,
-            },
-            ::core::ptr::null_mut::<socklen_t>(),
-        );
-        if i >= 0 as ::core::ffi::c_int {
-            return i;
-        } else if *__errno_location() != EAGAIN && *__errno_location() != EWOULDBLOCK {
-            return -1 as ::core::ffi::c_int;
-        }
-        s = monotonic_seconds();
-        msecpassed = 0 as uint32_t;
-        loop {
-            pfd.fd = lsock;
-            pfd.events = POLLIN as ::core::ffi::c_short;
-            pfd.revents = 0 as ::core::ffi::c_short;
-            if poll(
-                &raw mut pfd,
-                1 as nfds_t,
-                msecto.wrapping_sub(msecpassed) as ::core::ffi::c_int,
-            ) >= 0 as ::core::ffi::c_int
-            {
-                break;
-            }
-            if *__errno_location() == EINTR {
-                c = monotonic_seconds();
-                msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                if msecpassed >= msecto {
-                    *__errno_location() = ETIMEDOUT;
-                    return -1 as ::core::ffi::c_int;
+                if p[1].revents & (POLLERR | POLLHUP) != 0 {
+                    return -1;
                 }
+                p[0].revents = 0;
+            } else if rcvd == sent {
+                // only wait for read
+                if sys::poll(&mut p[..1], t) < 0 {
+                    if sys::errno() != EINTR {
+                        return -1;
+                    }
+                    continue;
+                }
+                if p[0].revents & POLLERR != 0 {
+                    return -1;
+                }
+                p[1].revents = 0;
             } else {
-                return -1 as ::core::ffi::c_int;
+                if sys::poll(&mut p, t) < 0 {
+                    if sys::errno() != EINTR {
+                        return -1;
+                    }
+                    continue;
+                }
+                if p[0].revents & POLLERR != 0 || p[1].revents & (POLLERR | POLLHUP) != 0 {
+                    return -1;
+                }
+            }
+            if p[0].revents & (POLLIN | POLLHUP) == 0 && p[1].revents & POLLOUT == 0 {
+                sys::set_errno(ETIMEDOUT);
+                return -1;
             }
         }
-        if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLERR) != 0 {
-            return -1 as ::core::ffi::c_int;
+        leng as i32
+    }
+
+    /// Poll `fd` for `events` until it fires, retrying EINTR against the
+    /// total budget (the shared wait of toaccept/toconnect). Ok(revents).
+    fn wait_once(fd: c_int, events: i16, msecto: u32) -> Result<i16, ()> {
+        let s = monotonic_seconds();
+        let mut msecpassed: u32 = 0;
+        loop {
+            let mut p = [pfd(fd, events)];
+            if sys::poll(&mut p, msecto.wrapping_sub(msecpassed) as c_int) >= 0 {
+                return Ok(p[0].revents);
+            }
+            if sys::errno() != EINTR {
+                return Err(());
+            }
+            msecpassed = ms(monotonic_seconds() - s);
+            if msecpassed >= msecto {
+                sys::set_errno(ETIMEDOUT);
+                return Err(());
+            }
         }
-        if pfd.revents as ::core::ffi::c_int & POLLIN != 0 {
-            return accept(
-                lsock,
-                __SOCKADDR_ARG {
-                    __sockaddr__: NULL as *mut sockaddr,
-                },
-                ::core::ptr::null_mut::<socklen_t>(),
-            );
+    }
+
+    /// C `streamtoaccept`.
+    pub fn toaccept(lsock: c_int, msecto: u32) -> c_int {
+        let i = sys::accept(lsock);
+        if i >= 0 {
+            return i;
         }
-        *__errno_location() = ETIMEDOUT;
-        return -1 as ::core::ffi::c_int;
-    }
-}
-#[inline]
-unsafe extern "C" fn streamaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sock: ::core::ffi::c_int = 0;
-        sock = accept(
-            lsock,
-            __SOCKADDR_ARG {
-                __sockaddr__: NULL as *mut sockaddr,
-            },
-            ::core::ptr::null_mut::<socklen_t>(),
-        );
-        if sock < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
+        if errno_error() {
+            return -1;
         }
-        return sock;
+        let Ok(rev) = wait_once(lsock, POLLIN, msecto) else { return -1 };
+        if rev & (POLLHUP | POLLERR) != 0 {
+            return -1;
+        }
+        if rev & POLLIN != 0 {
+            return sys::accept(lsock);
+        }
+        sys::set_errno(ETIMEDOUT);
+        -1
+    }
+
+    /// Result of a `connect()` call, mapped like tcp*connect: 0 done,
+    /// 1 in progress, -1 error.
+    pub fn connect_status(r: c_int) -> c_int {
+        if r >= 0 {
+            0
+        } else if sys::errno() == EINPROGRESS {
+            1
+        } else {
+            -1
+        }
+    }
+
+    /// The `*toconnect` tail after a non-blocking `connect()`.
+    pub fn finish_toconnect(sock: c_int, r: c_int, msecto: u32) -> c_int {
+        if r >= 0 {
+            return 0;
+        }
+        if sys::errno() != EINPROGRESS {
+            return -1;
+        }
+        let Ok(rev) = wait_once(sock, POLLOUT, msecto) else { return -1 };
+        if rev & (POLLHUP | POLLERR) != 0 {
+            return -1;
+        }
+        if rev & POLLOUT != 0 {
+            return sys::getstatus(sock);
+        }
+        sys::set_errno(ETIMEDOUT);
+        -1
+    }
+
+    /// C `sockaddrfill`: '*' means NULL; picks `random()%n` among matches.
+    pub fn addrfill(
+        host: Option<&CStr>,
+        service: Option<&CStr>,
+        family: c_int,
+        socktype: c_int,
+        passive: bool,
+    ) -> Option<libc::sockaddr_in> {
+        let host = host.filter(|h| h.to_bytes().first() != Some(&b'*'));
+        let service = service.filter(|s| s.to_bytes().first() != Some(&b'*'));
+        let list = sys::addrinfo(host, service, family, socktype, passive)?;
+        let n = list.len() as u32;
+        let r = if n > 0 { (sys::random() % n as libc::c_long) as u32 } else { 0 };
+        list.get(r as usize).copied()
+    }
+
+    /// C `univmakestrip` text.
+    pub fn fmt_ip(ip: u32) -> String {
+        format!("{}.{}.{}.{}", (ip >> 24) as u8, (ip >> 16) as u8, (ip >> 8) as u8, ip as u8)
+    }
+
+    /// C `univmakestripport` text.
+    pub fn fmt_ip_port(ip: u32, port: u16) -> String {
+        format!("{}:{port}", fmt_ip(ip))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn pair() -> (c_int, c_int) {
+            let mut fds = [0 as c_int; 2];
+            #[allow(unsafe_code)]
+            // SAFETY: socketpair fills the two-element array.
+            let r = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
+            assert_eq!(r, 0);
+            (fds[0], fds[1])
+        }
+
+        #[test]
+        fn formatting() {
+            assert_eq!(fmt_ip(0xC0A8_0001), "192.168.0.1");
+            assert_eq!(fmt_ip_port(0xFFFF_FFFF, 65535), "255.255.255.255:65535");
+        }
+
+        #[test]
+        fn read_write_forward_and_timeouts() {
+            let (a, b) = pair();
+            assert_eq!(towrite(a, b"hello", 1000, 1000), 5);
+            let mut buf = [0u8; 5];
+            assert_eq!(toread(b, &mut buf, 1000, 1000), 5);
+            assert_eq!(&buf, b"hello");
+            sys::nonblock(b);
+            let mut buf = [0u8; 4];
+            assert_eq!(toread(b, &mut buf, 50, 100), -1);
+            assert_eq!(sys::errno(), ETIMEDOUT);
+            assert_eq!(towait(b, 30), -1);
+            assert_eq!(sys::errno(), ETIMEDOUT);
+
+            let (c, d) = pair();
+            towrite(a, b"abcdef", 1000, 1000);
+            let mut fbuf = [0u8; 6];
+            assert_eq!(toforward(b, c, &mut fbuf, 0, 0, 1000, 1000), 6);
+            let mut out = [0u8; 6];
+            assert_eq!(toread(d, &mut out, 1000, 1000), 6);
+            assert_eq!(&out, b"abcdef");
+
+            // peer closed: short read returns what arrived, errno ECONNRESET
+            towrite(a, b"xy", 1000, 1000);
+            sys::close(a);
+            let mut buf = [0u8; 8];
+            assert_eq!(toread(b, &mut buf, 1000, 1000), 2);
+            assert_eq!(sys::errno(), ECONNRESET);
+            for fd in [b, c, d] {
+                sys::close(fd);
+            }
+        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// C ABI boundary (sockets.h)
+// ---------------------------------------------------------------------------
+
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univnonblock(mut fd: ::core::ffi::c_int) -> ::core::ffi::c_int {
+// SAFETY: caller guarantees `p` is NULL or a valid C string.
+unsafe fn opt_cstr<'a>(p: *const c_char) -> Option<&'a CStr> {
+    // SAFETY: per fn contract.
+    (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) })
+}
+
+/// # Safety
+// SAFETY: caller guarantees `buff` is valid for `leng` bytes.
+unsafe fn buf_mut<'a>(buff: *mut c_void, leng: u32) -> &'a mut [u8] {
+    if leng == 0 {
+        return &mut [];
+    }
+    // SAFETY: per fn contract.
+    unsafe { std::slice::from_raw_parts_mut(buff as *mut u8, leng as usize) }
+}
+
+/// # Safety
+// SAFETY: caller guarantees `buff` is valid for `leng` bytes.
+unsafe fn buf<'a>(buff: *const c_void, leng: u32) -> &'a [u8] {
+    if leng == 0 {
+        return &[];
+    }
+    // SAFETY: per fn contract.
+    unsafe { std::slice::from_raw_parts(buff as *const u8, leng as usize) }
+}
+
+/// Write the non-null (ip, port) out-params.
+///
+/// # Safety
+/// Non-null pointers must be writable.
+unsafe fn put_addr(ip: *mut u32, port: *mut u16, v: (u32, u16)) {
+    // SAFETY: per fn contract; each pointer checked for NULL as in C.
     unsafe {
-        return descnonblock(fd);
+        if !ip.is_null() {
+            *ip = v.0;
+        }
+        if !port.is_null() {
+            *port = v.1;
+        }
     }
 }
+
+/// C `snprintf(dst,size,"%s",s); dst[size-1]=0` for text shorter than size.
+///
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn univtoread(
-    mut fd: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
+/// `dst` must be writable for `size` bytes.
+unsafe fn put_text(dst: *mut c_char, size: usize, s: &str) {
+    let n = s.len().min(size - 1);
+    // SAFETY: per fn contract; n+1 <= size and index size-1 < size.
     unsafe {
-        return streamtoread(fd, buff, leng, msectopart, msectoall);
+        core::ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, dst, n);
+        *dst.add(n) = 0;
+        *dst.add(size - 1) = 0;
     }
 }
+
+fn strdup(s: &str) -> *mut c_char {
+    let c = std::ffi::CString::new(s).expect("address text has no NUL");
+    // SAFETY: strdup copies a valid C string into malloc'd memory (the
+    // caller frees it, as with the C strdup).
+    unsafe { libc::strdup(c.as_ptr()) }
+}
+
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+/// `strip` writable for STRIPSIZE bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn univtowrite(
-    mut fd: ::core::ffi::c_int,
-    mut buff: *const ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtowrite(fd, buff, leng, msectopart, msectoall);
-    }
+pub unsafe extern "C" fn univmakestrip(strip: *mut c_char, ip: u32) {
+    // SAFETY: per fn contract.
+    unsafe { put_text(strip, STRIPSIZE, &fmt_ip(ip)) }
 }
+
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+/// `stripport` writable for STRIPPORTSIZE bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn univtoforward(
-    mut srcfd: ::core::ffi::c_int,
-    mut dstfd: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut rcvd: uint32_t,
-    mut sent: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtoforward(srcfd, dstfd, buff, leng, rcvd, sent, msectopart, msectoall);
-    }
+pub unsafe extern "C" fn univmakestripport(stripport: *mut c_char, ip: u32, port: u16) {
+    // SAFETY: per fn contract.
+    unsafe { put_text(stripport, STRIPPORTSIZE, &fmt_ip_port(ip, port)) }
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpsetacceptfilter(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut v: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-        return setsockopt(
-            sock,
-            IPPROTO_TCP as ::core::ffi::c_int,
-            TCP_DEFER_ACCEPT,
-            &raw mut v as *const ::core::ffi::c_void,
-            ::core::mem::size_of::<::core::ffi::c_int>() as socklen_t,
-        );
-    }
+pub extern "C" fn univallocstrip(ip: u32) -> *mut c_char {
+    strdup(&fmt_ip(ip))
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpsocket() -> ::core::ffi::c_int {
-    unsafe {
-        return socket(
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-        );
-    }
+pub extern "C" fn univallocstripport(ip: u32, port: u16) -> *mut c_char {
+    strdup(&fmt_ip_port(ip, port))
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+macro_rules! fd_fn {
+    ($($name:ident => $body:expr;)*) => {$(
+        // SAFETY: exported by symbol for C-ABI consumers; body is safe.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name(sock: c_int) -> c_int {
+            ($body)(sock)
+        }
+    )*};
+}
+
+fd_fn! {
+    univnonblock => sys::nonblock;
+    tcpnonblock => sys::nonblock;
+    udpnonblock => sys::nonblock;
+    unixnonblock => sys::nonblock;
+    tcpgetstatus => sys::getstatus;
+    udpgetstatus => sys::getstatus;
+    unixgetstatus => sys::getstatus;
+    tcpaccept => sys::accept;
+    unixaccept => sys::accept;
+    udpclose => sys::close;
+    tcpreuseaddr => |s| sys::setsockopt_int(s, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1);
+    tcpnodelay => |s| sys::setsockopt_int(s, libc::IPPROTO_TCP, libc::TCP_NODELAY, 1);
+    tcpsetacceptfilter => |s| sys::setsockopt_int(s, libc::IPPROTO_TCP, libc::TCP_DEFER_ACCEPT, 1);
+    tcpaccfhttp => |_| { sys::set_errno(libc::EINVAL); -1 };
+    tcpaccfdata => |_| { sys::set_errno(libc::EINVAL); -1 };
+    tcpclose => |s| { sys::shutdown(s, libc::SHUT_WR); sys::close(s) };
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return descnonblock(sock);
-    }
+pub extern "C" fn tcpsocket() -> c_int {
+    sys::socket(libc::AF_INET, libc::SOCK_STREAM)
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return sockgetstatus(sock);
+pub extern "C" fn udpsocket() -> c_int {
+    sys::socket(libc::AF_INET, libc::SOCK_DGRAM)
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn unixsocket() -> c_int {
+    sys::socket(libc::AF_UNIX, libc::SOCK_STREAM)
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn tcpshutdown(sock: c_int) {
+    sys::shutdown(sock, libc::SHUT_WR);
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn tcptowait(sock: c_int, msectoall: u32) -> c_int {
+    imp::towait(sock, msectoall)
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn tcptoaccept(lsock: c_int, msecto: u32) -> c_int {
+    imp::toaccept(lsock, msecto)
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn unixtoaccept(lsock: c_int, msecto: u32) -> c_int {
+    imp::toaccept(lsock, msecto)
+}
+
+macro_rules! toread_fn {
+    ($($name:ident),*) => {$(
+        /// # Safety
+        /// `buff` writable for `leng` bytes.
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(sock: c_int, buff: *mut c_void, leng: u32, msectopart: u32, msectoall: u32) -> i32 {
+            // SAFETY: per fn contract.
+            imp::toread(sock, unsafe { buf_mut(buff, leng) }, msectopart, msectoall)
+        }
+    )*};
+}
+toread_fn!(univtoread, tcptoread, unixtoread);
+
+macro_rules! towrite_fn {
+    ($($name:ident),*) => {$(
+        /// # Safety
+        /// `buff` readable for `leng` bytes.
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(sock: c_int, buff: *const c_void, leng: u32, msectopart: u32, msectoall: u32) -> i32 {
+            // SAFETY: per fn contract.
+            imp::towrite(sock, unsafe { buf(buff, leng) }, msectopart, msectoall)
+        }
+    )*};
+}
+towrite_fn!(univtowrite, tcptowrite, unixtowrite);
+
+macro_rules! toforward_fn {
+    ($($name:ident),*) => {$(
+        /// # Safety
+        /// `buff` valid for `leng` bytes; `rcvd`,`sent` <= `leng`.
+        #[unsafe(no_mangle)]
+        #[allow(clippy::too_many_arguments)]
+        pub unsafe extern "C" fn $name(
+            srcsock: c_int,
+            dstsock: c_int,
+            buff: *mut c_void,
+            leng: u32,
+            rcvd: u32,
+            sent: u32,
+            msectopart: u32,
+            msectoall: u32,
+        ) -> i32 {
+            // SAFETY: per fn contract.
+            let b = unsafe { buf_mut(buff, leng) };
+            imp::toforward(srcsock, dstsock, b, rcvd, sent, msectopart, msectoall)
+        }
+    )*};
+}
+toforward_fn!(univtoforward, tcptoforward, unixtoforward);
+
+/// # Safety
+/// Strings NULL or valid; non-null out-params writable.
+unsafe fn resolve(
+    host: *const c_char,
+    service: *const c_char,
+    ip: *mut u32,
+    port: *mut u16,
+    socktype: c_int,
+    passive: c_int,
+) -> c_int {
+    // SAFETY: per fn contract.
+    let (h, s) = unsafe { (opt_cstr(host), opt_cstr(service)) };
+    match imp::addrfill(h, s, libc::AF_INET, socktype, passive != 0) {
+        Some(sa) => {
+            // SAFETY: per fn contract.
+            unsafe { put_addr(ip, port, (u32::from_be(sa.sin_addr.s_addr), u16::from_be(sa.sin_port))) };
+            0
+        }
+        None => -1,
     }
 }
+
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+/// Strings NULL or valid C strings; non-null out-params writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tcpresolve(
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-    mut passive: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        return sockresolve(
-            hostname,
-            service,
-            ip,
-            port,
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            passive,
-        );
-    }
+    hostname: *const c_char,
+    service: *const c_char,
+    ip: *mut u32,
+    port: *mut u16,
+    passive: c_int,
+) -> c_int {
+    // SAFETY: forwarded contract.
+    unsafe { resolve(hostname, service, ip, port, libc::SOCK_STREAM, passive) }
 }
+
 /// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpreuseaddr(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut yes: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-        return setsockopt(
-            sock,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            &raw mut yes as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
-            ::core::mem::size_of::<::core::ffi::c_int>() as socklen_t,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnodelay(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        let mut yes: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-        return setsockopt(
-            sock,
-            IPPROTO_TCP as ::core::ffi::c_int,
-            TCP_NODELAY,
-            &raw mut yes as *mut ::core::ffi::c_char as *const ::core::ffi::c_void,
-            ::core::mem::size_of::<::core::ffi::c_int>() as socklen_t,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpaccfhttp(_sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpaccfdata(_sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        *__errno_location() = EINVAL;
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpstrbind(
-    mut sock: ::core::ffi::c_int,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if sockaddrfill(
-            &raw mut sa,
-            hostname,
-            service,
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            1 as ::core::ffi::c_int,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnumbind(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        sockaddrnumfill(&raw mut sa, ip, port);
-        if bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpstrconnect(
-    mut sock: ::core::ffi::c_int,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if sockaddrfill(
-            &raw mut sa,
-            hostname,
-            service,
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            return 1 as ::core::ffi::c_int;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnumconnect(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        sockaddrnumfill(&raw mut sa, ip, port);
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            return 1 as ::core::ffi::c_int;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpstrtoconnect(
-    mut sock: ::core::ffi::c_int,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if descnonblock(sock) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if sockaddrfill(
-            &raw mut sa,
-            hostname,
-            service,
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            let mut s: ::core::ffi::c_double = 0.;
-            let mut c: ::core::ffi::c_double = 0.;
-            let mut msecpassed: uint32_t = 0;
-            let mut pfd: pollfd = pollfd {
-                fd: 0,
-                events: 0,
-                revents: 0,
-            };
-            s = monotonic_seconds();
-            msecpassed = 0 as uint32_t;
-            loop {
-                pfd.fd = sock;
-                pfd.events = POLLOUT as ::core::ffi::c_short;
-                pfd.revents = 0 as ::core::ffi::c_short;
-                if poll(
-                    &raw mut pfd,
-                    1 as nfds_t,
-                    msecto.wrapping_sub(msecpassed) as ::core::ffi::c_int,
-                ) >= 0 as ::core::ffi::c_int
-                {
-                    break;
-                }
-                if *__errno_location() == EINTR {
-                    c = monotonic_seconds();
-                    msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                    if msecpassed >= msecto {
-                        *__errno_location() = ETIMEDOUT;
-                        return -1 as ::core::ffi::c_int;
-                    }
-                } else {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-            if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLERR) != 0 {
-                return -1 as ::core::ffi::c_int;
-            }
-            if pfd.revents as ::core::ffi::c_int & POLLOUT != 0 {
-                return sockgetstatus(sock);
-            }
-            *__errno_location() = ETIMEDOUT;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnumtoconnect(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if descnonblock(sock) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        sockaddrnumfill(&raw mut sa, ip, port);
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            let mut s: ::core::ffi::c_double = 0.;
-            let mut c: ::core::ffi::c_double = 0.;
-            let mut msecpassed: uint32_t = 0;
-            let mut pfd: pollfd = pollfd {
-                fd: 0,
-                events: 0,
-                revents: 0,
-            };
-            s = monotonic_seconds();
-            msecpassed = 0 as uint32_t;
-            loop {
-                pfd.fd = sock;
-                pfd.events = POLLOUT as ::core::ffi::c_short;
-                pfd.revents = 0 as ::core::ffi::c_short;
-                if poll(
-                    &raw mut pfd,
-                    1 as nfds_t,
-                    msecto.wrapping_sub(msecpassed) as ::core::ffi::c_int,
-                ) >= 0 as ::core::ffi::c_int
-                {
-                    break;
-                }
-                if *__errno_location() == EINTR {
-                    c = monotonic_seconds();
-                    msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                    if msecpassed >= msecto {
-                        *__errno_location() = ETIMEDOUT;
-                        return -1 as ::core::ffi::c_int;
-                    }
-                } else {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-            if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLERR) != 0 {
-                return -1 as ::core::ffi::c_int;
-            }
-            if pfd.revents as ::core::ffi::c_int & POLLOUT != 0 {
-                return sockgetstatus(sock);
-            }
-            *__errno_location() = ETIMEDOUT;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpstrlisten(
-    mut sock: ::core::ffi::c_int,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut queue: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if sockaddrfill(
-            &raw mut sa,
-            hostname,
-            service,
-            AF_INET,
-            SOCK_STREAM as ::core::ffi::c_int,
-            1 as ::core::ffi::c_int,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if listen(sock, queue as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpnumlisten(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-    mut queue: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        sockaddrnumfill(&raw mut sa, ip, port);
-        if bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if listen(sock, queue as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpgetpeer(
-    mut sock: ::core::ffi::c_int,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        let mut leng: socklen_t = 0;
-        leng = ::core::mem::size_of::<sockaddr_in>() as socklen_t;
-        if getpeername(
-            sock,
-            __SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            &raw mut leng,
-        ) < 0 as ::core::ffi::c_int
-        {
-            if !ip.is_null() {
-                *ip = 0 as uint32_t;
-            }
-            if !port.is_null() {
-                *port = 0 as uint16_t;
-            }
-            return -1 as ::core::ffi::c_int;
-        }
-        if !ip.is_null() {
-            *ip = __bswap_32(sa.sin_addr.s_addr as __uint32_t) as uint32_t;
-        }
-        if !port.is_null() {
-            *port = __bswap_16(sa.sin_port as __uint16_t) as uint16_t;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpgetmyaddr(
-    mut sock: ::core::ffi::c_int,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        let mut leng: socklen_t = 0;
-        leng = ::core::mem::size_of::<sockaddr_in>() as socklen_t;
-        if getsockname(
-            sock,
-            __SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            &raw mut leng,
-        ) < 0 as ::core::ffi::c_int
-        {
-            if !ip.is_null() {
-                *ip = 0 as uint32_t;
-            }
-            if !port.is_null() {
-                *port = 0 as uint16_t;
-            }
-            return -1 as ::core::ffi::c_int;
-        }
-        if !ip.is_null() {
-            *ip = __bswap_32(sa.sin_addr.s_addr as __uint32_t) as uint32_t;
-        }
-        if !port.is_null() {
-            *port = __bswap_16(sa.sin_port as __uint16_t) as uint16_t;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpshutdown(mut sock: ::core::ffi::c_int) {
-    unsafe {
-        shutdown(sock, SHUT_WR as ::core::ffi::c_int);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpclose(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        shutdown(sock, SHUT_WR as ::core::ffi::c_int);
-        return close(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcptoread(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtoread(sock, buff, leng, msectopart, msectoall);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcptowrite(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *const ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtowrite(sock, buff, leng, msectopart, msectoall);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcptoforward(
-    mut srcsock: ::core::ffi::c_int,
-    mut dstsock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut rcvd: uint32_t,
-    mut sent: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtoforward(
-            srcsock, dstsock, buff, leng, rcvd, sent, msectopart, msectoall,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcptowait(
-    mut sock: ::core::ffi::c_int,
-    mut msectoall: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        return streamtowait(sock, msectoall);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcptoaccept(
-    mut lsock: ::core::ffi::c_int,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        return streamtoaccept(lsock, msecto);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn tcpaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return streamaccept(lsock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpsocket() -> ::core::ffi::c_int {
-    unsafe {
-        return socket(
-            AF_INET,
-            SOCK_DGRAM as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return descnonblock(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return sockgetstatus(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+/// As `tcpresolve`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn udpresolve(
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-    mut passive: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        return sockresolve(
-            hostname,
-            service,
-            ip,
-            port,
-            AF_INET,
-            SOCK_DGRAM as ::core::ffi::c_int,
-            passive,
-        );
+    hostname: *const c_char,
+    service: *const c_char,
+    ip: *mut u32,
+    port: *mut u16,
+    passive: c_int,
+) -> c_int {
+    // SAFETY: forwarded contract.
+    unsafe { resolve(hostname, service, ip, port, libc::SOCK_DGRAM, passive) }
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+unsafe fn strfill(host: *const c_char, service: *const c_char, socktype: c_int, passive: bool) -> Option<libc::sockaddr_in> {
+    // SAFETY: per fn contract.
+    let (h, s) = unsafe { (opt_cstr(host), opt_cstr(service)) };
+    imp::addrfill(h, s, libc::AF_INET, socktype, passive)
+}
+
+fn bind_listen(sock: c_int, sa: &libc::sockaddr_in, queue: c_int) -> c_int {
+    if sys::bind_in(sock, sa) < 0 || sys::listen(sock, queue) < 0 {
+        return -1;
+    }
+    0
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpstrbind(sock: c_int, hostname: *const c_char, service: *const c_char) -> c_int {
+    // SAFETY: forwarded contract.
+    match unsafe { strfill(hostname, service, libc::SOCK_STREAM, true) } {
+        Some(sa) if sys::bind_in(sock, &sa) >= 0 => 0,
+        _ => -1,
     }
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpnumlisten(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        sockaddrnumfill(&raw mut sa, ip, port);
-        return bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        );
+pub extern "C" fn tcpnumbind(sock: c_int, ip: u32, port: u16) -> c_int {
+    if sys::bind_in(sock, &sys::sin(ip, port)) < 0 { -1 } else { 0 }
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpstrconnect(sock: c_int, hostname: *const c_char, service: *const c_char) -> c_int {
+    // SAFETY: forwarded contract.
+    match unsafe { strfill(hostname, service, libc::SOCK_STREAM, false) } {
+        Some(sa) => imp::connect_status(sys::connect_in(sock, &sa)),
+        None => -1,
     }
 }
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpstrlisten(
-    mut sock: ::core::ffi::c_int,
-    mut hostname: *const ::core::ffi::c_char,
-    mut service: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if sockaddrfill(
-            &raw mut sa,
-            hostname,
-            service,
-            AF_INET,
-            SOCK_DGRAM as ::core::ffi::c_int,
-            1 as ::core::ffi::c_int,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
+pub extern "C" fn tcpnumconnect(sock: c_int, ip: u32, port: u16) -> c_int {
+    imp::connect_status(sys::connect_in(sock, &sys::sin(ip, port)))
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpstrtoconnect(
+    sock: c_int,
+    hostname: *const c_char,
+    service: *const c_char,
+    msecto: u32,
+) -> c_int {
+    if sys::nonblock(sock) < 0 {
+        return -1;
+    }
+    // SAFETY: forwarded contract.
+    let Some(sa) = (unsafe { strfill(hostname, service, libc::SOCK_STREAM, false) }) else { return -1 };
+    imp::finish_toconnect(sock, sys::connect_in(sock, &sa), msecto)
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn tcpnumtoconnect(sock: c_int, ip: u32, port: u16, msecto: u32) -> c_int {
+    if sys::nonblock(sock) < 0 {
+        return -1;
+    }
+    imp::finish_toconnect(sock, sys::connect_in(sock, &sys::sin(ip, port)), msecto)
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpstrlisten(
+    sock: c_int,
+    hostname: *const c_char,
+    service: *const c_char,
+    queue: u16,
+) -> c_int {
+    // SAFETY: forwarded contract.
+    match unsafe { strfill(hostname, service, libc::SOCK_STREAM, true) } {
+        Some(sa) => bind_listen(sock, &sa, queue as c_int),
+        None => -1,
+    }
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn tcpnumlisten(sock: c_int, ip: u32, port: u16, queue: u16) -> c_int {
+    bind_listen(sock, &sys::sin(ip, port), queue as c_int)
+}
+
+/// # Safety
+/// Non-null out-params writable.
+unsafe fn getname(sock: c_int, ip: *mut u32, port: *mut u16, peer: bool) -> c_int {
+    let r = sys::name(sock, peer);
+    // SAFETY: per fn contract; C zeroes the outputs on failure.
+    unsafe { put_addr(ip, port, r.unwrap_or((0, 0))) };
+    if r.is_some() { 0 } else { -1 }
+}
+
+/// # Safety
+/// Non-null out-params writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpgetpeer(sock: c_int, ip: *mut u32, port: *mut u16) -> c_int {
+    // SAFETY: forwarded contract.
+    unsafe { getname(sock, ip, port, true) }
+}
+
+/// # Safety
+/// Non-null out-params writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tcpgetmyaddr(sock: c_int, ip: *mut u32, port: *mut u16) -> c_int {
+    // SAFETY: forwarded contract.
+    unsafe { getname(sock, ip, port, false) }
+}
+
+// SAFETY: exported by symbol for C-ABI consumers; body is safe.
+#[unsafe(no_mangle)]
+pub extern "C" fn udpnumlisten(sock: c_int, ip: u32, port: u16) -> c_int {
+    sys::bind_in(sock, &sys::sin(ip, port))
+}
+
+/// # Safety
+/// Strings NULL or valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn udpstrlisten(sock: c_int, hostname: *const c_char, service: *const c_char) -> c_int {
+    // SAFETY: forwarded contract.
+    match unsafe { strfill(hostname, service, libc::SOCK_DGRAM, true) } {
+        Some(sa) => sys::bind_in(sock, &sa),
+        None => -1,
+    }
+}
+
+/// # Safety
+/// `buff` readable for `leng` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn udpwrite(sock: c_int, ip: u32, port: u16, buff: *const c_void, leng: u16) -> c_int {
+    if leng > 512 {
+        return -1;
+    }
+    // SAFETY: per fn contract.
+    sys::sendto_in(sock, unsafe { buf(buff, leng as u32) }, &sys::sin(ip, port))
+}
+
+/// # Safety
+/// `buff` writable for `leng` bytes; non-null out-params writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn udpread(sock: c_int, ip: *mut u32, port: *mut u16, buff: *mut c_void, leng: u16) -> c_int {
+    // SAFETY: per fn contract.
+    let (ret, src) = sys::recvfrom_in(sock, unsafe { buf_mut(buff, leng as u32) });
+    if let Some(a) = src {
+        // SAFETY: per fn contract.
+        unsafe { put_addr(ip, port, a) };
+    }
+    ret
+}
+
+/// # Safety
+/// `path` must be a valid C string.
+unsafe fn sun(path: *const c_char) -> Option<libc::sockaddr_un> {
+    // SAFETY: per fn contract.
+    sys::sun(unsafe { CStr::from_ptr(path) }.to_bytes())
+}
+
+/// # Safety
+/// `path` must be a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn unixconnect(sock: c_int, path: *const c_char) -> c_int {
+    // SAFETY: forwarded contract.
+    match unsafe { sun(path) } {
+        Some(sa) => imp::connect_status(sys::connect_un(sock, &sa)),
+        None => -1,
+    }
+}
+
+/// # Safety
+/// `path` must be a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn unixtoconnect(sock: c_int, path: *const c_char, msecto: u32) -> c_int {
+    if sys::nonblock(sock) < 0 {
+        return -1;
+    }
+    // SAFETY: forwarded contract.
+    let Some(sa) = (unsafe { sun(path) }) else { return -1 };
+    imp::finish_toconnect(sock, sys::connect_un(sock, &sa), msecto)
+}
+
+/// # Safety
+/// `path` must be a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn unixlisten(sock: c_int, path: *const c_char, queue: c_int) -> c_int {
+    // SAFETY: forwarded contract.
+    let Some(sa) = (unsafe { sun(path) }) else { return -1 };
+    if sys::bind_un(sock, &sa) < 0 || sys::listen(sock, queue) < 0 {
+        return -1;
+    }
+    0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_buffers_match_c_snprintf() {
+        let mut b = [b'#' as c_char; STRIPSIZE];
+        // SAFETY: local buffers of the required sizes.
+        unsafe { univmakestrip(b.as_mut_ptr(), 0x0A00_0001) };
+        let s: Vec<u8> = b.iter().map(|&c| c as u8).collect();
+        assert_eq!(&s[..9], b"10.0.0.1\0");
+        assert_eq!(s[9], b'#'); // bytes past the NUL untouched (as snprintf)
+        assert_eq!(s[15], 0);
+        let mut b = [0 as c_char; STRIPPORTSIZE];
+        // SAFETY: as above.
+        unsafe { univmakestripport(b.as_mut_ptr(), 0x7F00_0001, 9421) };
+        // SAFETY: NUL-terminated by univmakestripport.
+        assert_eq!(unsafe { CStr::from_ptr(b.as_ptr()) }.to_bytes(), b"127.0.0.1:9421");
+    }
+
+    #[test]
+    fn tcp_listen_connect_resolve() {
+        let l = tcpsocket();
+        assert_eq!(tcpreuseaddr(l), 0);
+        assert_eq!(tcpnumlisten(l, 0x7F00_0001, 0, 5), 0);
+        let (mut ip, mut port) = (0u32, 0u16);
+        // SAFETY: locals as out-params.
+        unsafe { assert_eq!(tcpgetmyaddr(l, &mut ip, &mut port), 0) };
+        assert_eq!(ip, 0x7F00_0001);
+        let c = tcpsocket();
+        assert_eq!(tcpnumtoconnect(c, ip, port, 1000), 0);
+        let a = tcptoaccept(l, 1000);
+        assert!(a >= 0);
+        // SAFETY: literal buffer.
+        unsafe { assert_eq!(tcptowrite(c, b"ping".as_ptr() as *const c_void, 4, 1000, 1000), 4) };
+        let mut buf = [0u8; 4];
+        // SAFETY: local buffer.
+        unsafe { assert_eq!(tcptoread(a, buf.as_mut_ptr() as *mut c_void, 4, 1000, 1000), 4) };
+        assert_eq!(&buf, b"ping");
+        let (mut pip, mut pport) = (1u32, 1u16);
+        // SAFETY: locals as out-params.
+        unsafe { assert_eq!(tcpgetpeer(-1, &mut pip, &mut pport), -1) };
+        assert_eq!((pip, pport), (0, 0));
+        // SAFETY: literal C strings / locals.
+        unsafe {
+            assert_eq!(tcpresolve(c"127.0.0.1".as_ptr(), c"9421".as_ptr(), &mut ip, &mut port, 0), 0);
+            assert_eq!((ip, port), (0x7F00_0001, 9421));
+            assert_eq!(tcpresolve(c"*".as_ptr(), c"*".as_ptr(), &mut ip, &mut port, 1), -1);
         }
-        return bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpwrite(
-    mut sock: ::core::ffi::c_int,
-    mut ip: uint32_t,
-    mut port: uint16_t,
-    mut buff: *const ::core::ffi::c_void,
-    mut leng: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_in = sockaddr_in {
-            sin_family: 0,
-            sin_port: 0,
-            sin_addr: in_addr { s_addr: 0 },
-            sin_zero: [0; 8],
-        };
-        if leng as ::core::ffi::c_int > 512 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
+        for fd in [a, c, l] {
+            tcpclose(fd);
         }
-        sockaddrnumfill(&raw mut sa, ip, port);
-        return sendto(
-            sock,
-            buff,
-            leng as size_t,
-            0 as ::core::ffi::c_int,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_in>() as socklen_t,
-        ) as ::core::ffi::c_int;
     }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpread(
-    mut sock: ::core::ffi::c_int,
-    mut ip: *mut uint32_t,
-    mut port: *mut uint16_t,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint16_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut templeng: socklen_t = 0;
-        let mut tempaddr: sockaddr = sockaddr {
-            sa_family: 0,
-            sa_data: [0; 14],
-        };
-        let mut saptr: *mut sockaddr_in = ::core::ptr::null_mut::<sockaddr_in>();
-        let mut ret: ::core::ffi::c_int = 0;
-        ret = recvfrom(
-            sock,
-            buff,
-            leng as size_t,
-            0 as ::core::ffi::c_int,
-            __SOCKADDR_ARG {
-                __sockaddr__: &raw mut tempaddr,
-            },
-            &raw mut templeng,
-        ) as ::core::ffi::c_int;
-        if templeng as usize == ::core::mem::size_of::<sockaddr_in>() {
-            saptr = &raw mut tempaddr as *mut sockaddr_in;
-            if !ip.is_null() {
-                *ip = __bswap_32((*saptr).sin_addr.s_addr as __uint32_t) as uint32_t;
-            }
-            if !port.is_null() {
-                *port = __bswap_16((*saptr).sin_port as __uint16_t) as uint16_t;
-            }
-        }
-        return ret;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn udpclose(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return close(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixsocket() -> ::core::ffi::c_int {
-    unsafe {
-        return socket(
-            AF_UNIX,
-            SOCK_STREAM as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixnonblock(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return descnonblock(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixgetstatus(mut sock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return sockgetstatus(sock);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixconnect(
-    mut sock: ::core::ffi::c_int,
-    mut path: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_un = sockaddr_un {
-            sun_family: 0,
-            sun_path: [0; 108],
-        };
-        if sockaddrpathfill(&raw mut sa, path) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_un>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            return 1 as ::core::ffi::c_int;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixtoconnect(
-    mut sock: ::core::ffi::c_int,
-    mut path: *const ::core::ffi::c_char,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_un = sockaddr_un {
-            sun_family: 0,
-            sun_path: [0; 108],
-        };
-        if descnonblock(sock) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if sockaddrpathfill(&raw mut sa, path) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if connect(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_un>() as socklen_t,
-        ) >= 0 as ::core::ffi::c_int
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        if *__errno_location() == EINPROGRESS {
-            let mut s: ::core::ffi::c_double = 0.;
-            let mut c: ::core::ffi::c_double = 0.;
-            let mut msecpassed: uint32_t = 0;
-            let mut pfd: pollfd = pollfd {
-                fd: 0,
-                events: 0,
-                revents: 0,
-            };
-            s = monotonic_seconds();
-            msecpassed = 0 as uint32_t;
-            loop {
-                pfd.fd = sock;
-                pfd.events = POLLOUT as ::core::ffi::c_short;
-                pfd.revents = 0 as ::core::ffi::c_short;
-                if poll(
-                    &raw mut pfd,
-                    1 as nfds_t,
-                    msecto.wrapping_sub(msecpassed) as ::core::ffi::c_int,
-                ) >= 0 as ::core::ffi::c_int
-                {
-                    break;
-                }
-                if *__errno_location() == EINTR {
-                    c = monotonic_seconds();
-                    msecpassed = ((c - s) * 1000.0f64) as uint32_t;
-                    if msecpassed >= msecto {
-                        *__errno_location() = ETIMEDOUT;
-                        return -1 as ::core::ffi::c_int;
-                    }
-                } else {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-            if pfd.revents as ::core::ffi::c_int & (POLLHUP | POLLERR) != 0 {
-                return -1 as ::core::ffi::c_int;
-            }
-            if pfd.revents as ::core::ffi::c_int & POLLOUT != 0 {
-                return sockgetstatus(sock);
-            }
-            *__errno_location() = ETIMEDOUT;
-        }
-        return -1 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixlisten(
-    mut sock: ::core::ffi::c_int,
-    mut path: *const ::core::ffi::c_char,
-    mut queue: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let mut sa: sockaddr_un = sockaddr_un {
-            sun_family: 0,
-            sun_path: [0; 108],
-        };
-        if sockaddrpathfill(&raw mut sa, path) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if bind(
-            sock,
-            __CONST_SOCKADDR_ARG {
-                __sockaddr__: &raw mut sa as *mut sockaddr,
-            },
-            ::core::mem::size_of::<sockaddr_un>() as socklen_t,
-        ) < 0 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        if listen(sock, queue) < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixtoread(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtoread(sock, buff, leng, msectopart, msectoall);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixtowrite(
-    mut sock: ::core::ffi::c_int,
-    mut buff: *const ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtowrite(sock, buff, leng, msectopart, msectoall);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixtoforward(
-    mut srcsock: ::core::ffi::c_int,
-    mut dstsock: ::core::ffi::c_int,
-    mut buff: *mut ::core::ffi::c_void,
-    mut leng: uint32_t,
-    mut rcvd: uint32_t,
-    mut sent: uint32_t,
-    mut msectopart: uint32_t,
-    mut msectoall: uint32_t,
-) -> int32_t {
-    unsafe {
-        return streamtoforward(
-            srcsock, dstsock, buff, leng, rcvd, sent, msectopart, msectoall,
-        );
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixtoaccept(
-    mut lsock: ::core::ffi::c_int,
-    mut msecto: uint32_t,
-) -> ::core::ffi::c_int {
-    unsafe {
-        return streamtoaccept(lsock, msecto);
-    }
-}
-/// # Safety
-/// SAFETY: C ABI wrapper; all fd/pointer/buffer args per the C caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unixaccept(mut lsock: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    unsafe {
-        return streamaccept(lsock);
+
+    #[test]
+    fn unix_paths_and_accept_timeout() {
+        let long = std::ffi::CString::new(vec![b'x'; 108]).unwrap();
+        let s = unixsocket();
+        // SAFETY: valid C strings.
+        unsafe { assert_eq!(unixlisten(s, long.as_ptr(), 1), -1) };
+        let dir = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/socktest"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(format!("socktest-{}", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let cp = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+        // SAFETY: valid C strings.
+        unsafe { assert_eq!(unixlisten(s, cp.as_ptr(), 1), 0) };
+        unixnonblock(s);
+        assert_eq!(unixtoaccept(s, 30), -1);
+        assert_eq!(sys::errno(), libc::ETIMEDOUT);
+        let c = unixsocket();
+        // SAFETY: valid C string.
+        unsafe { assert_eq!(unixtoconnect(c, cp.as_ptr(), 1000), 0) };
+        assert!(unixtoaccept(s, 1000) >= 0);
+        std::fs::remove_file(&p).unwrap();
+        assert_eq!(tcpaccfhttp(s), -1);
+        assert_eq!(sys::errno(), libc::EINVAL);
     }
 }

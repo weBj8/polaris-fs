@@ -25,7 +25,7 @@ unsafe_sites	plfsmount	le	554
 unsafe_sites	plfsbdev	le	474
 unsafe_sites	plfsgui	le	97
 unsafe_sites	plfsnetdump	le	44
-unsafe_sites	plfscommon	le	353
+unsafe_sites	plfscommon	le	335
 unsafe_no_safety	plfsmaster	le	2655
 unsafe_no_safety	plfschunkserver	le	730
 unsafe_no_safety	plfsmetalogger	le	92
@@ -33,7 +33,7 @@ unsafe_no_safety	plfsmount	le	539
 unsafe_no_safety	plfsbdev	le	466
 unsafe_no_safety	plfsgui	le	97
 unsafe_no_safety	plfsnetdump	le	44
-unsafe_no_safety	plfscommon	le	162
+unsafe_no_safety	plfscommon	le	79
 migration_iou	workspace	le	1
 unsafe_sites	plfsclient	le	294
 unsafe_no_safety	plfsclient	le	283
@@ -45,4 +45,4 @@ wrapping_ops	plfsmount	ge	372
 wrapping_ops	plfsbdev	ge	175
 wrapping_ops	plfsgui	ge	54
 wrapping_ops	plfsnetdump	ge	68
-wrapping_ops	plfscommon	ge	865
+wrapping_ops	plfscommon	ge	854
