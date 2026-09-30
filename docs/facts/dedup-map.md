@@ -13,7 +13,7 @@ per-daemon copies and their variants.
 
 | file | plfsmaster | plfschunkserver | plfsmetalogger | plfsmount | plfsbdev | plfsgui |
 | --- | --- | --- | --- | --- | --- | --- |
-| cfg.rs | = | A | B | - | - | C |
+| ~~cfg.rs~~ | shared | shared | shared | - | - | shared |  (P6: ported from cfg.c into `plfscommon::cfg`, safe core; the four copies differed only in `__FILE__`) |
 | cuckoohash.rs | = | - | - | - | - | - |
 | dictionary.rs | = | - | - | - | - | - |
 | globengine.rs | = | - | - | - | - | - |

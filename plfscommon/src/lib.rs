@@ -16,6 +16,8 @@ pub mod charts;
 pub mod clocks;
 pub mod conncache;
 pub mod cpuusage;
+pub mod cfg;
+pub mod cnum;
 pub mod crc;
 pub mod delayrun;
 pub mod labelparser;

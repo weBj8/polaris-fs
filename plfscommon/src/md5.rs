@@ -556,7 +556,7 @@ fn md5_transform(state: &mut [uint32_t; 4], block: &[uint8_t]) {
     state[3] = state[3].wrapping_add(d);
     x.fill(0); // hygiene: clear the block copy, as the original memset did
 }
-fn md5_init_imp(ctx: &mut md5ctx) {
+pub fn md5_init_imp(ctx: &mut md5ctx) {
     ctx.count = [0, 0];
     ctx.state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
 }
@@ -569,7 +569,7 @@ pub unsafe extern "C" fn md5_init(mut ctx: *mut md5ctx) {
     unsafe { md5_init_imp(&mut *ctx) }
 }
 
-fn md5_update_imp(ctx: &mut md5ctx, buff: &[uint8_t]) {
+pub fn md5_update_imp(ctx: &mut md5ctx, buff: &[uint8_t]) {
     let leng = buff.len() as uint32_t;
     let mut indx = (ctx.count[0] >> 3) & 0x3f;
     ctx.count[0] = ctx.count[0].wrapping_add(leng << 3);
@@ -606,7 +606,7 @@ pub unsafe extern "C" fn md5_update(
     unsafe { md5_update_imp(&mut *ctx, std::slice::from_raw_parts(buff, leng as usize)) }
 }
 
-fn md5_final_imp(digest: &mut [uint8_t; 16], ctx: &mut md5ctx) {
+pub fn md5_final_imp(digest: &mut [uint8_t; 16], ctx: &mut md5ctx) {
     let mut bits = [0u8; 8];
     md5_encode(&mut bits, &ctx.count);
     let indx = (ctx.count[0] >> 3) & 0x3f;

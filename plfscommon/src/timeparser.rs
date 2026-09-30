@@ -12,6 +12,10 @@ pub const TPARSE_OK: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const TPARSE_UNEXPECTED_CHAR: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
 pub const TPARSE_VALUE_TOO_BIG: ::core::ffi::c_int = -2 as ::core::ffi::c_int;
 
+/// Safe period parser for Rust callers (C `parse_period_common` core):
+/// `Ok(value)` or `Err((TPARSE_* code, value C stores in *ret))`.
+pub use imp::parse_period;
+
 #[deny(unsafe_code)]
 mod imp {
     /// snprintf semantics: appends `piece` to out, pretending the visible
@@ -78,7 +82,7 @@ mod imp {
             let mut ndiv: u64 = 1;
             if str_.first().is_some_and(|c| c.is_ascii_digit()) {
                 if mask & 0xc0 == 0xc0 {
-                    return Err((TPARSE_UNEXPECTED_CHAR_I, str_[0] as u32));
+                    return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(str_[0])));
                 }
                 while str_.first().is_some_and(|c| c.is_ascii_digit()) && cur < u32::MAX as u64 {
                     // original used a double multiply — kept bit-exact
@@ -94,7 +98,7 @@ mod imp {
                     str_ = &str_[1..];
                 }
             } else {
-                return Err((TPARSE_UNEXPECTED_CHAR_I, *str_.first().unwrap_or(&0) as u32));
+                return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(*str_.first().unwrap_or(&0))));
             }
             let ch = *str_.first().unwrap_or(&0);
             let cmask: u8;
@@ -103,7 +107,7 @@ mod imp {
             match ch {
                 b'.' => {
                     if mask != 0 {
-                        return Err((TPARSE_UNEXPECTED_CHAR_I, ch as u32));
+                        return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(ch)));
                     }
                     mask |= 0x80;
                     res = cur;
@@ -137,7 +141,7 @@ mod imp {
                 }
                 b'm' | b'M' => {
                     if hmode {
-                        return Err((TPARSE_UNEXPECTED_CHAR_I, ch as u32));
+                        return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(ch)));
                     }
                     mul = 60;
                     max = 3600;
@@ -145,7 +149,7 @@ mod imp {
                 }
                 b's' | b'S' => {
                     if hmode {
-                        return Err((TPARSE_UNEXPECTED_CHAR_I, ch as u32));
+                        return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(ch)));
                     }
                     mul = 1;
                     max = 60;
@@ -157,7 +161,7 @@ mod imp {
                     }
                     return Err((TPARSE_UNEXPECTED_CHAR_I, 0));
                 }
-                _ => return Err((TPARSE_UNEXPECTED_CHAR_I, ch as u32)),
+                _ => return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(ch))),
             }
             // shared suffix of the C original's loop body
             cur = cur.wrapping_mul(mul as u64);
@@ -178,10 +182,10 @@ mod imp {
                     res = res.wrapping_add(cur);
                     str_ = &str_[1..];
                 } else {
-                    return Err((TPARSE_VALUE_TOO_BIG_I, ch as u32));
+                    return Err((TPARSE_VALUE_TOO_BIG_I, cchar(ch)));
                 }
             } else {
-                return Err((TPARSE_UNEXPECTED_CHAR_I, ch as u32));
+                return Err((TPARSE_UNEXPECTED_CHAR_I, cchar(ch)));
             }
             if res > u32::MAX as u64 {
                 return Err((TPARSE_VALUE_TOO_BIG_I, 0));
@@ -194,6 +198,12 @@ mod imp {
                 return Ok(res as u32);
             }
         }
+    }
+
+    /// C stores `*ret = *str` from a (signed, x86) `char`: bytes >= 0x80
+    /// sign-extend into the uint32_t out-param.
+    fn cchar(c: u8) -> u32 {
+        c as i8 as i32 as u32
     }
 
     pub const TPARSE_UNEXPECTED_CHAR_I: i32 = -1;
