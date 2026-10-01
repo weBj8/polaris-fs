@@ -6,3 +6,4 @@ target/
 __pycache__/
 *.py[cod]
 *.swp
+tools/charts-diff/rs/Cargo.lock

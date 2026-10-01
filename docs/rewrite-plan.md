@@ -332,3 +332,31 @@ C passed uninitialized (UB). Tests: loopback TCP listen/connect/accept/
 read/write, forward via socketpairs, timeouts (ETIMEDOUT), peer close
 (ECONNRESET short read), unix path overflow, resolver `*` handling,
 snprintf-exact strip buffers. SMOKE OK, gates exit 0.
+
+### P6 wave — charts.c (2026-08-04)
+
+`mfscommon/charts.c` ported from C (`plfscommon/src/charts.rs` + `charts/
+{imp,render,tables}.rs`; 5.2k transpiled lines → safe `imp`/`render`
+cores, a libc time boundary and the 11-function charts.h C ABI). Closes
+the P1 charts MIGRATION-IOU. Kept from C: stats-file format and error
+paths (stderr text in mode 1, mfslog otherwise), RPN calc evaluation with
+`int64_t` wrap and `STACK_NODATA`, `uint32_t`/`int32_t` time arithmetic,
+the `glock` protocol (make_png holds it until get_png; monotonic and
+multi-series makedata unlocked), deflate level 1 through system zlib
+(flate2 `zlib` backend → same compressed bytes), and x86-64 `cvttsd2si`
+results for the `u64 /= double` sites. Deviations only where C is UB: a
+missing lower series of an extended chart reads as "no data" (C: NULL
+dereference); calls before `charts_init` see an empty chart set.
+
+Verified with a differential harness (`tools/charts-diff/run.sh`: links
+the same C driver against compiled MooseFS 4.59.2 `charts.c` and against
+the Rust port): fixed scenario (6000 samples with
+gaps/back-dating/overflow values, every chart type × range × 5 sizes,
+string ids, makedata both modes, getdata, get, monotonic, store → reload)
+byte-identical vs compiled C under 5 TZs (UTC, Warsaw, Kolkata, St_Johns,
+Chatham); seeded fuzz (random defs/calcs, crafted stats files incl. bad
+version / short and long `fleng` / unknown names, random ids and sizes)
+identical except PNG bytes past the image, where C deflates an
+uninitialized malloc'd tail of `rawchart` after re-init (decoded pixels
+identical; checked by `classify.py`). Gates re-frozen (plfscommon unsafe
+335 → 293, wrapping 854 → 431, migration_iou 1 → 0).
