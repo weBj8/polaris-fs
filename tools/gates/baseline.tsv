@@ -18,6 +18,11 @@
 # VC-05/VC-06).
 # Baseline change (P4 native ownership/thread wave): generated internal wrapper
 # removal lowered wrapping floors: plfsclient 796 -> 723, plfsmount 410 -> 400.
+# Baseline change (P6 charts): charts.c re-ported as safe imp/render cores
+# (differential-tested vs C: fixed scenario x5 TZs + seeded fuzz). Transpiled
+# copy's 495 wrapping ops replaced by ~70 explicit ones on the C-unsigned paths:
+# plfscommon wrapping 854 -> 431, unsafe 335 -> 293, no-safety 79 -> 24;
+# charts MIGRATION-IOU closed: migration_iou 1 -> 0.
 unsafe_sites	plfsmaster	le	2660
 unsafe_sites	plfschunkserver	le	730
 unsafe_sites	plfsmetalogger	le	92
@@ -25,7 +30,7 @@ unsafe_sites	plfsmount	le	554
 unsafe_sites	plfsbdev	le	474
 unsafe_sites	plfsgui	le	97
 unsafe_sites	plfsnetdump	le	44
-unsafe_sites	plfscommon	le	335
+unsafe_sites	plfscommon	le	293
 unsafe_no_safety	plfsmaster	le	2655
 unsafe_no_safety	plfschunkserver	le	730
 unsafe_no_safety	plfsmetalogger	le	92
@@ -33,8 +38,8 @@ unsafe_no_safety	plfsmount	le	539
 unsafe_no_safety	plfsbdev	le	466
 unsafe_no_safety	plfsgui	le	97
 unsafe_no_safety	plfsnetdump	le	44
-unsafe_no_safety	plfscommon	le	79
-migration_iou	workspace	le	1
+unsafe_no_safety	plfscommon	le	24
+migration_iou	workspace	le	0
 unsafe_sites	plfsclient	le	294
 unsafe_no_safety	plfsclient	le	283
 wrapping_ops	plfsclient	ge	603
@@ -45,4 +50,4 @@ wrapping_ops	plfsmount	ge	372
 wrapping_ops	plfsbdev	ge	175
 wrapping_ops	plfsgui	ge	54
 wrapping_ops	plfsnetdump	ge	68
-wrapping_ops	plfscommon	ge	854
+wrapping_ops	plfscommon	ge	431

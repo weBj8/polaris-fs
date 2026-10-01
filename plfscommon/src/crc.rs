@@ -133,6 +133,11 @@ mod imp {
 }
 
 static CRC_TABLE: LazyLock<MainTables> = LazyLock::new(imp::generate_main_tables);
+
+/// C `mycrc32(crc, data, leng)` for safe callers.
+pub fn crc32(crc: u32, data: &[u8]) -> u32 {
+    imp::crc_compute(crc, data, &CRC_TABLE)
+}
 static CRC_COMBINE_TABLE: LazyLock<CombineTables> = LazyLock::new(imp::generate_combine_tables);
 
 /// # Safety

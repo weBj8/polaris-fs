@@ -237,4 +237,4 @@ Columns: item · blocking crate/module · reason · created (phase) · consumed
 
 | item | blocked_on | reason | created | consumed | status |
 | --- | --- | --- | --- | --- | --- |
-| plfscommon::charts | P2 (plfsgui renders charts) + P5 (plfsmaster writes via chartsdata) | 5.2k lines of binary chart-format I/O + CGI rendering; subtle mistakes corrupt stats history; needs its owning daemons' phases for behavioral verification | P1 (2026-07-30) | — | open |
+| ~~plfscommon::charts~~ | P2 (plfsgui renders charts) + P5 (plfsmaster writes via chartsdata) | 5.2k lines of binary chart-format I/O + CGI rendering; subtle mistakes corrupt stats history; needs its owning daemons' phases for behavioral verification | P1 (2026-07-30) | P6 charts wave (2026-08-04): safe port, differential-tested vs compiled C (rewrite-plan.md) | ~~open~~ closed |
