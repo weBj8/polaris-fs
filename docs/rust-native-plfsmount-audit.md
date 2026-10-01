@@ -192,7 +192,7 @@ annotations:
   struct offsets and free+strdup's them on repeated options (verified against
   libfuse3 disassembly; a CString conversion reproduced a double-free).
 - `plfscommon::processname` environ copy: process bootstrap (annotated
-  boundary, AGENTS.md pattern).
+  boundary, migration pattern now in `.pi/realmem`).
 - `plfsclient::readdata` iovec array: fixed 3-arg `read_data_free_buff` ABI
   cannot recover the count at free time.
 - libfuse/libc/POSIX syscall surface (fuse_*, sockets, sigmask, tcp*).
