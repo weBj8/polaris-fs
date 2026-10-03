@@ -50,6 +50,16 @@ mod sys {
         unsafe { libc::write(fd, buf.as_ptr() as *const c_void, buf.len()) }
     }
 
+    pub fn writev(fd: c_int, bufs: &[&[u8]]) -> isize {
+        let iov: Vec<libc::iovec> = bufs
+            .iter()
+            .map(|b| libc::iovec { iov_base: b.as_ptr() as *mut c_void, iov_len: b.len() })
+            .collect();
+        // Each iovec describes a live slice borrowed for the call.
+        // SAFETY: writev only reads the described, live buffers.
+        unsafe { libc::writev(fd, iov.as_ptr(), iov.len() as c_int) }
+    }
+
     pub fn poll(fds: &mut [libc::pollfd], timeout: c_int) -> c_int {
         // SAFETY: fds is a valid array of fds.len() pollfd entries.
         unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) }
@@ -281,6 +291,59 @@ mod sys {
 }
 
 pub use imp::{fmt_ip, fmt_ip_port};
+
+/// Safe Rust-facing API for migrated modules: the same code paths as the
+/// C exports below (`tcpsocket`, `tcpresolve`, ...), with fd + slice
+/// arguments. errno stays the error channel, as in C.
+pub mod tcp {
+    use super::{imp, sys};
+    use core::ffi::{CStr, c_int};
+
+    pub use super::sys::{errno, set_errno};
+
+    /// `tcpsocket`.
+    pub fn socket() -> c_int {
+        sys::socket(libc::AF_INET, libc::SOCK_STREAM)
+    }
+    /// `tcpnonblock`.
+    pub fn nonblock(sock: c_int) -> c_int {
+        sys::nonblock(sock)
+    }
+    /// `tcpnodelay`.
+    pub fn nodelay(sock: c_int) -> c_int {
+        sys::setsockopt_int(sock, libc::IPPROTO_TCP, libc::TCP_NODELAY, 1)
+    }
+    /// `tcpgetstatus`.
+    pub fn getstatus(sock: c_int) -> c_int {
+        sys::getstatus(sock)
+    }
+    /// `tcpclose` (shutdown write side, then close).
+    pub fn close(sock: c_int) -> c_int {
+        sys::shutdown(sock, libc::SHUT_WR);
+        sys::close(sock)
+    }
+    /// `tcpnumbind`.
+    pub fn numbind(sock: c_int, ip: u32, port: u16) -> c_int {
+        if sys::bind_in(sock, &sys::sin(ip, port)) < 0 { -1 } else { 0 }
+    }
+    /// `tcpnumconnect`: 0 connected, 1 in progress, -1 error.
+    pub fn numconnect(sock: c_int, ip: u32, port: u16) -> c_int {
+        imp::connect_status(sys::connect_in(sock, &sys::sin(ip, port)))
+    }
+    /// `tcpresolve` (`*` = any, `random()%n` among matches): (ip, port).
+    pub fn resolve(host: Option<&CStr>, service: Option<&CStr>, passive: bool) -> Option<(u32, u16)> {
+        imp::addrfill(host, service, libc::AF_INET, libc::SOCK_STREAM, passive)
+            .map(|sa| (u32::from_be(sa.sin_addr.s_addr), u16::from_be(sa.sin_port)))
+    }
+    /// One `read(2)`.
+    pub fn read(sock: c_int, buf: &mut [u8]) -> isize {
+        sys::read(sock, buf)
+    }
+    /// One `writev(2)` over the given slices (at most IOV_MAX of them).
+    pub fn writev(sock: c_int, bufs: &[&[u8]]) -> isize {
+        sys::writev(sock, bufs)
+    }
+}
 
 #[deny(unsafe_code)]
 mod imp {

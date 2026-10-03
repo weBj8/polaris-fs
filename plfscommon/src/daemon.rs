@@ -83,18 +83,85 @@ type DescFn = unsafe extern "C" fn(*mut libc::pollfd, *mut u32);
 type ServeFn = unsafe extern "C" fn(*mut libc::pollfd);
 type ChldFn = unsafe extern "C" fn(libc::pid_t, c_int);
 
+/// A `void (*)(void)` callback: registered through main.h by a transpiled
+/// module, or through the safe API below by a migrated one.
+#[derive(Clone, Copy)]
+enum VoidCb {
+    C(VoidFn),
+    Rust(fn()),
+}
+
+impl VoidCb {
+    fn call(self) {
+        match self {
+            // Registered through main.h: callable for the process lifetime.
+            // SAFETY: registration contract (see above).
+            VoidCb::C(f) => unsafe { f() },
+            VoidCb::Rust(f) => f(),
+        }
+    }
+}
+
+/// An info callback: C writes to the info `FILE*` itself, Rust returns the
+/// text that is written at the same position.
+#[derive(Clone, Copy)]
+enum InfoCb {
+    C(InfoFn),
+    Rust(fn() -> Vec<u8>),
+}
+
+impl InfoCb {
+    /// # Safety
+    // SAFETY: caller guarantees `f` is an open, writable `FILE*`.
+    unsafe fn call(self, f: *mut libc::FILE) {
+        match self {
+            // SAFETY: main.h contract; `f` valid per fn contract.
+            InfoCb::C(g) => unsafe { g(f) },
+            InfoCb::Rust(g) => {
+                let text = g();
+                // SAFETY: `f` valid per fn contract; text outlives the call.
+                unsafe { libc::fwrite(text.as_ptr() as *const c_void, 1, text.len(), f) };
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Named<F> {
     fun: F,
     name: String,
 }
 
+#[derive(Clone, Copy)]
+enum PollCb {
+    C { desc: DescFn, serve: ServeFn },
+    Rust { desc: fn(&mut [libc::pollfd], &mut u32), serve: fn(&[libc::pollfd]) },
+}
+
 #[derive(Clone)]
 struct Poll {
-    desc: DescFn,
-    serve: ServeFn,
+    cb: PollCb,
     dname: String,
     sname: String,
+}
+
+impl Poll {
+    fn desc(&self, pdesc: &mut [libc::pollfd], ndesc: &mut u32) {
+        match self.cb {
+            // C contract: desc appends below MFSMAXFILES (= pdesc.len()).
+            // SAFETY: pdesc is a live array of MFSMAXFILES entries.
+            PollCb::C { desc, .. } => unsafe { desc(pdesc.as_mut_ptr(), ndesc) },
+            PollCb::Rust { desc, .. } => desc(pdesc, ndesc),
+        }
+    }
+
+    fn serve(&self, pdesc: &mut [libc::pollfd]) {
+        match self.cb {
+            // SAFETY: serve reads the pollfd array filled by desc + poll.
+            PollCb::C { serve, .. } => unsafe { serve(pdesc.as_mut_ptr()) },
+            PollCb::Rust { serve, .. } => serve(pdesc),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -108,21 +175,21 @@ struct Timer {
     nextevent: u64,
     useconds: u64,
     usecoffset: u64,
-    fun: VoidFn,
+    fun: VoidCb,
     name: String,
 }
 
 /// Lists are kept in C order: C prepends, so the newest entry runs first.
 struct Registry {
-    destruct: Vec<Named<VoidFn>>,
+    destruct: Vec<Named<VoidCb>>,
     mayexit: Vec<Named<IntFn>>,
-    wantexit: Vec<Named<VoidFn>>,
+    wantexit: Vec<Named<VoidCb>>,
     canexit: Vec<Named<IntFn>>,
-    reload: Vec<Named<VoidFn>>,
-    info: Vec<Named<InfoFn>>,
-    keepalive: Vec<Named<VoidFn>>,
+    reload: Vec<Named<VoidCb>>,
+    info: Vec<Named<InfoCb>>,
+    keepalive: Vec<Named<VoidCb>>,
     poll: Vec<Poll>,
-    eachloop: Vec<Named<VoidFn>>,
+    eachloop: Vec<Named<VoidCb>>,
     chld: Vec<Chld>,
     /// Boxed so the address handed out as the timer handle is stable.
     timers: Vec<Box<Timer>>,
@@ -199,7 +266,7 @@ unsafe fn cname(p: *const c_char) -> String {
 }
 
 macro_rules! register_fn {
-    ($(#[$m:meta])* $cname:ident, $field:ident, $ty:ty) => {
+    ($(#[$m:meta])* $cname:ident, $field:ident, $ty:ty, $wrap:expr) => {
         $(#[$m])*
         /// # Safety
         /// `fname` must be a valid C string; `fun` must be callable for the
@@ -209,19 +276,69 @@ macro_rules! register_fn {
             let Some(fun) = fun else { return };
             // SAFETY: per fn contract.
             let name = unsafe { cname(fname) };
-            reg().$field.insert(0, Named { fun, name });
+            reg().$field.insert(0, Named { fun: $wrap(fun), name });
         }
     };
 }
 
-register_fn!(main_destruct_register_fname, destruct, VoidFn);
-register_fn!(main_mayexit_register_fname, mayexit, IntFn);
-register_fn!(main_wantexit_register_fname, wantexit, VoidFn);
-register_fn!(main_canexit_register_fname, canexit, IntFn);
-register_fn!(main_reload_register_fname, reload, VoidFn);
-register_fn!(main_info_register_fname, info, InfoFn);
-register_fn!(main_keepalive_register_fname, keepalive, VoidFn);
-register_fn!(main_eachloop_register_fname, eachloop, VoidFn);
+register_fn!(main_destruct_register_fname, destruct, VoidFn, VoidCb::C);
+register_fn!(main_mayexit_register_fname, mayexit, IntFn, |f| f);
+register_fn!(main_wantexit_register_fname, wantexit, VoidFn, VoidCb::C);
+register_fn!(main_canexit_register_fname, canexit, IntFn, |f| f);
+register_fn!(main_reload_register_fname, reload, VoidFn, VoidCb::C);
+register_fn!(main_info_register_fname, info, InfoFn, InfoCb::C);
+register_fn!(main_keepalive_register_fname, keepalive, VoidFn, VoidCb::C);
+register_fn!(main_eachloop_register_fname, eachloop, VoidFn, VoidCb::C);
+
+// ---------------------------------------------------------------------------
+// Safe registration for migrated Rust modules. Same lists, same prepend
+// order, and `name` plays the role of main.h's `STR(x)` in long-call logs.
+// ---------------------------------------------------------------------------
+
+/// `main_destruct_register`.
+pub fn destruct_register(fun: fn(), name: &str) {
+    reg().destruct.insert(0, Named { fun: VoidCb::Rust(fun), name: name.to_owned() });
+}
+
+/// `main_reload_register`.
+pub fn reload_register(fun: fn(), name: &str) {
+    reg().reload.insert(0, Named { fun: VoidCb::Rust(fun), name: name.to_owned() });
+}
+
+/// `main_info_register`: `fun` returns the text to append to the info file.
+pub fn info_register(fun: fn() -> Vec<u8>, name: &str) {
+    reg().info.insert(0, Named { fun: InfoCb::Rust(fun), name: name.to_owned() });
+}
+
+/// `main_poll_register`: `desc` gets the whole pollfd array and the next
+/// free index (as C's `pdesc`/`ndesc`), `serve` the array after poll.
+pub fn poll_register(
+    desc: fn(&mut [libc::pollfd], &mut u32),
+    serve: fn(&[libc::pollfd]),
+    dname: &str,
+    sname: &str,
+) {
+    reg().poll.insert(
+        0,
+        Poll { cb: PollCb::Rust { desc, serve }, dname: dname.to_owned(), sname: sname.to_owned() },
+    );
+}
+
+/// Handle of a registered timer (C's opaque `void*`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TimerHandle(usize);
+
+/// `main_time_register`: `None` where C returns NULL (zero period or
+/// offset >= period). Seconds are scaled in `uint32_t` as in C.
+pub fn time_register(seconds: u32, offset: u32, fun: fn(), name: &str) -> Option<TimerHandle> {
+    let h = msectime_register(seconds.wrapping_mul(1000), offset.wrapping_mul(1000), VoidCb::Rust(fun), name);
+    (h != 0).then_some(TimerHandle(h))
+}
+
+/// `main_time_change` (a `None` handle matches no timer, like C's NULL).
+pub fn time_change(h: Option<TimerHandle>, seconds: u32, offset: u32) -> c_int {
+    msectime_change(h.map_or(0, |h| h.0), seconds.wrapping_mul(1000), offset.wrapping_mul(1000))
+}
 
 /// # Safety
 /// Names must be valid C strings; callbacks callable for the process
@@ -236,7 +353,7 @@ pub unsafe extern "C" fn main_poll_register_fname(
     let (Some(desc), Some(serve)) = (desc, serve) else { return };
     // SAFETY: per fn contract.
     let (dname, sname) = unsafe { (cname(dname), cname(sname)) };
-    reg().poll.insert(0, Poll { desc, serve, dname, sname });
+    reg().poll.insert(0, Poll { cb: PollCb::C { desc, serve }, dname, sname });
 }
 
 /// # Safety
@@ -262,6 +379,40 @@ fn first_event(usecnow: u64, useconds: u64, usecoffset: u64) -> u64 {
     n
 }
 
+/// Shared registration core; returns the handle (0 = C's NULL).
+fn msectime_register(mseconds: u32, offset: u32, fun: VoidCb, name: &str) -> usize {
+    let useconds = 1000 * mseconds as u64;
+    let usecoffset = 1000 * offset as u64;
+    if useconds == 0 || usecoffset >= useconds {
+        return 0;
+    }
+    let t = Box::new(Timer {
+        nextevent: first_event(USECNOW.load(Ordering::Relaxed), useconds, usecoffset),
+        useconds,
+        usecoffset,
+        fun,
+        name: name.to_owned(),
+    });
+    let handle = &*t as *const Timer as usize;
+    reg().timers.insert(0, t);
+    handle
+}
+
+fn msectime_change(h: usize, mseconds: u32, offset: u32) -> c_int {
+    let useconds = 1000 * mseconds as u64;
+    let usecoffset = 1000 * offset as u64;
+    if useconds == 0 || usecoffset >= useconds {
+        return -1;
+    }
+    let mut r = reg();
+    if let Some(t) = r.timers.iter_mut().find(|t| &***t as *const Timer as usize == h) {
+        t.nextevent = first_event(USECNOW.load(Ordering::Relaxed), useconds, usecoffset);
+        t.useconds = useconds;
+        t.usecoffset = usecoffset;
+    }
+    0
+}
+
 /// # Safety
 /// `fname` must be a valid C string. Returns an opaque timer handle.
 #[unsafe(no_mangle)]
@@ -271,42 +422,20 @@ pub unsafe extern "C" fn main_msectime_register_fname(
     fun: Option<VoidFn>,
     fname: *const c_char,
 ) -> *mut c_void {
-    let useconds = 1000 * mseconds as u64;
-    let usecoffset = 1000 * offset as u64;
     let Some(fun) = fun else { return core::ptr::null_mut() };
-    if useconds == 0 || usecoffset >= useconds {
+    if mseconds == 0 || offset >= mseconds {
         return core::ptr::null_mut();
     }
     // SAFETY: per fn contract.
     let name = unsafe { cname(fname) };
-    let t = Box::new(Timer {
-        nextevent: first_event(USECNOW.load(Ordering::Relaxed), useconds, usecoffset),
-        useconds,
-        usecoffset,
-        fun,
-        name,
-    });
-    let handle = &*t as *const Timer as *mut c_void;
-    reg().timers.insert(0, t);
-    handle
+    msectime_register(mseconds, offset, VoidCb::C(fun), &name) as *mut c_void
 }
 
 /// # Safety
 /// `x` must be a handle returned by `main_*time_register_fname`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn main_msectime_change(x: *mut c_void, mseconds: u32, offset: u32) -> c_int {
-    let useconds = 1000 * mseconds as u64;
-    let usecoffset = 1000 * offset as u64;
-    if useconds == 0 || usecoffset >= useconds {
-        return -1;
-    }
-    let mut r = reg();
-    if let Some(t) = r.timers.iter_mut().find(|t| &***t as *const Timer as *mut c_void == x) {
-        t.nextevent = first_event(USECNOW.load(Ordering::Relaxed), useconds, usecoffset);
-        t.useconds = useconds;
-        t.usecoffset = usecoffset;
-    }
-    0
+    msectime_change(x as usize, mseconds, offset)
 }
 
 /// # Safety
@@ -392,8 +521,7 @@ pub extern "C" fn main_keep_alive() {
     refresh_now();
     let list = reg().keepalive.clone();
     for e in list {
-        // SAFETY: registered daemon callback.
-        timed(&e.name, || unsafe { (e.fun)() });
+        timed(&e.name, || e.fun.call());
     }
 }
 
@@ -463,7 +591,7 @@ fn main_reload() {
 
 /// Snapshot of timer schedules: (handle, nextevent, useconds, usecoffset,
 /// fun, name).
-type TimerSnap = (usize, u64, u64, u64, VoidFn, String);
+type TimerSnap = (usize, u64, u64, u64, VoidCb, String);
 
 fn timer_snapshot() -> Vec<TimerSnap> {
     reg()
@@ -526,8 +654,7 @@ fn mainloop(spec: &Spec) -> c_int {
         pdesc[0] = libc::pollfd { fd: SIGNAL_PIPE[0].load(Ordering::Relaxed), events: libc::POLLIN, revents: 0 };
         let polls = reg().poll.clone();
         for p in &polls {
-            // SAFETY: C contract: desc appends entries below MFSMAXFILES.
-            timed(&p.dname, || unsafe { (p.desc)(pdesc.as_mut_ptr(), &mut ndesc) });
+            timed(&p.dname, || p.desc(&mut pdesc, &mut ndesc));
         }
         check_long_loop(monotonic_seconds());
         // SAFETY: pdesc holds ndesc initialized entries.
@@ -587,14 +714,12 @@ fn mainloop(spec: &Spec) -> c_int {
                 }
             }
             for p in &polls {
-                // SAFETY: serve reads the pollfd array filled above.
-                timed(&p.sname, || unsafe { (p.serve)(pdesc.as_mut_ptr()) });
+                timed(&p.sname, || p.serve(&mut pdesc));
             }
         }
         let eachloop = reg().eachloop.clone();
         for e in &eachloop {
-            // SAFETY: registered daemon callback.
-            timed(&e.name, || unsafe { (e.fun)() });
+            timed(&e.name, || e.fun.call());
         }
         if usecnow < prevtime {
             for (h, ne, us, off, _, _) in timer_snapshot() {
@@ -616,8 +741,7 @@ fn mainloop(spec: &Spec) -> c_int {
                         Some((ne, _, _)) if usecnow >= ne => {}
                         _ => break,
                     }
-                    // SAFETY: registered daemon callback.
-                    timed(&name, || unsafe { fun() });
+                    timed(&name, || fun.call());
                     if let Some((ne, us, _)) = timer_load(h) {
                         timer_store(h, ne.wrapping_add(us));
                     }
@@ -636,8 +760,7 @@ fn mainloop(spec: &Spec) -> c_int {
             main_reload();
             let list = reg().reload.clone();
             for e in &list {
-                // SAFETY: registered daemon callback.
-                timed(&e.name, || unsafe { (e.fun)() });
+                timed(&e.name, || e.fun.call());
             }
             r = 0;
         } else if r == 2 {
@@ -660,8 +783,7 @@ fn mainloop(spec: &Spec) -> c_int {
             if ok {
                 let list = reg().wantexit.clone();
             for e in list {
-                    // SAFETY: registered daemon callback.
-                    timed(&e.name, || unsafe { (e.fun)() });
+                    timed(&e.name, || e.fun.call());
                 }
                 t = 2;
             }
@@ -726,7 +848,7 @@ fn write_info_file(spec: &Spec) {
         cfg::cfg_info(f);
         let list = reg().info.clone();
             for e in list {
-            timed(&e.name, || (e.fun)(f));
+            timed(&e.name, || e.fun.call(f));
         }
         libc::fclose(f);
     }
@@ -1693,8 +1815,7 @@ pub fn run(spec: &Spec) -> c_int {
     log(MFSLOG_SYSLOG_STDERR, MFSLOG_INFO, "exititng ...");
     let list = reg().destruct.clone();
             for e in list {
-        // SAFETY: registered daemon callback.
-        timed(&e.name, || unsafe { (e.fun)() });
+        timed(&e.name, || e.fun.call());
     }
     signal_cleanup();
     cfg::term();

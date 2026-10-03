@@ -23,17 +23,23 @@
 # copy's 495 wrapping ops replaced by ~70 explicit ones on the C-unsigned paths:
 # plfscommon wrapping 854 -> 431, unsafe 335 -> 293, no-safety 79 -> 24;
 # charts MIGRATION-IOU closed: migration_iou 1 -> 0.
+# Baseline change (P7 metalogger): masterconn.c re-ported as safe Rust on new
+# safe plfscommon APIs (daemon::*_register, sockets::tcp); old-vs-new live
+# diff (tools/metalogger_diff.sh) identical. Transpiled copy's wrapping ops
+# replaced by explicit ones on the C-unsigned paths: plfsmetalogger wrapping
+# 56 -> 13, unsafe 92 -> 1, no-safety 92 -> 0; plfscommon wrapping 431 -> 433
+# (u32 scaling in the safe timer API), unsafe 293 -> 292.
 unsafe_sites	plfsmaster	le	2660
 unsafe_sites	plfschunkserver	le	730
-unsafe_sites	plfsmetalogger	le	92
+unsafe_sites	plfsmetalogger	le	1
 unsafe_sites	plfsmount	le	554
 unsafe_sites	plfsbdev	le	474
 unsafe_sites	plfsgui	le	97
 unsafe_sites	plfsnetdump	le	44
-unsafe_sites	plfscommon	le	293
+unsafe_sites	plfscommon	le	292
 unsafe_no_safety	plfsmaster	le	2655
 unsafe_no_safety	plfschunkserver	le	730
-unsafe_no_safety	plfsmetalogger	le	92
+unsafe_no_safety	plfsmetalogger	le	0
 unsafe_no_safety	plfsmount	le	539
 unsafe_no_safety	plfsbdev	le	466
 unsafe_no_safety	plfsgui	le	97
@@ -45,9 +51,9 @@ unsafe_no_safety	plfsclient	le	283
 wrapping_ops	plfsclient	ge	603
 wrapping_ops	plfsmaster	ge	3829
 wrapping_ops	plfschunkserver	ge	1180
-wrapping_ops	plfsmetalogger	ge	56
+wrapping_ops	plfsmetalogger	ge	13
 wrapping_ops	plfsmount	ge	372
 wrapping_ops	plfsbdev	ge	175
 wrapping_ops	plfsgui	ge	54
 wrapping_ops	plfsnetdump	ge	68
-wrapping_ops	plfscommon	ge	431
+wrapping_ops	plfscommon	ge	433

@@ -360,3 +360,32 @@ identical except PNG bytes past the image, where C deflates an
 uninitialized malloc'd tail of `rawchart` after re-init (decoded pixels
 identical; checked by `classify.py`). Gates re-frozen (plfscommon unsafe
 335 → 293, wrapping 854 → 431, migration_iou 1 → 0).
+
+### P7 wave — plfsmetalogger masterconn.c (2026-10-06)
+
+`mfsmetalogger/masterconn.c` ported from C into safe Rust
+(`plfsmetalogger/src/plfsmetalogger/masterconn.rs`, `#![deny(unsafe_code)]`
+except one annotated `close(2)` so "error closing metafile" is still
+reported). The crate is now: shared runtime main (`plfscommon::daemon`) +
+this module; the c2rust-bitfields dependency is gone. New safe APIs in
+plfscommon used by it: `daemon::{destruct,reload,info,poll}_register`,
+`daemon::time_register/time_change` (same registries, order and timer grid
+as the main.h C ABI) and `sockets::tcp` (socket/nonblock/nodelay/connect/
+bind/resolve/read/writev over the same code paths as the C exports).
+
+Kept from C: framing and 1.5 MB limit, 10 ms parse budget, writev batching,
+1 s NOP keepalive, timeout handling, the download state machine (retry ≤ 5,
+1 MB blocks, renames, oldmode), `changelog_ml.0.back` backward scan quirks,
+cfg read order and clamps, log texts/modes. Deviations (not observable):
+changelog buffered by `BufWriter` (st_blksize) instead of stdio, O_CLOEXEC,
+no fd leak on a repeated DOWNLOAD_INFO, unused `masterconn_stats` dropped.
+
+Verified: 10 unit tests (framing at every split, register packets, ack/
+timeout, changelog append/rotate/gap, download incl. crc retry, data checks,
+metadata formats, info text, last-version scan incl. block carry and window);
+`tools/metalogger_diff.sh` runs the pre-port binary and the new one as two
+metaloggers of one live master with a FUSE workload and a restart:
+byte-identical metadata/changelog backups, identical changelog stream over
+the common version range, identical log lines. Gates re-frozen
+(plfsmetalogger unsafe 92 → 1, wrapping 56 → 13).
+

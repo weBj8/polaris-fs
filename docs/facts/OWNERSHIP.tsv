@@ -242,43 +242,6 @@ plfsclient	plfsclient/src/writedata.rs	570	minlogretry	uint32_t	STATIC	AtomicU32
 plfsclient	plfsclient/src/writedata.rs	571	erroronlostchunk	uint8_t	STATIC	AtomicU8	auto:type-shape
 plfsclient	plfsclient/src/writedata.rs	572	erroronnospace	uint8_t	STATIC	AtomicU8	auto:type-shape
 plfsclient	plfsclient/src/writedata.rs	577	idhash	[Vec<*mut inodedata>; IDHASHSIZE as usize] =	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	1259	png_tailer	[uint8_t; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	1277	png_1x1	[uint8_t; 68]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	1347	font	[[uint8_t; 9]; 25]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	337	calcdefs	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	338	calcstartpos	*mut *mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	339	calcdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	340	statdefs	*mut statdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	341	statdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	342	estatdefs	*mut estatdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	343	estatdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	344	statsfilename	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	345	series	*mut stat_record	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	346	pointers	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	347	timepoint	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	348	monotonic	*mut uint64_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	349	shhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	350	shmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	351	medhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	352	medmin	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	353	lngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	354	lngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	355	lnghalfhour	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	356	lngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	357	vlngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	358	vlngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	359	vlngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	360	chart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	361	rawchart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	362	compbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	363	rawchartsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	364	compbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	365	compsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	366	zstr	z_stream	BUF	Mutex<z_stream> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	3729	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	390	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
-plfscommon	plfscommon/src/charts.rs	410	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 plfscommon	plfscommon/src/getopt.rs	173	optind	libc::c_int	STATIC	AtomicI32	auto:type-shape
 plfscommon	plfscommon/src/getopt.rs	174	opterr	libc::c_int	STATIC	AtomicI32	auto:type-shape
 plfscommon	plfscommon/src/getopt.rs	175	optarg	*mut libc::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
@@ -893,21 +856,6 @@ plfsmaster	plfsmaster/src/plfsmaster/xattr.rs	240	xattrhashtab	[*mut *mut xattre
 plfsmaster	plfsmaster/src/plfsmaster/xattr.rs	242	xattrrehashpos	uint32_t	STATIC	AtomicU32	auto:type-shape
 plfsmaster	plfsmaster/src/plfsmaster/xattr.rs	243	xattrhashsize	uint32_t	STATIC	AtomicU32	auto:type-shape
 plfsmaster	plfsmaster/src/plfsmaster/xattr.rs	244	xattrhashelem	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	1761	readbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	1762	readbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	38	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	465	masterconnsingleton	*mut masterconn	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	466	BackLogsNumber	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	467	BackMetaCopies	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	468	MasterHost	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	469	MasterPort	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	470	BindHost	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	471	Timeout	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	472	reconnect_hook	*mut ::core::ffi::c_void =	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	474	download_hook	*mut ::core::ffi::c_void	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	475	lastlogversion	uint64_t	STATIC	AtomicU64	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	476	stats_bytesout	uint32_t	STATIC	AtomicU32	auto:type-shape
-plfsmetalogger	plfsmetalogger/src/plfsmetalogger/masterconn.rs	477	stats_bytesin	uint32_t	STATIC	AtomicU32	auto:type-shape
 plfsmount	plfsmount/src/fuse_client/masterproxy.rs	162	lsock	::core::ffi::c_int	BUF	Mutex<::core::ffi::c_int> or thread_local	auto:type-shape
 plfsmount	plfsmount/src/fuse_client/masterproxy.rs	165	proxyhost	uint32_t	STATIC	AtomicU32	auto:type-shape
 plfsmount	plfsmount/src/fuse_client/masterproxy.rs	166	proxyport	uint16_t	STATIC	AtomicU16	auto:type-shape
@@ -990,3 +938,40 @@ plfsnetdump	plfsnetdump/src/plfsnetdump.rs	1946	connhead	*mut connection	UNKNOWN
 plfsnetdump	plfsnetdump/src/plfsnetdump.rs	26	optarg	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
 plfsnetdump	plfsnetdump/src/plfsnetdump.rs	550	id	[::core::ffi::c_char; 72]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
 plfsnetdump	plfsnetdump/src/plfsnetdump.rs	556	cmdtab	[_mfscmd; 273]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	1259	png_tailer	[uint8_t; 16]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	1277	png_1x1	[uint8_t; 68]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	1347	font	[[uint8_t; 9]; 25]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	21	stderr	*mut FILE	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	337	calcdefs	*mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	338	calcstartpos	*mut *mut uint32_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	339	calcdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	340	statdefs	*mut statdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	341	statdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	342	estatdefs	*mut estatdef	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	343	estatdefscount	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	344	statsfilename	*mut ::core::ffi::c_char	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	345	series	*mut stat_record	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	346	pointers	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	347	timepoint	[uint32_t; 4]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	348	monotonic	*mut uint64_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	349	shhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	350	shmin	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	351	medhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	352	medmin	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	353	lngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	354	lngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	355	lnghalfhour	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	356	lngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	357	vlngmday	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	358	vlngyear	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	359	vlngmonth	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	360	chart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	361	rawchart	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	362	compbuff	*mut uint8_t	UNKNOWN	Option<NonNull<_>> + per-site analysis	auto:type-shape
+target	target/charts_c2rust.rs	363	rawchartsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	364	compbuffsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	365	compsize	uint32_t	STATIC	AtomicU32	auto:type-shape
+target	target/charts_c2rust.rs	366	zstr	z_stream	BUF	Mutex<z_stream> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	3729	jtab	[uint8_t; 11]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	390	data_colors	[uint8_t; 18]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
+target	target/charts_c2rust.rs	410	png_header	[uint8_t; 847]	BUF	Mutex<[…; N]> or thread_local	auto:type-shape
