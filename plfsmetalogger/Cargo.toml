@@ -14,6 +14,5 @@ crate-type = ["staticlib", "rlib"]
 path = "src/plfscommon/main.rs"
 name = "plfsmetalogger"
 [dependencies]
-c2rust-bitfields = { path = "../vendor/c2rust-bitfields-0.22.1" }
 libc = "0.2"
 plfscommon = { path = "../plfscommon" }
